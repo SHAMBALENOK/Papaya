@@ -20,10 +20,6 @@ def is_valid_email(email: str) -> bool:
 
     return True
 
-
-import re
-
-
 def is_valid_fullname(fullname: str) -> tuple[bool, str]:
     """
     Проверяет валидность ФИО (расширенная версия)
@@ -99,9 +95,6 @@ def is_valid_fullname(fullname: str) -> tuple[bool, str]:
         return False, "ФИО не должно содержать несколько пробелов подряд"
 
     return True, ""
-
-
-import re
 
 
 def is_valid_password(password: str) -> tuple[bool, str]:

@@ -101,10 +101,8 @@
 
         .btn-container {
             display: flex;
-            gap: 15px;
             justify-content: center;
             margin-top: 30px;
-            flex-wrap: wrap;
         }
 
         .btn {
@@ -117,50 +115,17 @@
             transition: all 0.3s;
             text-decoration: none;
             display: inline-block;
-        }
-
-        .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
 
-        .btn-primary:hover {
+        .btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(102, 126, 234, 0.6);
         }
 
-        .btn-primary:active {
-            transform: translateY(0);
-        }
-
-        .btn-secondary {
-            background: white;
-            color: #667eea;
-            border: 2px solid #667eea;
-        }
-
-        .btn-secondary:hover {
-            background: #f0f0ff;
-            transform: translateY(-2px);
-        }
-
-        .btn-secondary:active {
-            transform: translateY(0);
-        }
-
-        .btn-report {
-            background: #ff416c;
-            color: white;
-            margin-top: 15px;
-        }
-
-        .btn-report:hover {
-            background: #ff2b56;
-            transform: translateY(-2px);
-        }
-
-        .btn-report:active {
+        .btn:active {
             transform: translateY(0);
         }
 
@@ -204,14 +169,6 @@
             .error-title {
                 font-size: 24px;
             }
-
-            .btn {
-                width: 100%;
-            }
-
-            .btn-container {
-                flex-direction: column;
-            }
         }
 
         .animation {
@@ -224,23 +181,6 @@
             }
             50% {
                 transform: scale(1.05);
-            }
-        }
-
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s linear infinite;
-            margin-left: 10px;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
             }
         }
     </style>
@@ -264,17 +204,10 @@
         </div>
 
         <div class="btn-container">
-            <a href="/" class="btn btn-primary">
+            <a href="/" class="btn">
                 На главную
             </a>
-            <a href="javascript:location.reload()" class="btn btn-secondary">
-                Обновить страницу
-            </a>
         </div>
-
-        <button class="btn btn-report" onclick="reportError()">
-            Сообщить об ошибке
-        </button>
 
         <div class="debug-info" id="debugInfo" style="display: none;">
             <h4>Информация для отладки:</h4>
@@ -305,37 +238,6 @@
             document.getElementById('errorUrl').textContent = window.location.href;
             document.getElementById('errorType').textContent = errorType;
         }
-
-        // Функция для сообщения об ошибке
-        function reportError() {
-            const message = `Ошибка 500 на странице ${window.location.href}\n\n` +
-                           `Время: ${new Date().toISOString()}\n` +
-                           `Тип: ${errorType}\n` +
-                           `Сообщение: ${errorMessage}`;
-
-            // Можно отправить на сервер или открыть почтовый клиент
-            alert('Спасибо! Мы получили информацию об ошибке и работаем над её исправлением.');
-
-            // Пример отправки на сервер
-            // fetch('/api/report-error', {
-            //     method: 'POST',
-            //     headers: { 'Content-Type': 'application/json' },
-            //     body: JSON.stringify({
-            //         url: window.location.href,
-            //         errorType: errorType,
-            //         errorMessage: errorMessage,
-            //         timestamp: new Date().toISOString()
-            //     })
-            // });
-        }
-
-        // Автоматическое скрытие сообщения об ошибке через 5 секунд
-        setTimeout(() => {
-            const details = document.getElementById('errorDetails');
-            if (details.classList.contains('show')) {
-                details.classList.remove('show');
-            }
-        }, 5000);
     </script>
 </body>
 </html>

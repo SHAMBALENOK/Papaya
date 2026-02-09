@@ -1,28 +1,28 @@
 from sqlalchemy import create_engine, Column, Integer, String, Boolean
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from datetime import datetime, timezone
-# import os
-#
-# USER = os.getenv('DB_USER')
-# PASSWORD = os.getenv('DB_PASSWORD')
-# HOST = os.getenv('DB_HOST')
-# PORT = os.getenv('DB_PORT')
-# DB_NAME = os.getenv('DB_NAME')
-#
-engine = create_engine(f"postgresql://postgres:pasha290410@localhost:5432/papaya_db", echo=True)
+from werkzeug.security import generate_password_hash
+import os
+
+USER = os.getenv('DB_USER')
+PASSWORD = os.getenv('DB_PASSWORD')
+HOST = os.getenv('DB_HOST')
+PORT = os.getenv('DB_PORT')
+DB_NAME = os.getenv('DB_NAME')
+
+engine = create_engine(f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}", echo=False)  # echo=False в продакшене!
 Session = sessionmaker(autoflush=False, bind=engine)
 
 class Base(DeclarativeBase): pass
 
 class Users(Base):
-    __tablename__ = 'Users'
-
+    __tablename__ = 'users'  # ИСПРАВЛЕНО: tablename → __tablename__
     id = Column(String, primary_key=True)
-    email = Column(String)
-    password = Column(String)
-    fullname = Column(String)
-    role = Column(String)
-    isActive = Column(Boolean)
+    email = Column(String, unique=True, nullable=False)  # Добавлено: уникальность email
+    password = Column(String, nullable=False)
+    fullname = Column(String, nullable=False)
+    role = Column(String, default='USER')
+    isActive = Column(Boolean, default=True)
     createdAt = Column(String)
     updatedAt = Column(String)
 
@@ -35,7 +35,7 @@ def add_user(ins: dict):
         user = Users(
             id = ins['user_id'],
             email=ins['email'],
-            password=ins['password'],
+            password=generate_password_hash(ins['password']),
             fullname=ins['fullname'],
             role=ins['role'],
             isActive= True,
@@ -46,7 +46,6 @@ def add_user(ins: dict):
         session.commit()
         session.refresh(user)
 
-def find_user(id: str):
-    with Session(autoflush=False, bind=engine) as session:
-        result = session.query(Users).filter(Users.id==id).first()
-    return result
+def find_user_by_email(email: str):
+    with Session() as session:
+        return session.query(Users).filter(Users.email == email).first()
