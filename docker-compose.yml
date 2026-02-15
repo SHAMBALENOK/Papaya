@@ -1,0 +1,50 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: papaya-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-papaya_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pasha290410}
+    volumes:
+      - papaya_postgres_data:/var/lib/postgresql/data
+    networks:
+      - papaya-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-papaya_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  web:
+    build:
+      context: .  # Указывает на текущую директорию, где лежит Dockerfile
+      # dockerfile: Dockerfile # Можно указать, если имя отличается
+    container_name: papaya-web
+    environment:
+      DB_HOST: db  # Критично: имя сервиса БД в сети compose
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-papaya_db}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pasha290410}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-T6tXDoTQ93Dh-sKRIxxRBpjJ7tss5K3iCKo5Bl6sQvIKPhFFX1w1D3ZCOTB0coXc}
+    ports:
+      - "5000:5000" # Хост:Контейнер
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - papaya-network
+    restart: unless-stopped
+
+networks:
+  papaya-network:
+    driver: bridge
+
+volumes:
+  papaya_postgres_data:
