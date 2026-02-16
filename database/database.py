@@ -13,7 +13,7 @@ DB_NAME = os.getenv('DB_NAME', 'testdb')    # Изменено на 'papaya_db'
 
 DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}"
 
-engine = create_engine(f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}", echo=False)
+engine = create_engine(f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}", echo=True)
 Session = sessionmaker(autoflush=False, bind=engine)
 
 

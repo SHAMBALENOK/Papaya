@@ -9,11 +9,15 @@ import uuid
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
+import logging
 load_dotenv()
 
 user_namespace = uuid.NAMESPACE_DNS
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -37,7 +41,8 @@ def register():
     try:
         try:
             data = request.get_json()
-        except JSONDecodeError:
+        except JSONDecodeError as e:
+            logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
         # user_ip = request.remote_addr
@@ -47,15 +52,19 @@ def register():
         check_fullname = re_check.is_valid_fullname(fullname)
         check_password = re_check.is_valid_password(password)
         if not re_check.is_valid_email(email):
+            logger.debug(f"email {email} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Неверный email'}), 400
         if not check_fullname[0]:
+            logger.debug(f"имя {fullname} не прошло проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': check_fullname[1]}), 400
         if not check_password[0]:
+            logger.debug(f"пароль {password} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': check_password[1]}), 400
         if db.find_user_by_email(email):
+            logger.debug(f"пользователь уже есть в системе", exc_info=True)
             return jsonify({'status': 'emailIsBusy',
                             'hint': 'Email уже зарегистрирован'}), 409
 
@@ -73,13 +82,14 @@ def register():
         user = db.find_user_by_id(user_id)
         login_user(user, remember=True)
 
+        logger.debug(f"Успешная регистрация {fullname} {email} под {user_id}, пароль {password}", exc_info=True)
         return jsonify({
             'status': 'Created',
             'redirect': url_for('main')
         }), 201
 
     except Exception as e:
-        print(e)
+        logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
         return jsonify({
             "status": "internal_error",
             "hint": "Ошибка сервера"
@@ -91,7 +101,8 @@ def login():
     try:
         try:
             data = request.get_json()
-        except JSONDecodeError:
+        except JSONDecodeError as e:
+            logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
         email = data.get('email', 'null').strip()
@@ -99,22 +110,27 @@ def login():
         # check_fullname = re_check.is_valid_fullname(fullname)
         check_password = re_check.is_valid_password(password)
         if not re_check.is_valid_email(email):
+            logger.debug(f"email {email} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Неверный email'}), 400
         if not check_password[0]:
+            logger.debug(f"пароль {password} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': check_password[1]}), 400
 
         db_user = db.find_user_by_email(email)
 
         if not db_user:
+            logger.debug(f"такого пользователя нет", exc_info=True)
             return jsonify({'status': 'unauthorized',
                             'hint': f'email {email} не занят, используйте register'}), 401
         else:
             if not check_password_hash(db_user.password, password) and email != db_user.email:
+                logger.debug(f"пароль {password} или email {email} не прошел проверку", exc_info=True)
                 return jsonify({'status': 'unauthorized',
                                 'hint': f'Либо email {email} введен неправильно, либо - пароль'}), 401
             else:
+                logger.debug(f"Успешный логин {email}, пароль {password}", exc_info=True)
                 login_user(db_user, remember=True)
                 return jsonify({
                     'status': 'success',
@@ -122,7 +138,7 @@ def login():
                 }), 200
 
     except Exception as e:
-        print(e)
+        logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
         return jsonify({
             "status": "internal_error",
             "hint": "Ошибка сервера"
@@ -132,12 +148,14 @@ def login():
 @login_required
 def logout():
     logout_user()
+    logger.debug(f"пользователь разлогинился", exc_info=True)
     return redirect(url_for('auth'))
 
 
 @app.route('/', methods=['GET'])
 @login_required
 def main():
+    logger.debug(f"пользователь посетил основную страничку", exc_info=True)
     return render_template(
         'main.html',
         user_id=current_user.id,

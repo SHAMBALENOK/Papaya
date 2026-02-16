@@ -3,306 +3,249 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Регистрация и Вход</title>
+    <title>Вход и Регистрация | Papaya</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+            background-color: #f4f4f9;
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 20px;
+            height: 100vh;
+            margin: 0;
         }
-
         .container {
             background: white;
-            border-radius: 20px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             width: 100%;
             max-width: 400px;
-            overflow: hidden;
         }
-
-        .tabs {
-            display: flex;
-            background: #f0f0f0;
-        }
-
-        .tab {
-            flex: 1;
-            padding: 15px;
+        h2 {
             text-align: center;
-            cursor: pointer;
-            font-weight: 600;
-            color: #666;
-            transition: all 0.3s;
-        }
-
-        .tab.active {
-            background: white;
-            color: #667eea;
-            box-shadow: 0 2px 10px rgba(102, 126, 234, 0.2);
-        }
-
-        .tab:hover:not(.active) {
-            background: #e0e0e0;
-        }
-
-        .form-container {
-            padding: 40px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
             color: #333;
+            margin-bottom: 1.5rem;
         }
-
-        .form-group input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s;
+        .form-group {
+            margin-bottom: 1rem;
         }
-
-        .form-group input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .form-group input.error {
-            border-color: #e74c3c;
-        }
-
-        .error-message {
-            color: #e74c3c;
-            font-size: 14px;
-            margin-top: 5px;
-            display: none;
-        }
-
-        .error-message.show {
+        label {
             display: block;
+            margin-bottom: 0.5rem;
+            color: #666;
+            font-size: 0.9rem;
         }
-
-        .btn {
+        input {
             width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box; /* Важно для padding */
+            font-size: 1rem;
+        }
+        input:focus {
+            border-color: #ff6b6b;
+            outline: none;
+        }
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #ff6b6b;
             color: white;
             border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
+            border-radius: 4px;
+            font-size: 1rem;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: background 0.3s;
         }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        button:hover {
+            background-color: #ff5252;
         }
-
-        .btn:active {
-            transform: translateY(0);
-        }
-
-        .form-footer {
+        .toggle-link {
             text-align: center;
-            margin-top: 20px;
-            color: #666;
-            font-size: 14px;
+            margin-top: 1rem;
+            font-size: 0.9rem;
         }
-
-        .form-footer a {
-            color: #667eea;
+        .toggle-link a {
+            color: #ff6b6b;
             text-decoration: none;
-            font-weight: 600;
+            cursor: pointer;
         }
-
-        .form-footer a:hover {
+        .toggle-link a:hover {
             text-decoration: underline;
         }
-
+        .error-message {
+            color: #d32f2f;
+            background-color: #ffebee;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            display: none; /* Скрыто по умолчанию */
+            text-align: center;
+        }
         .hidden {
             display: none;
-        }
-
-        .success-message {
-            background: #d4edda;
-            color: #155724;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            text-align: center;
-            display: none;
-        }
-
-        .success-message.show {
-            display: block;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="tabs">
-            <div class="tab active" onclick="switchTab('login')">Вход</div>
-            <div class="tab" onclick="switchTab('register')">Регистрация</div>
-        </div>
 
-        <div class="form-container">
-            <!-- Форма входа -->
-            <form id="loginForm" method="POST" action="/login" class="form">
-                <div class="success-message" id="loginSuccess"></div>
-                <div class="form-group">
-                    <label for="loginEmail">Email</label>
-                    <input type="email" id="loginEmail" name="email" required>
-                    <div class="error-message" id="loginEmailError"></div>
-                </div>
-                <div class="form-group">
-                    <label for="loginPassword">Пароль</label>
-                    <input type="password" id="loginPassword" name="password" required>
-                    <div class="error-message" id="loginPasswordError"></div>
-                </div>
-                <button type="submit" class="btn">Войти</button>
-                <div class="form-footer">
-                    <p>Нет аккаунта? <a href="#" onclick="switchTab('register'); return false;">Зарегистрироваться</a></p>
-                </div>
-            </form>
+<div class="container">
+    <!-- Блок ошибок -->
+    <div id="error-box" class="error-message"></div>
 
-            <!-- Форма регистрации -->
-            <form id="registerForm" method="POST" action="/register" class="form hidden">
-                <div class="success-message" id="registerSuccess"></div>
-                <div class="form-group">
-                    <label for="registerFullname">ФИО</label>
-                    <input type="text" id="registerFullname" name="fullname" required>
-                    <div class="error-message" id="registerFullnameError"></div>
-                </div>
-                <div class="form-group">
-                    <label for="registerEmail">Email</label>
-                    <input type="email" id="registerEmail" name="email" required>
-                    <div class="error-message" id="registerEmailError"></div>
-                </div>
-                <div class="form-group">
-                    <label for="registerPassword">Пароль</label>
-                    <input type="password" id="registerPassword" name="password" required>
-                    <div class="error-message" id="registerPasswordError"></div>
-                </div>
-                <div class="form-group">
-                    <label for="registerConfirmPassword">Подтвердите пароль</label>
-                    <input type="password" id="registerConfirmPassword" name="confirm_password" required>
-                    <div class="error-message" id="registerConfirmPasswordError"></div>
-                </div>
-                <button type="submit" class="btn">Зарегистрироваться</button>
-                <div class="form-footer">
-                    <p>Уже есть аккаунт? <a href="#" onclick="switchTab('login'); return false;">Войти</a></p>
-                </div>
-            </form>
+    <!-- Форма Входа -->
+    <div id="login-section">
+        <h2>Вход</h2>
+        <form id="login-form">
+            <div class="form-group">
+                <label for="login-email">Email</label>
+                <input type="email" id="login-email" name="email" required placeholder="example@mail.com">
+            </div>
+            <div class="form-group">
+                <label for="login-password">Пароль</label>
+                <input type="password" id="login-password" name="password" required placeholder="Введите пароль">
+            </div>
+            <button type="submit">Войти</button>
+        </form>
+        <div class="toggle-link">
+            Нет аккаунта? <a onclick="toggleForms()">Зарегистрироваться</a>
         </div>
     </div>
 
-    <script>
-        function switchTab(tabName) {
-            const loginTab = document.querySelector('.tab:nth-child(1)');
-            const registerTab = document.querySelector('.tab:nth-child(2)');
-            const loginForm = document.getElementById('loginForm');
-            const registerForm = document.getElementById('registerForm');
+    <!-- Форма Регистрации -->
+    <div id="register-section" class="hidden">
+        <h2>Регистрация</h2>
+        <form id="register-form">
+            <div class="form-group">
+                <label for="reg-fullname">ФИО</label>
+                <input type="text" id="reg-fullname" name="fullName" required placeholder="Иванов Иван">
+            </div>
+            <div class="form-group">
+                <label for="reg-email">Email</label>
+                <input type="email" id="reg-email" name="email" required placeholder="example@mail.com">
+            </div>
+            <div class="form-group">
+                <label for="reg-password">Пароль</label>
+                <input type="password" id="reg-password" name="password" required placeholder="Минимум 8 символов">
+            </div>
+            <div class="form-group">
+                <label for="reg-confirm-password">Подтвердите пароль</label>
+                <input type="password" id="reg-confirm-password" name="confirmPassword" required placeholder="Повторите пароль">
+            </div>
+            <button type="submit">Зарегистрироваться</button>
+        </form>
+        <div class="toggle-link">
+            Уже есть аккаунт? <a onclick="toggleForms()">Войти</a>
+        </div>
+    </div>
+</div>
 
-            if (tabName === 'login') {
-                loginTab.classList.add('active');
-                registerTab.classList.remove('active');
-                loginForm.classList.remove('hidden');
-                registerForm.classList.add('hidden');
+<script>
+    const loginSection = document.getElementById('login-section');
+    const registerSection = document.getElementById('register-section');
+    const errorBox = document.getElementById('error-box');
+
+    // Переключение между формами
+    function toggleForms() {
+        errorBox.style.display = 'none';
+        if (loginSection.classList.contains('hidden')) {
+            loginSection.classList.remove('hidden');
+            registerSection.classList.add('hidden');
+        } else {
+            loginSection.classList.add('hidden');
+            registerSection.classList.remove('hidden');
+        }
+    }
+
+    // Отображение ошибки
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.style.display = 'block';
+    }
+
+    // Обработка входа
+    document.getElementById('login-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        errorBox.style.display = 'none';
+
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+
+        try {
+            const response = await fetch('/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ email, password })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Успех: редирект согласно ответу сервера
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                } else {
+                    window.location.href = '/';
+                }
             } else {
-                registerTab.classList.add('active');
-                loginTab.classList.remove('active');
-                registerForm.classList.remove('hidden');
-                loginForm.classList.add('hidden');
+                // Ошибка сервера/валидации
+                showError(data.hint || 'Ошибка входа');
             }
+        } catch (err) {
+            console.error(err);
+            showError('Ошибка соединения с сервером');
+        }
+    });
+
+    // Обработка регистрации
+    document.getElementById('register-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        errorBox.style.display = 'none';
+
+        const fullName = document.getElementById('reg-fullname').value.trim();
+        const email = document.getElementById('reg-email').value.trim();
+        const password = document.getElementById('reg-password').value;
+        const confirmPassword = document.getElementById('reg-confirm-password').value;
+
+        // Клиентская проверка совпадения паролей
+        if (password !== confirmPassword) {
+            showError('Пароли не совпадают');
+            return;
         }
 
-        // Валидация форм
-        // Обработка регистрации
-        document.getElementById('registerForm').addEventListener('submit', function(e) {
-            e.preventDefault(); // Отменяем стандартную отправку формы
-            
-            // Собираем данные
-            const data = {
-                fullname: document.getElementById('registerFullname').value,
-                email: document.getElementById('registerEmail').value,
-                password: document.getElementById('registerPassword').value,
-                confirm_password: document.getElementById('registerConfirmPassword').value
-            };
-            
-            // Отправляем JSON на сервер
-            fetch('/auth/register', {  // Изменено с /register на /auth/register
+        try {
+            const response = await fetch('/auth/register', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    alert('Регистрация успешна!');
-                    window.location.href = '/dashboard';
-                } else {
-                    alert('Ошибка: ' + result.error);
-                }
-            })
-            .catch(error => {
-                console.error('Ошибка:', error);
-                alert('Произошла ошибка при регистрации');
+                body: JSON.stringify({ fullName, email, password })
             });
-        });
 
-        // Обработка входа
-        document.getElementById('loginForm').addEventListener('submit', function(e) {
-            e.preventDefault(); // Отменяем стандартную отправку формы
-            
-            // Собираем данные
-            const data = {
-                email: document.getElementById('loginEmail').value,
-                password: document.getElementById('loginPassword').value
-            };
-            
-            // Отправляем JSON на сервер
-            fetch('/auth/login', {  // Изменено с /login на /auth/login
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    alert('Вход выполнен успешно!');
-                    window.location.href = '/dashboard';
+            const data = await response.json();
+
+            if (response.ok) {
+                // Успех (201 Created)
+                if (data.redirect) {
+                    window.location.href = data.redirect;
                 } else {
-                    alert('Ошибка: ' + result.error);
+                    window.location.href = '/';
                 }
-            })
-            .catch(error => {
-                console.error('Ошибка:', error);
-                alert('Произошла ошибка при входе');
-            });
-        });
-    </script>
+            } else {
+                // Ошибка (400, 409 и т.д.)
+                showError(data.hint || 'Ошибка регистрации');
+            }
+        } catch (err) {
+            console.error(err);
+            showError('Ошибка соединения с сервером');
+        }
+    });
+</script>
+
 </body>
 </html>
