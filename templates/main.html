@@ -2,42 +2,135 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Papaya</title>
-<style>
-        * {
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Papaya - Главная</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
+            color: #333;
+        }
+        header {
+            background-color: #ff6b6b;
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        header h1 { margin: 0; font-size: 1.5rem; }
+        .user-info { font-size: 0.9rem; }
+        .user-info a { color: white; text-decoration: underline; margin-left: 10px; }
+
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+
+        .welcome { margin-bottom: 2rem; }
+
+        /* Сетка событий */
+        .events-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
         }
 
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f8f9fa;
-            padding: 20px;
+        /* Карточка события */
+        .event-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+            border-left: 5px solid #ff6b6b;
         }
+        .event-card:hover { transform: translateY(-5px); }
+        .event-card h3 { margin-top: 0; color: #ff6b6b; }
+        .event-detail { margin: 8px 0; font-size: 0.95rem; }
+        .event-detail strong { color: #555; }
 
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
+        /* Стили для бейджей (Класс и Возраст) */
+        .badges-row {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+            flex-wrap: wrap;
         }
-
-        .post {
-            background-color: white;
-            border: 1px solid #e0e0e0;
+        .badge {
+            display: inline-block;
+            background: #eee;
+            padding: 4px 8px;
             border-radius: 4px;
-            padding: 16px;
-            margin-bottom: 8px;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .badge-class {
+            background: #ff6b6b;
+            color: white;
+        }
+        .badge-age {
+            background: #e0e0e0;
+            color: #333;
         }
 
-        .post:last-child {
-            margin-bottom: 0;
+        .no-events {
+            text-align: center;
+            color: #888;
+            font-size: 1.2rem;
+            padding: 2rem;
+            background: white;
+            border-radius: 10px;
         }
     </style>
 </head>
 <body>
+    <header>
+        <h1>Papaya</h1>
+        <div class="user-info">
+            <span>{{ fullname }} ({{ role }})</span>
+            <a href="{{ url_for('logout') }}">Выйти</a>
+        </div>
+    </header>
+
     <div class="container">
-        <div class="post"></div>
+        <div class="welcome">
+            <h2>Добро пожаловать, {{ fullname }}!</h2>
+            <p>Вот подборка случайных событий для вас:</p>
+        </div>
+
+        {% if events %}
+            <div class="events-grid">
+                {% for event in events %}
+                    <div class="event-card">
+                        <h3>{{ event.name }}</h3>
+                        <div class="event-detail"><strong>Место:</strong> {{ event.place }}</div>
+
+                        <!-- Блок с Классом и Возрастом -->
+                        <div class="event-detail">
+                            <div class="badges-row">
+                                <!-- Класс (на основе min_age) -->
+                                <span class="badge badge-class">
+                                    Класс {{ event.min_grade }} - {{ event.max_grade }}
+                                </span>
+                                <!-- Возраст -->
+                                <span class="badge badge-age">
+                                    {{ event.min_age }} - {{ event.max_age }} лет
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="event-detail" style="font-size: 0.8rem; color: #999; margin-top: 15px;">
+                            ID: {{ event.id }}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="no-events">
+                <p>Событий пока нет или они не активны.</p>
+            </div>
+        {% endif %}
     </div>
 </body>
 </html>

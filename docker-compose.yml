@@ -31,6 +31,13 @@ services:
       - DB_HOST=db  # Важно: имя сервиса базы данных в docker-compose
       - DB_PORT=5432
       - DB_NAME=${DB_NAME}
+      - INIT_EVENT_ID = 111
+      - INIT_EVENT_NAME = my_event
+      - INIT_EVENT_PLACE = my_place
+      - INIT_EVENT_MIN_GRADE = 1
+      - INIT_EVENT_MAX_GRADE = 11
+      - INIT_EVENT_MIN_AGE = 6
+      - INIT_EVENT_MAX_AGE = 17
     depends_on:
       db:
         condition: service_healthy
