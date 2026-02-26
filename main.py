@@ -17,6 +17,9 @@ user_namespace = uuid.NAMESPACE_DNS
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
 
+app.config['SERVER_NAME'] = os.getenv('SITE_NAME', 'localhost')
+app.config['PREFERRED_URL_SCHEME'] = 'https'
+
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -219,6 +222,7 @@ def main():
     #       "URL": URL10,
     #     },
     # }), 200
+
 
 if __name__ == '__main__':
   app.run(debug=True)

@@ -5,15 +5,20 @@ from werkzeug.security import generate_password_hash
 from flask_login import UserMixin
 import os
 
-USER = os.getenv('DB_USER')
-PASSWORD = os.getenv('DB_PASSWORD')
-HOST = os.getenv('DB_HOST')
-PORT = os.getenv('DB_PORT')
-DB_NAME = os.getenv('DB_NAME')
+# USER = os.getenv('DB_USER')
+# PASSWORD = os.getenv('DB_PASSWORD')
+# HOST = os.getenv('DB_HOST')
+# PORT = os.getenv('DB_PORT')
+# DB_NAME = os.getenv('DB_NAME')
 
-DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}"
+DATABASE_URL = os.getenv('DB_URL')
 
-engine = create_engine(f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}", echo=False)
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=300
+)
 Session = sessionmaker(autoflush=False, bind=engine)
 
 

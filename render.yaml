@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: papaya
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app --bind 0.0.0.0:$PORT
+    healthCheckPath: /
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: DB_USER
+        fromDatabase:
+          name: papaya-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: papaya-db
+          property: password
+      - key: DB_HOST
+        fromDatabase:
+          name: papaya-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: papaya-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: papaya-db
+          property: database
+
+databases:
+  - name: papaya-db
+    databaseName: papaya
+    user: papaya
+    plan: free
