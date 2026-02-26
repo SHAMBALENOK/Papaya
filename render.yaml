@@ -14,9 +14,9 @@ services:
         fromDatabase:
           name: postgresql://postgres:JeJB$HXr%XFs2@db.xbiauujzrxoduwgfnzhr.supabase.co:5432/postgres
           property: url
-s
 databases:
   - name: papaya-db
     databaseName: papaya
     user: papaya
+
     plan: free
