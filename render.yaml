@@ -10,27 +10,11 @@ services:
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true
-      - key: DB_USER
+      - key: DB_URL
         fromDatabase:
-          name: papaya-db
-          property: user
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: papaya-db
-          property: password
-      - key: DB_HOST
-        fromDatabase:
-          name: papaya-db
-          property: host
-      - key: DB_PORT
-        fromDatabase:
-          name: papaya-db
-          property: port
-      - key: DB_NAME
-        fromDatabase:
-          name: papaya-db
-          property: database
-
+          name: postgresql://postgres:JeJB$HXr%XFs2@db.xbiauujzrxoduwgfnzhr.supabase.co:5432/postgres
+          property: url
+s
 databases:
   - name: papaya-db
     databaseName: papaya
