@@ -18,5 +18,4 @@ databases:
   - name: papaya-db
     databaseName: papaya
     user: papaya
-
     plan: free

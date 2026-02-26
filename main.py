@@ -2,8 +2,9 @@ import os
 from json import JSONDecodeError
 from flask import Flask, request, jsonify, redirect, url_for, render_template
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-import database.database_users as db_users
-import database.database_events as db_events
+# import database.database_users as db
+# import database.database_events as db
+import database.database as db
 import middlewares.re_check as re_check
 from werkzeug.security import check_password_hash
 import uuid
@@ -31,7 +32,7 @@ login_manager.login_message_category = "warning"
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db_users.find_user_by_id(user_id)
+    return db.find_user_by_id(user_id)
 
 @app.route('/auth', methods=['GET'])
 def auth():
@@ -67,14 +68,14 @@ def register():
             logger.debug(f"пароль {password} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': check_password[1]}), 400
-        if db_users.find_user_by_email(email):
+        if db.find_user_by_email(email):
             logger.debug(f"пользователь уже есть в системе", exc_info=True)
             return jsonify({'status': 'emailIsBusy',
                             'hint': 'Email уже зарегистрирован'}), 409
 
 
         user_id = str(uuid.uuid5(user_namespace, email))
-        db_users.add_user({
+        db.add_user({
             'id': user_id,
             'email': email,
             'fullname': fullname,
@@ -83,7 +84,7 @@ def register():
 
         })
 
-        user = db_users.find_user_by_id(user_id)
+        user = db.find_user_by_id(user_id)
         login_user(user, remember=True)
 
         logger.debug(f"Успешная регистрация {fullname} {email} под {user_id}, пароль {password}", exc_info=True)
@@ -122,7 +123,7 @@ def login():
             return jsonify({'status': 'badRequest',
                             'hint': check_password[1]}), 400
 
-        db_user = db_users.find_user_by_email(email)
+        db_user = db.find_user_by_email(email)
 
         if not db_user:
             logger.debug(f"такого пользователя нет", exc_info=True)
@@ -159,7 +160,7 @@ def logout():
 @app.route('/', methods=['GET'])
 @login_required
 def main():
-    random_events = db_events.show_random_events(1)
+    random_events = db.show_random_events(1)
 
     return render_template(
         'main.html',
