@@ -123,6 +123,18 @@ def find_event_by_id(event_id: str):
     with Session() as session:
         return session.query(Events).filter(Events.id == event_id).first()
 
+if not find_event_by_id('111'):
+    add_event(
+        {
+            'id': os.getenv('INIT_EVENT_ID', '111'),
+            'name': os.getenv('INIT_EVENT_NAME', 'my_events'),
+            'place': os.getenv('INIT_EVENT_PLACE', 'my_place'),
+            'min_grade': os.getenv('INIT_EVENT_MIN_GRADE', '1'),
+            'max_grade': os.getenv('INIT_EVENT_MAX_GRADE', '11'),
+            'min_age': os.getenv('INIT_EVENT_MIN_AGE', '6'),
+            'max_age': os.getenv('INIT_EVENT_MAX_AGE', '17')
+        }
+    )
 
 def show_random_events(quantity: int):
     with Session() as session:
