@@ -6,13 +6,15 @@ from flask_login import UserMixin
 import os
 
 # ==================== Database Configuration ====================
-USER = os.getenv('DB_USER', 'postgres')
-PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
-HOST = os.getenv('DB_HOST', 'localhost')
-PORT = os.getenv('DB_PORT', '5432')
-DB_NAME = os.getenv('DB_NAME', 'papaya_db')
+# USER = os.getenv('DB_USER', 'postgres')
+# PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
+# HOST = os.getenv('DB_HOST', 'localhost')
+# PORT = os.getenv('DB_PORT', '5432')
+# DB_NAME = os.getenv('DB_NAME', 'papaya_db')
+#
+# DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}?sslmode=require"
 
-DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}?sslmode=require"
+DATABASE_URL = os.getenv('DATABASE_URL')
 
 engine = create_engine(
     DATABASE_URL,
@@ -62,7 +64,7 @@ class Events(Base):
     updatedAt = Column(String)
 
 
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 # ==================== Users Functions ====================
 def add_user(ins: dict):

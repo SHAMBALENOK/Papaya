@@ -9,10 +9,7 @@ import middlewares.re_check as re_check
 from werkzeug.security import check_password_hash
 import uuid
 from datetime import datetime, timezone
-
-from dotenv import load_dotenv
 import logging
-load_dotenv()
 
 user_namespace = uuid.NAMESPACE_DNS
 app = Flask(__name__)
@@ -130,7 +127,7 @@ def login():
             return jsonify({'status': 'unauthorized',
                             'hint': f'email {email} не занят, используйте register'}), 401
         else:
-            if not check_password_hash(db_user.password, password) and email != db_user.email:
+            if not check_password_hash(db_user.password, password):
                 logger.debug(f"пароль {password} или email {email} не прошел проверку", exc_info=True)
                 return jsonify({'status': 'unauthorized',
                                 'hint': f'Либо email {email} введен неправильно, либо - пароль'}), 401
