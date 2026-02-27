@@ -6,15 +6,15 @@ from flask_login import UserMixin
 import os
 
 # ==================== Database Configuration ====================
-# USER = os.getenv('DB_USER', 'postgres')
-# PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
-# HOST = os.getenv('DB_HOST', 'localhost')
-# PORT = os.getenv('DB_PORT', '5432')
-# DB_NAME = os.getenv('DB_NAME', 'papaya_db')
-#
-# DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}?sslmode=require"
+USER = os.getenv('DB_USER', 'postgres')
+PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
+HOST = os.getenv('DB_HOST', 'localhost')
+PORT = os.getenv('DB_PORT', '5432')
+DB_NAME = os.getenv('DB_NAME', 'papaya_db')
 
-DATABASE_URL = os.getenv('DATABASE_URL')
+DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}?sslmode=require"
+
+# DATABASE_URL = os.getenv('DATABASE_URL')
 
 engine = create_engine(
     DATABASE_URL,
