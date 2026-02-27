@@ -10,6 +10,17 @@ from werkzeug.security import check_password_hash
 import uuid
 from datetime import datetime, timezone
 import logging
+import sys
+
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 user_namespace = uuid.NAMESPACE_DNS
 app = Flask(__name__)
