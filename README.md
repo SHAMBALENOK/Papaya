@@ -30,6 +30,8 @@ $ cd путь до вашей папки
 $ docker-compose up -d --build
 ```
 
+Сайт находится по пути localhost:5000
+
 ### Для выключения используйте:
 ```bash
 $ docker-compose down -v
