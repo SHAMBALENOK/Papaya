@@ -6,15 +6,13 @@ from flask_login import UserMixin
 import os
 
 # ==================== Database Configuration ====================
-# USER = os.getenv('DB_USER', 'postgres')
-# PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
-# HOST = os.getenv('DB_HOST', 'localhost')
-# PORT = os.getenv('DB_PORT', '5432')
-# DB_NAME = os.getenv('DB_NAME', 'papaya_db')
-#
-# DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}?sslmode=require"
+USER = os.getenv('DB_USER', 'postgres')
+PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
+HOST = os.getenv('DB_HOST', 'localhost')
+PORT = os.getenv('DB_PORT', '5432')
+DB_NAME = os.getenv('DB_NAME', 'papaya_db')
 
-DATABASE_URL = os.getenv('DATABASE_URL')
+DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}?sslmode=require"
 
 engine = create_engine(
     DATABASE_URL,
@@ -64,7 +62,7 @@ class Events(Base):
     updatedAt = Column(String)
 
 
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 # ==================== Users Functions ====================
 def add_user(ins: dict):
@@ -123,18 +121,6 @@ def find_event_by_id(event_id: str):
     with Session() as session:
         return session.query(Events).filter(Events.id == event_id).first()
 
-if not find_event_by_id('111'):
-    add_event(
-        {
-            'id': os.getenv('INIT_EVENT_ID', '111'),
-            'name': os.getenv('INIT_EVENT_NAME', 'my_events'),
-            'place': os.getenv('INIT_EVENT_PLACE', 'my_place'),
-            'min_grade': os.getenv('INIT_EVENT_MIN_GRADE', '1'),
-            'max_grade': os.getenv('INIT_EVENT_MAX_GRADE', '11'),
-            'min_age': os.getenv('INIT_EVENT_MIN_AGE', '6'),
-            'max_age': os.getenv('INIT_EVENT_MAX_AGE', '17')
-        }
-    )
 
 def show_random_events(quantity: int):
     with Session() as session:

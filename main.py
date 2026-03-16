@@ -9,18 +9,10 @@ import middlewares.re_check as re_check
 from werkzeug.security import check_password_hash
 import uuid
 from datetime import datetime, timezone
+
+from dotenv import load_dotenv
 import logging
-import sys
-
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
+load_dotenv()
 
 user_namespace = uuid.NAMESPACE_DNS
 app = Flask(__name__)
@@ -138,7 +130,7 @@ def login():
             return jsonify({'status': 'unauthorized',
                             'hint': f'email {email} не занят, используйте register'}), 401
         else:
-            if not check_password_hash(db_user.password, password):
+            if not check_password_hash(db_user.password, password) and email != db_user.email:
                 logger.debug(f"пароль {password} или email {email} не прошел проверку", exc_info=True)
                 return jsonify({'status': 'unauthorized',
                                 'hint': f'Либо email {email} введен неправильно, либо - пароль'}), 401
