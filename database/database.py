@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine, Column, String, Boolean, Integer
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, scoped_session
+from sqlalchemy import inspect, text
 from datetime import datetime, timezone
 from werkzeug.security import generate_password_hash
 from flask_login import UserMixin
@@ -66,6 +67,26 @@ class Events(Base):
 
 
 Base.metadata.create_all(bind=engine)
+
+# ==================== Inspection ====================
+
+def check_and_fix_events_table():
+    inspector = inspect(engine)
+    columns = [col['name'] for col in inspector.get_columns('events')]
+
+    # Если нет нужных колонок, удаляем таблицу и создаем заново
+    if 'min_grade' not in columns or 'max_grade' not in columns:
+        print("⚠️ Обнаружена несовместимая структура таблицы events. Пересоздаем...")
+        with engine.connect() as conn:
+            # Удаляем таблицу (данные событий пропадут, но это тестовые данные)
+            conn.execute(text("DROP TABLE IF EXISTS events CASCADE"))
+            conn.commit()
+
+        # Пересоздаем все таблицы (events создастся заново с правильными колонками)
+        Base.metadata.create_all(bind=engine)
+        print("✅ Таблица events пересоздана успешно.")
+    else:
+        print("✅ Структура таблицы events корректна.")
 
 # ==================== Users Functions ====================
 def add_user(ins: dict):
