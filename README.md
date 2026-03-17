@@ -1,4 +1,4 @@
-# [Papaya](https://papaya-sayd.onrender.com)
+# [Papaya](https://papaya-57wq.onrender.com/)
 Сервис для школьников, содержащий все олимпиады в одном удобном месте
 
 ## Самостоятельный Запуск *(ИСПОЛЬУЙТЕ ФОРК DOCKER!!!)*
