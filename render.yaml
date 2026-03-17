@@ -10,12 +10,25 @@ services:
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true
-      - key: DB_URL
-        fromDatabase:
-          name: postgresql://postgres:JeJB$HXr%XFs2@db.xbiauujzrxoduwgfnzhr.supabase.co:5432/postgres
-          property: url
-databases:
-  - name: papaya-db
-    databaseName: papaya
-    user: papaya
-    plan: free
+      # Исправлено: используем connectionString и правильное имя переменной DATABASE_URL
+      - key: DATABASE_URL
+        value: "postgresql://postgres:JeJB$HXr%XFs2@db.xbiauujzrxoduwgfnzhr.supabase.co:5432/postgres?sslmode=require"
+
+      # Добавим переменные для инициализации события, чтобы оно точно создалось
+      - key: INIT_EVENT_ID
+        value: "111"
+      - key: INIT_EVENT_NAME
+        value: "Мероприятие от Papaya"
+      - key: INIT_EVENT_PLACE
+        value: "Онлайн"
+      - key: INIT_EVENT_MIN_GRADE
+        value: "1"
+      - key: INIT_EVENT_MAX_GRADE
+        value: "11"
+      - key: INIT_EVENT_MIN_AGE
+        value: "6"
+      - key: INIT_EVENT_MAX_AGE
+        value: "17"
+
+# Убрали секцию databases, так как вы используете внешнюю базу Supabase,
+# а не создаете новую внутри Render. Это устранит конфликт.
