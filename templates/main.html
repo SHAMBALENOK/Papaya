@@ -99,38 +99,38 @@
             <p>Вот подборка случайных событий для вас:</p>
         </div>
 
-        {% if events %}
-            <div class="events-grid">
-                {% for event in events %}
-                    <div class="event-card">
-                        <h3>{{ event.name }}</h3>
-                        <div class="event-detail"><strong>Место:</strong> {{ event.place }}</div>
+<!-- Внутри main.html замените цикл на этот код -->
+{% if events %}
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
+        {% for event in events %}
+            <!-- Обертка ссылки на страницу события -->
+            <a href="{{ url_for('event_detail', event_id=event.id) }}" style="text-decoration: none; color: inherit;">
+                <div style="border: 1px solid #ddd; border-radius: 8px; padding: 20px; background: #fff; transition: transform 0.2s, box-shadow 0.2s;"
+                     onmouseover="this.style.transform='translateY(-5px)'; this.style.boxShadow='0 5px 15px rgba(0,0,0,0.1)';"
+                     onmouseout="this.style.transform='none'; this.style.boxShadow='none';">
 
-                        <!-- Блок с Классом и Возрастом -->
-                        <div class="event-detail">
-                            <div class="badges-row">
-                                <!-- Класс (на основе min_age) -->
-                                <span class="badge badge-class">
-                                    Класс {{ event.min_grade }} - {{ event.max_grade }}
-                                </span>
-                                <!-- Возраст -->
-                                <span class="badge badge-age">
-                                    {{ event.min_age }} - {{ event.max_age }} лет
-                                </span>
-                            </div>
-                        </div>
-
-                        <div class="event-detail" style="font-size: 0.8rem; color: #999; margin-top: 15px;">
-                            ID: {{ event.id }}
-                        </div>
-                    </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="no-events">
-                <p>Событий пока нет или они не активны.</p>
-            </div>
-        {% endif %}
+                    <h3 style="margin-top: 0; color: #ff6b6b;">{{ event.name }}</h3>
+                    <p><strong>Место:</strong> {{ event.place }}</p>
+                    <p>
+                        <span style="background: #e0f7fa; color: #006064; padding: 2px 8px; border-radius: 12px; font-size: 0.9em;">
+                            Класс {{ event.min_grade }} - {{ event.max_grade }}
+                        </span>
+                    </p>
+                    <p>
+                        <span style="background: #fff3e0; color: #e65100; padding: 2px 8px; border-radius: 12px; font-size: 0.9em;">
+                            {{ event.min_age }} - {{ event.max_age }} лет
+                        </span>
+                    </p>
+                    <p style="font-size: 0.8em; color: #888; margin-top: 15px;">ID: {{ event.id }}</p>
+                </div>
+            </a>
+        {% endfor %}
     </div>
+{% else %}
+    <div style="text-align: center; color: #777;">
+        Событий пока нет или они не активны.
+    </div>
+{% endif %}
+
 </body>
 </html>

@@ -151,7 +151,7 @@ def login():
                 }), 200
 
     except Exception as e:
-        logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
+        logger.error(f"Произошла ошибка при авторизации: {e}", exc_info=True)
         return jsonify({
             "status": "internal_error",
             "hint": "Ошибка сервера"
@@ -160,77 +160,54 @@ def login():
 @app.route('/logout')
 @login_required
 def logout():
-    logout_user()
-    logger.debug(f"пользователь разлогинился", exc_info=True)
-    return redirect(url_for('auth'))
+    try:
+        logout_user()
+        logger.debug(f"пользователь разлогинился", exc_info=True)
+        return redirect(url_for('auth'))
+    except Exception as e:
+        logger.error(f"Произошла ошибка {e}", exc_info=True)
+        return jsonify({
+            "status": "internal_error",
+            "hint": "Ошибка сервера"
+        }), 500
 
 
 @app.route('/', methods=['GET'])
 @login_required
 def main():
-    random_events = db.show_random_events(1)
+    try:
+        random_events = db.show_random_events(1)
 
-    return render_template(
-        'main.html',
-        user_id=current_user.id,
-        email=current_user.email,
-        fullname=current_user.fullname,
-        role=current_user.role,
-        events=random_events
-    )
+        return render_template(
+            'main.html',
+            user_id=current_user.id,
+            email=current_user.email,
+            fullname=current_user.fullname,
+            role=current_user.role,
+            events=random_events
+        )
+    except Exception as e:
+        logger.error(f"Произошла ошибка {e}", exc_info=True)
+        return jsonify({
+            "status": "internal_error",
+            "hint": "Ошибка сервера"
+        }), 500
 
-# return jsonify({
-    #     "box_1": {
-    #       "image": image1,
-    #       "content": content1,
-    #       "URL": URL1,
-    #     },
-    #     "box_2": {
-    #       "image": image2,
-    #       "content": content2,
-    #       "URL": URL2,
-    #     },
-    #     "box_3": {
-    #       "image": image3,
-    #       "content": content3,
-    #       "URL": URL3,
-    #     },
-    #     "box_4": {
-    #       "image": image4,
-    #       "content": content4,
-    #       "URL": URL4,
-    #     },
-    #     "box_5": {
-    #       "image": image5,
-    #       "content": content5,
-    #       "URL": URL5,
-    #     },
-    #     "box_6": {
-    #       "image": image6,
-    #       "content": content6,
-    #       "URL": URL6,
-    #     },
-    #     "box_7": {
-    #       "image": image7,
-    #       "content": content7,
-    #       "URL": URL7,
-    #     },
-    #     "box_8": {
-    #       "image": image8,
-    #       "content": content8,
-    #       "URL": URL8,
-    #     },
-    #     "box_9": {
-    #       "image": image9,
-    #       "content": content9,
-    #       "URL": URL9,
-    #     },
-    #     "box_10": {
-    #       "image": image10,
-    #       "content": content10,
-    #       "URL": URL10,
-    #     },
-    # }), 200
+@app.route('/event/<event_id>', methods=['GET'])
+@login_required
+def event_details(event_id):
+    event = db.find_event_by_id(event_id)
+
+    event = db.find_event_by_id(event_id)
+
+    if not event:
+        logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
+        return jsonify({
+            "status": "page_not_found",
+            "hint": "страница не найдена"
+        }), 404
+
+    return render_template('event_detail.html', event=event)
 
 
 if __name__ == '__main__':

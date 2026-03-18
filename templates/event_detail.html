@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ event.name }} - Papaya</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+        }
+        h1 {
+            color: #ff6b6b; /* Цвет бренда Papaya */
+            margin-top: 0;
+            font-size: 2.5rem;
+        }
+        .detail-row {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #555;
+            display: block;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+        }
+        .detail-value {
+            font-size: 1.1rem;
+            color: #222;
+        }
+        .badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 20px;
+            background-color: #e0f7fa;
+            color: #006064;
+            font-size: 0.9rem;
+            margin-right: 5px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 25px;
+            text-decoration: none;
+            color: #ff6b6b;
+            font-weight: bold;
+            transition: color 0.3s;
+        }
+        .back-link:hover {
+            color: #ff4757;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ event.name }}</h1>
+
+        <div class="detail-row">
+            <span class="detail-label">Место проведения</span>
+            <span class="detail-value">{{ event.place }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span class="detail-label">Классы</span>
+            <span class="detail-value">
+                <span class="badge">{{ event.min_grade }} - {{ event.max_grade }}</span>
+            </span>
+        </div>
+
+        <div class="detail-row">
+            <span class="detail-label">Возраст</span>
+            <span class="detail-value">
+                <span class="badge">{{ event.min_age }} - {{ event.max_age }} лет</span>
+            </span>
+        </div>
+
+        <div class="detail-row">
+            <span class="detail-label">ID События</span>
+            <span class="detail-value" style="font-family: monospace; color: #888;">{{ event.id }}</span>
+        </div>
+
+        <div class="detail-row">
+            <span class="detail-label">Статус</span>
+            <span class="detail-value" style="color: {% if event.isActive %}green{% else %}red{% endif %};">
+                {% if event.isActive %}Активно{% else %}Неактивно{% endif %}
+            </span>
+        </div>
+
+        <a href="{{ url_for('main') }}" class="back-link">&larr; Вернуться к списку событий</a>
+    </div>
+</body>
+</html>
