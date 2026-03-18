@@ -105,7 +105,7 @@ def register():
         logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
         return jsonify({
             "status": "internal_error",
-            "hint": "Ошибка сервера"
+            "hint": f"Ошибка сервера {e}"
         }), 500
 
 
@@ -154,7 +154,7 @@ def login():
         logger.error(f"Произошла ошибка при авторизации: {e}", exc_info=True)
         return jsonify({
             "status": "internal_error",
-            "hint": "Ошибка сервера"
+            "hint": f"Ошибка сервера {e}"
         }), 500
 
 @app.route('/logout')
@@ -168,30 +168,23 @@ def logout():
         logger.error(f"Произошла ошибка {e}", exc_info=True)
         return jsonify({
             "status": "internal_error",
-            "hint": "Ошибка сервера"
+            "hint": f"Ошибка сервера {e}"
         }), 500
 
 
 @app.route('/', methods=['GET'])
 @login_required
 def main():
-    try:
-        random_events = db.show_random_events(1)
+    random_events = db.show_random_events(1)
 
-        return render_template(
-            'main.html',
-            user_id=current_user.id,
-            email=current_user.email,
-            fullname=current_user.fullname,
-            role=current_user.role,
-            events=random_events
-        )
-    except Exception as e:
-        logger.error(f"Произошла ошибка {e}", exc_info=True)
-        return jsonify({
-            "status": "internal_error",
-            "hint": "Ошибка сервера"
-        }), 500
+    return render_template(
+        'main.html',
+        user_id=current_user.id,
+        email=current_user.email,
+        fullname=current_user.fullname,
+        role=current_user.role,
+        events=random_events
+    )
 
 @app.route('/event/<event_id>', methods=['GET'])
 @login_required
