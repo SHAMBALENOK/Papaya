@@ -196,12 +196,11 @@ def main():
 @app.route('/event/<event_id>', methods=['GET'])
 @login_required
 def event_details(event_id):
-    event = db.find_event_by_id(event_id)
 
     event = db.find_event_by_id(event_id)
 
     if not event:
-        logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
+        logger.error(f"Произошла ошибка при воспроизведении события", exc_info=True)
         return jsonify({
             "status": "page_not_found",
             "hint": "страница не найдена"
