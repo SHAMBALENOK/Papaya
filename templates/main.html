@@ -5,132 +5,248 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Papaya - Главная</title>
     <style>
+        :root {
+            --primary-color: #ff6b6b;
+            --secondary-color: #4ecdc4;
+            --bg-color: #f7f9fc;
+            --card-bg: #ffffff;
+            --text-color: #2d3436;
+            --text-muted: #636e72;
+        }
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f4f9;
+            background-color: var(--bg-color);
+            color: var(--text-color);
             margin: 0;
             padding: 0;
-            color: #333;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
+
+        /* Header Styles */
         header {
-            background-color: #ff6b6b;
-            color: white;
+            background-color: var(--card-bg);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
             padding: 1rem 2rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-        header h1 { margin: 0; font-size: 1.5rem; }
-        .user-info { font-size: 0.9rem; }
-        .user-info a { color: white; text-decoration: underline; margin-left: 10px; }
 
-        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            text-decoration: none;
+        }
 
-        .welcome { margin-bottom: 2rem; }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
 
-        /* Сетка событий */
+        .user-details {
+            text-align: right;
+            font-size: 0.9rem;
+        }
+
+        .user-name {
+            font-weight: bold;
+            display: block;
+        }
+
+        .user-role {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            background: #eee;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .logout-btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: background 0.3s;
+        }
+
+        .logout-btn:hover {
+            background-color: #ff5252;
+        }
+
+        /* Main Content */
+        main {
+            flex: 1;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            margin-bottom: 2rem;
+            color: var(--text-color);
+        }
+
+        /* Events Grid */
         .events-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
+            gap: 25px;
         }
 
-        /* Карточка события */
+        /* Event Card Link Wrapper */
+        .event-card-link {
+            text-decoration: none;
+            color: inherit;
+            display: block;
+            height: 100%;
+        }
+
         .event-card {
-            background: white;
-            border-radius: 10px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: transform 0.2s;
-            border-left: 5px solid #ff6b6b;
-        }
-        .event-card:hover { transform: translateY(-5px); }
-        .event-card h3 { margin-top: 0; color: #ff6b6b; }
-        .event-detail { margin: 8px 0; font-size: 0.95rem; }
-        .event-detail strong { color: #555; }
-
-        /* Стили для бейджей (Класс и Возраст) */
-        .badges-row {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.04);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            height: 100%;
             display: flex;
-            gap: 5px;
-            margin-top: 5px;
-            flex-wrap: wrap;
+            flex-direction: column;
+            border: 1px solid #eee;
+            position: relative;
+            overflow: hidden;
         }
-        .badge {
-            display: inline-block;
-            background: #eee;
-            padding: 4px 8px;
-            border-radius: 4px;
+
+        .event-card-link:hover .event-card {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 20px rgba(0,0,0,0.1);
+            border-color: var(--primary-color);
+        }
+
+        .event-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background-color: var(--secondary-color);
+            transition: background-color 0.3s;
+        }
+
+        .event-card-link:hover .event-card::before {
+            background-color: var(--primary-color);
+        }
+
+        .event-title {
+            font-size: 1.4rem;
+            margin: 0 0 15px 0;
+            color: var(--text-color);
+            font-weight: 700;
+        }
+
+        .event-location {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+        }
+
+        .tags-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: auto;
+        }
+
+        .tag {
+            padding: 6px 12px;
+            border-radius: 20px;
             font-size: 0.85rem;
             font-weight: 600;
         }
-        .badge-class {
-            background: #ff6b6b;
-            color: white;
-        }
-        .badge-age {
-            background: #e0e0e0;
-            color: #333;
+
+        .tag-grade {
+            background-color: #e3f2fd;
+            color: #1565c0;
         }
 
-        .no-events {
+        .tag-age {
+            background-color: #fff3e0;
+            color: #ef6c00;
+        }
+
+        .empty-state {
             text-align: center;
-            color: #888;
+            padding: 4rem 0;
+            color: var(--text-muted);
             font-size: 1.2rem;
-            padding: 2rem;
-            background: white;
-            border-radius: 10px;
         }
     </style>
 </head>
 <body>
+
     <header>
-        <h1>Papaya</h1>
+        <a href="{{ url_for('main') }}" class="logo">🍈 Papaya</a>
+        
         <div class="user-info">
-            <span>{{ fullname }} ({{ role }})</span>
-            <a href="{{ url_for('logout') }}">Выйти</a>
+            <div class="user-details">
+                <span class="user-name">{{ fullname }}</span>
+                <span class="user-role">{{ role }}</span>
+                <div style="font-size: 0.75rem; color: #999;">{{ email }}</div>
+            </div>
+            <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>
         </div>
     </header>
 
-    <div class="container">
-        <div class="welcome">
-            <h2>Добро пожаловать, {{ fullname }}!</h2>
-            <p>Вот подборка случайных событий для вас:</p>
-        </div>
+    <main>
+        <h1>Актуальные события</h1>
 
-<!-- Внутри main.html замените цикл на этот код -->
-{% if events %}
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px;">
-        {% for event in events %}
-            <!-- Обертка ссылки на страницу события -->
-            <a href="{{ url_for('event_detail', event_id=event.id) }}" style="text-decoration: none; color: inherit;">
-                <div style="border: 1px solid #ddd; border-radius: 8px; padding: 20px; background: #fff; transition: transform 0.2s, box-shadow 0.2s;"
-                     onmouseover="this.style.transform='translateY(-5px)'; this.style.boxShadow='0 5px 15px rgba(0,0,0,0.1)';"
-                     onmouseout="this.style.transform='none'; this.style.boxShadow='none';">
+        {% if events %}
+            <div class="events-grid">
+                {% for event in events %}
+                    <!-- Ссылка оборачивает всю карточку -->
+                    <a href="{{ url_for('event_details', event_id=event.id) }}" class="event-card-link">
+                        <div class="event-card">
+                            <h2 class="event-title">{{ event.name }}</h2>
+                            
+                            <div class="event-location">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path>
+                                    <circle cx="12" cy="10" r="3"></circle>
+                                </svg>
+                                {{ event.place }}
+                            </div>
 
-                    <h3 style="margin-top: 0; color: #ff6b6b;">{{ event.name }}</h3>
-                    <p><strong>Место:</strong> {{ event.place }}</p>
-                    <p>
-                        <span style="background: #e0f7fa; color: #006064; padding: 2px 8px; border-radius: 12px; font-size: 0.9em;">
-                            Класс {{ event.min_grade }} - {{ event.max_grade }}
-                        </span>
-                    </p>
-                    <p>
-                        <span style="background: #fff3e0; color: #e65100; padding: 2px 8px; border-radius: 12px; font-size: 0.9em;">
-                            {{ event.min_age }} - {{ event.max_age }} лет
-                        </span>
-                    </p>
-                    <p style="font-size: 0.8em; color: #888; margin-top: 15px;">ID: {{ event.id }}</p>
-                </div>
-            </a>
-        {% endfor %}
-    </div>
-{% else %}
-    <div style="text-align: center; color: #777;">
-        Событий пока нет или они не активны.
-    </div>
-{% endif %}
+                            <div class="tags-container">
+                                <span class="tag tag-grade">
+                                    {{ event.min_grade }} - {{ event.max_grade }} классы
+                                </span>
+                                <span class="tag tag-age">
+                                    {{ event.min_age }} - {{ event.max_age }} лет
+                                </span>
+                            </div>
+                        </div>
+                    </a>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>На данный момент нет активных событий для отображения.</p>
+            </div>
+        {% endif %}
+    </main>
 
 </body>
 </html>
