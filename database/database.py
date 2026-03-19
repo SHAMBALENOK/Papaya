@@ -63,8 +63,8 @@ class Events(Base):
     max_grade = Column(Integer)
     min_age = Column(Integer)
     max_age = Column(Integer)
-    preview_picture = Column(String)
-    picture = Column(String)
+    preview_picture = Column(String, nullable=True)
+    picture = Column(String, nullable=True)
     isActive = Column(Boolean, default=True)
     createdAt = Column(String)
     updatedAt = Column(String)
@@ -161,6 +161,8 @@ if not find_event_by_id('111'):
             'max_grade': os.getenv('INIT_EVENT_MAX_GRADE', '11'),
             'min_age': os.getenv('INIT_EVENT_MIN_AGE', '6'),
             'max_age': os.getenv('INIT_EVENT_MAX_AGE', '17'),
+            'preview_picture': os.getenv('INIT_EVENT_PREVIEW_PICTURE', None),
+            'picture': os.getenv('INIT_EVENT_PICTURE', None),
         }
     )
 
