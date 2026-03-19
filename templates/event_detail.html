@@ -10,101 +10,183 @@
             background-color: #f4f7f6;
             color: #333;
             margin: 0;
-            padding: 20px;
+            padding: 0;
             display: flex;
             justify-content: center;
-            align-items: center;
             min-height: 100vh;
         }
         .container {
             background: white;
-            padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            max-width: 600px;
             width: 100%;
+            max-width: 800px;
+            margin: 40px 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+            overflow: hidden;
         }
-        h1 {
-            color: #ff6b6b; /* Цвет бренда Papaya */
-            margin-top: 0;
-            font-size: 2.5rem;
+
+        /* Banner Image Styles */
+        .event-banner {
+            width: 100%;
+            height: 350px;
+            background-color: #eee;
+            position: relative;
+            overflow: hidden;
         }
-        .detail-row {
-            margin-bottom: 15px;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 10px;
-        }
-        .detail-label {
-            font-weight: bold;
-            color: #555;
+        .event-banner img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
             display: block;
-            margin-bottom: 5px;
+        }
+        .banner-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px;
+            background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+            color: white;
+        }
+        .banner-title {
+            margin: 0;
+            font-size: 2.2rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .detail-row {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            font-weight: 700;
+            color: #888;
+            display: block;
+            margin-bottom: 8px;
             text-transform: uppercase;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
+            letter-spacing: 0.5px;
         }
+
         .detail-value {
-            font-size: 1.1rem;
+            font-size: 1.2rem;
             color: #222;
+            font-weight: 500;
         }
+
+        .badge-container {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
         .badge {
             display: inline-block;
-            padding: 5px 10px;
-            border-radius: 20px;
-            background-color: #e0f7fa;
-            color: #006064;
-            font-size: 0.9rem;
-            margin-right: 5px;
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-size: 0.95rem;
+            font-weight: 600;
         }
+        .badge-grade { background-color: #e3f2fd; color: #1565c0; }
+        .badge-age { background-color: #fff3e0; color: #ef6c00; }
+        .badge-status {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+        .badge-status.inactive {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
         .back-link {
-            display: inline-block;
-            margin-top: 25px;
+            display: inline-flex;
+            align-items: center;
+            margin-top: 30px;
             text-decoration: none;
-            color: #ff6b6b;
+            color: var(--primary-color, #ff6b6b);
             font-weight: bold;
-            transition: color 0.3s;
+            font-size: 1.1rem;
+            transition: transform 0.2s, color 0.2s;
+            padding: 10px 20px;
+            background: #fff0f0;
+            border-radius: 8px;
         }
         .back-link:hover {
             color: #ff4757;
-            text-decoration: underline;
+            transform: translateX(-5px);
+            background: #ffe0e0;
+        }
+        .back-link svg {
+            margin-right: 8px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>{{ event.name }}</h1>
+        <!-- Баннер с картинкой -->
+        <div class="event-banner">
+            {% set img_url = event.picture if event.picture else 'https://placehold.co/1200x600/e0e0e0/757575?text=No+Event+Photo' %}
+            <img src="{{ img_url }}" alt="{{ event.name }}" onerror="this.src='https://placehold.co/1200x600/e0e0e0/757575?text=Image+Error'">
 
-        <div class="detail-row">
-            <span class="detail-label">Место проведения</span>
-            <span class="detail-value">{{ event.place }}</span>
+            <div class="banner-overlay">
+                <h1 class="banner-title">{{ event.name }}</h1>
+            </div>
         </div>
 
-        <div class="detail-row">
-            <span class="detail-label">Классы</span>
-            <span class="detail-value">
-                <span class="badge">{{ event.min_grade }} - {{ event.max_grade }}</span>
-            </span>
-        </div>
+        <div class="content">
+            <div class="detail-row">
+                <span class="detail-label">Место проведения</span>
+                <div class="detail-value" style="display: flex; align-items: center; gap: 10px;">
+                    <svg width="20" height="20" fill="none" stroke="#ff6b6b" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                    {{ event.place }}
+                </div>
+            </div>
 
-        <div class="detail-row">
-            <span class="detail-label">Возраст</span>
-            <span class="detail-value">
-                <span class="badge">{{ event.min_age }} - {{ event.max_age }} лет</span>
-            </span>
-        </div>
+            <div class="detail-row">
+                <span class="detail-label">Параметры участия</span>
+                <div class="badge-container">
+                    <span class="badge badge-grade">
+                        {{ event.min_grade }} - {{ event.max_grade }} классы
+                    </span>
+                    <span class="badge badge-age">
+                        {{ event.min_age }} - {{ event.max_age }} лет
+                    </span>
+                </div>
+            </div>
 
-        <div class="detail-row">
-            <span class="detail-label">ID События</span>
-            <span class="detail-value" style="font-family: monospace; color: #888;">{{ event.id }}</span>
-        </div>
+            <div class="detail-row">
+                <span class="detail-label">ID События</span>
+                <span class="detail-value" style="font-family: monospace; color: #888; font-size: 1rem;">{{ event.id }}</span>
+            </div>
 
-        <div class="detail-row">
-            <span class="detail-label">Статус</span>
-            <span class="detail-value" style="color: {% if event.isActive %}green{% else %}red{% endif %};">
-                {% if event.isActive %}Активно{% else %}Неактивно{% endif %}
-            </span>
-        </div>
+            <div class="detail-row">
+                <span class="detail-label">Статус</span>
+                <span class="badge badge-status {% if not event.isActive %}inactive{% endif %}">
+                    {% if event.isActive %}● Активно{% else %}○ Неактивно{% endif %}
+                </span>
+            </div>
 
-        <a href="{{ url_for('main') }}" class="back-link">&larr; Вернуться к списку событий</a>
+            <a href="{{ url_for('main') }}" class="back-link">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path d="M19 12H5m7 7l-7-7 7-7"></path>
+                </svg>
+                Вернуться к списку
+            </a>
+        </div>
     </div>
 </body>
 </html>

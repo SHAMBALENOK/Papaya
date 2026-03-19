@@ -63,32 +63,33 @@ class Events(Base):
     max_grade = Column(Integer)
     min_age = Column(Integer)
     max_age = Column(Integer)
+    preview_picture = Column(String)
+    picture = Column(String)
     isActive = Column(Boolean, default=True)
     createdAt = Column(String)
     updatedAt = Column(String)
-
 
 Base.metadata.create_all(bind=engine)
 
 # ==================== Inspection ====================
 
-def check_and_fix_events_table():
-    inspector = inspect(engine)
-    columns = [col['name'] for col in inspector.get_columns('events')]
-
-    # Если нет нужных колонок, удаляем таблицу и создаем заново
-    if 'min_grade' not in columns or 'max_grade' not in columns:
-        print("⚠️ Обнаружена несовместимая структура таблицы events. Пересоздаем...")
-        with engine.connect() as conn:
-            # Удаляем таблицу (данные событий пропадут, но это тестовые данные)
-            conn.execute(text("DROP TABLE IF EXISTS events CASCADE"))
-            conn.commit()
-
-        # Пересоздаем все таблицы (events создастся заново с правильными колонками)
-        Base.metadata.create_all(bind=engine)
-        print("✅ Таблица events пересоздана успешно.")
-    else:
-        print("✅ Структура таблицы events корректна.")
+# def check_and_fix_events_table():
+#     inspector = inspect(engine)
+#     columns = [col['name'] for col in inspector.get_columns('events')]
+#
+#     # Если нет нужных колонок, удаляем таблицу и создаем заново
+#     if 'min_grade' not in columns or 'max_grade' not in columns:
+#         print("⚠️ Обнаружена несовместимая структура таблицы events. Пересоздаем...")
+#         with engine.connect() as conn:
+#             # Удаляем таблицу (данные событий пропадут, но это тестовые данные)
+#             conn.execute(text("DROP TABLE IF EXISTS events CASCADE"))
+#             conn.commit()
+#
+#         # Пересоздаем все таблицы (events создастся заново с правильными колонками)
+#         Base.metadata.create_all(bind=engine)
+#         print("✅ Таблица events пересоздана успешно.")
+#     else:
+#         print("✅ Структура таблицы events корректна.")
 
 # ==================== Users Functions ====================
 def add_user(ins: dict):
@@ -134,6 +135,8 @@ def add_event(ins: dict):
             max_grade=ins['max_grade'],
             min_age=ins['min_age'],
             max_age=ins['max_age'],
+            preview_picture=ins['preview_picture'],
+            picture=ins['picture'],
             isActive=True,
             createdAt=formatted_time,
             updatedAt=formatted_time,
@@ -157,7 +160,7 @@ if not find_event_by_id('111'):
             'min_grade': os.getenv('INIT_EVENT_MIN_GRADE', '1'),
             'max_grade': os.getenv('INIT_EVENT_MAX_GRADE', '11'),
             'min_age': os.getenv('INIT_EVENT_MIN_AGE', '6'),
-            'max_age': os.getenv('INIT_EVENT_MAX_AGE', '17')
+            'max_age': os.getenv('INIT_EVENT_MAX_AGE', '17'),
         }
     )
 
