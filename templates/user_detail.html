@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Профиль {{ user.fullname }} - Papaya</title>
+    <style>
+        :root {
+            --primary-color: #ff6b6b;
+            --bg-color: #f7f9fc;
+            --card-bg: #ffffff;
+            --text-color: #2d3436;
+            --text-muted: #636e72;
+            --border-color: #dfe6e9;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            margin: 40px 20px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+
+        /* Header Profile Section */
+        .profile-header {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ff8787 100%);
+            padding: 40px;
+            color: white;
+            text-align: center;
+            position: relative;
+        }
+
+        .avatar-placeholder {
+            width: 100px;
+            height: 100px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 15px;
+            font-size: 2.5rem;
+            border: 4px solid rgba(255,255,255,0.5);
+        }
+
+        .profile-name {
+            font-size: 2rem;
+            margin: 0;
+            font-weight: 700;
+        }
+
+        .profile-role {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-top: 8px;
+            backdrop-filter: blur(5px);
+        }
+
+        /* Content Grid */
+        .profile-content {
+            padding: 40px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        @media (max-width: 600px) {
+            .profile-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .info-group {
+            margin-bottom: 20px;
+        }
+
+        .info-label {
+            display: block;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        .info-value {
+            font-size: 1.1rem;
+            color: var(--text-color);
+            font-weight: 500;
+            word-break: break-word;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .bio-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            text-decoration: none;
+            color: var(--primary-color);
+            font-weight: 600;
+            padding: 10px 20px;
+            background: #fff0f0;
+            border-radius: 8px;
+            margin: 20px 40px 40px;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            background: #ffe0e0;
+            transform: translateX(-5px);
+        }
+
+        .back-btn svg {
+            margin-right: 8px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .status-active { background: #d4edda; color: #155724; }
+        .status-inactive { background: #f8d7da; color: #721c24; }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="profile-header">
+            <div class="avatar-placeholder">
+                {{ user.fullname[0] | upper }}
+            </div>
+            <h1 class="profile-name">{{ user.fullname }}</h1>
+            <span class="profile-role">{{ user.role }}</span>
+        </div>
+
+        <div class="profile-content">
+            <!-- Column 1 -->
+            <div>
+                <div class="info-group">
+                    <span class="info-label">Email</span>
+                    <div class="info-value">{{ user.email }}</div>
+                </div>
+
+                <div class="info-group">
+                    <span class="info-label">Телефон</span>
+                    <div class="info-value">{{ user.phone if user.phone else 'Не указан' }}</div>
+                </div>
+
+                <div class="info-group">
+                    <span class="info-label">Дата рождения</span>
+                    <div class="info-value">{{ user.bday if user.bday else 'Не указана' }}</div>
+                </div>
+
+                <div class="info-group">
+                    <span class="info-label">Пол</span>
+                    <div class="info-value">
+                        {% if user.gender == 'male' %}Мужской
+                        {% elif user.gender == 'female' %}Женский
+                        {% else %}{{ user.gender if user.gender else 'Не указан' }}{% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Column 2 -->
+            <div>
+                <div class="info-group">
+                    <span class="info-label">Регион</span>
+                    <div class="info-value">{{ user.region if user.region else 'Не указан' }}</div>
+                </div>
+
+                <div class="info-group">
+                    <span class="info-label">Статус</span>
+                    <div class="info-value">{{ user.status if user.status else 'Не указан' }}</div>
+                </div>
+
+                <div class="info-group">
+                    <span class="info-label">Аккаунт</span>
+                    <div class="info-value">
+                        <span class="status-badge {% if user.isActive %}status-active{% else %}status-inactive{% endif %}">
+                            {% if user.isActive %}Активен{% else %}Заблокирован{% endif %}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="info-group">
+                    <span class="info-label">ID Пользователя</span>
+                    <div class="info-value" style="font-family: monospace; font-size: 0.9rem; color: #888;">{{ user.id }}</div>
+                </div>
+            </div>
+
+            <!-- Full Width Bio -->
+            <div class="full-width bio-section">
+                <span class="info-label">О себе (Bio)</span>
+                <div class="info-value" style="line-height: 1.6;">
+                    {{ user.bio if user.bio else 'Пользователь не заполнил информацию о себе.' }}
+                </div>
+            </div>
+
+            <div class="full-width">
+                 <span class="info-label">Дата регистрации</span>
+                 <div class="info-value" style="font-size: 0.9rem; color: #888;">
+                    {{ user.createdAt if user.createdAt else 'Неизвестно' }}
+                 </div>
+            </div>
+        </div>
+    </div>
+
+    <a href="{{ url_for('main') }}" class="back-btn">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M19 12H5m7 7l-7-7 7-7"></path>
+        </svg>
+        На главную
+    </a>
+
+</body>
+</html>

@@ -62,6 +62,12 @@ def register():
         email = data.get('email', 'null').strip()
         password = data.get('password', 'null')
         fullname = data.get('fullName', 'null').strip()
+        gender = data.get('gender', 'null')
+        bday = data.get('bday', 'null')
+        bio = data.get('bio', 'null')
+        phone = data.get('phone', 'null')
+        region = data.get('region', 'null')
+        status = data.get('status', 'null')
         check_fullname = re_check.is_valid_fullname(fullname)
         check_password = re_check.is_valid_password(password)
         if not re_check.is_valid_email(email):
@@ -88,7 +94,13 @@ def register():
             'email': email,
             'fullname': fullname,
             'password': password,
-            'role': 'USER'
+            'role': 'USER',
+            'gender': gender,
+            'bday': bday,
+            'bio': bio,
+            'phone': phone,
+            'region': region,
+            'status': status,
 
         })
 
@@ -189,9 +201,7 @@ def main():
 @app.route('/event/<event_id>', methods=['GET'])
 @login_required
 def event_details(event_id):
-
     event = db.find_event_by_id(event_id)
-
     if not event:
         logger.error(f"Произошла ошибка при воспроизведении события", exc_info=True)
         return jsonify({
@@ -200,6 +210,18 @@ def event_details(event_id):
         }), 404
 
     return render_template('event_detail.html', event=event)
+
+@app.route('/user/<user_id>', methods=['GET'])
+@login_required
+def user_details(user_id):
+    user = db.find_user_by_id(user_id)
+    if not user:
+        logger.error(f"Произошла ошибка при воспроизведении информации о пользователе", exc_info=True)
+        return jsonify({
+            "status": "page_not_found",
+            "hint": "страница не найдена"
+        }), 404
+    return render_template('user_detail.html', user=user)
 
 
 if __name__ == '__main__':
