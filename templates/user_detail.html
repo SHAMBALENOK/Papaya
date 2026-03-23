@@ -21,18 +21,52 @@
             margin: 0;
             padding: 0;
             display: flex;
-            justify-content: center;
+            flex-direction: column; /* Изменили на column для правильного позиционирования */
+            align-items: center;
             min-height: 100vh;
+            padding-top: 40px; /* Отступ сверху для кнопки и карточки */
+            padding-bottom: 40px;
         }
 
         .container {
             width: 100%;
             max-width: 800px;
-            margin: 40px 20px;
             background: var(--card-bg);
             border-radius: 16px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.05);
             overflow: hidden;
+            margin: 0 20px; /* Отступы по бокам */
+        }
+
+        /* Кнопка "Назад" теперь сверху */
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            text-decoration: none;
+            color: var(--primary-color);
+            font-weight: 600;
+            padding: 10px 20px;
+            background: #fff0f0;
+            border-radius: 8px;
+            margin-bottom: 20px; /* Отступ снизу до карточки */
+            transition: all 0.2s;
+            align-self: flex-start; /* Прижимаем влево относительно контейнера body */
+            margin-left: 20px; /* Небольшой отступ слева если экран широкий */
+        }
+
+        @media (min-width: 840px) {
+            .back-btn {
+                margin-left: calc((100vw - 800px) / 2 + 20px); /* Центрирование относительно карточки на больших экранах */
+            }
+        }
+
+        .back-btn:hover {
+            background: #ffe0e0;
+            transform: translateX(-5px);
+        }
+
+        .back-btn svg {
+            margin-right: 8px;
         }
 
         /* Header Profile Section */
@@ -85,6 +119,11 @@
             .profile-content {
                 grid-template-columns: 1fr;
             }
+            .back-btn {
+                margin-left: 20px; /* На мобильных просто отступ слева */
+                margin-right: 20px;
+                width: fit-content;
+            }
         }
 
         .info-group {
@@ -119,28 +158,6 @@
             border: 1px solid var(--border-color);
         }
 
-        .back-btn {
-            display: inline-flex;
-            align-items: center;
-            text-decoration: none;
-            color: var(--primary-color);
-            font-weight: 600;
-            padding: 10px 20px;
-            background: #fff0f0;
-            border-radius: 8px;
-            margin: 20px 40px 40px;
-            transition: all 0.2s;
-        }
-
-        .back-btn:hover {
-            background: #ffe0e0;
-            transform: translateX(-5px);
-        }
-
-        .back-btn svg {
-            margin-right: 8px;
-        }
-
         .status-badge {
             display: inline-block;
             padding: 4px 10px;
@@ -154,6 +171,14 @@
     </style>
 </head>
 <body>
+
+    <!-- Кнопка вынесена НАД карточкой -->
+    <a href="{{ url_for('main') }}" class="back-btn">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M19 12H5m7 7l-7-7 7-7"></path>
+        </svg>
+        На главную
+    </a>
 
     <div class="container">
         <div class="profile-header">
@@ -235,13 +260,6 @@
             </div>
         </div>
     </div>
-
-    <a href="{{ url_for('main') }}" class="back-btn">
-        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M19 12H5m7 7l-7-7 7-7"></path>
-        </svg>
-        На главную
-    </a>
 
 </body>
 </html>
