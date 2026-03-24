@@ -43,6 +43,12 @@ class Users(Base, UserMixin):
     email = Column(String, unique=True, nullable=False)
     password = Column(String, nullable=False)
     fullname = Column(String, nullable=False)
+    gender = Column(String, nullable=True)
+    bday = Column(String, nullable=True)
+    bio = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    status = Column(String, nullable=True)#default='SCHOOL_STUDENT')
     role = Column(String, default='USER')
     isActive = Column(Boolean, default=True)
     createdAt = Column(String)
@@ -101,6 +107,12 @@ def add_user(ins: dict):
             email=ins['email'],
             password=generate_password_hash(ins['password']),
             fullname=ins['fullname'],
+            gender= ins['fullname'],
+            bday = ins['bday'],
+            bio = ins['bio'],
+            phone = ins['phone'],
+            region = ins['region'],
+            status = ins['status'],
             role=ins['role'],
             isActive=True,
             createdAt=formatted_time,
@@ -111,6 +123,15 @@ def add_user(ins: dict):
         session.refresh(user)
         return user
 
+# def add_info(point: str, ins: str):
+#     with Session() as session:
+#         user = Users(
+#             ''=ins,
+#         )
+#         session.add(user)
+#         session.commit()
+#         session.refresh(user)
+#         return user
 
 def find_user_by_email(email: str):
     with Session() as session:
@@ -121,6 +142,17 @@ def find_user_by_id(user_id: str):
     with Session() as session:
         return session.query(Users).filter(Users.id == user_id).first()
 
+def edit_user(user_id:str, ins:dict):
+    with Session() as session:
+        now = datetime.now(timezone.utc)
+        formatted_time = now.isoformat().split('.')[0] + 'Z'
+        user = session.query(Users).filter(Users.id == user_id).first()
+        for key, value, in ins.values():
+            setattr(user, key, value)
+        user.updatedAt = formatted_time
+        session.commit()
+        session.refresh(user)
+        return user
 
 # ==================== Events Functions ====================
 def add_event(ins: dict):
@@ -151,23 +183,33 @@ def find_event_by_id(event_id: str):
     with Session() as session:
         return session.query(Events).filter(Events.id == event_id).first()
 
-if not find_event_by_id('111'):
-    add_event(
-        {
-            'id': os.getenv('INIT_EVENT_ID', '111'),
-            'name': os.getenv('INIT_EVENT_NAME', 'my_events'),
-            'place': os.getenv('INIT_EVENT_PLACE', 'my_place'),
-            'min_grade': os.getenv('INIT_EVENT_MIN_GRADE', '1'),
-            'max_grade': os.getenv('INIT_EVENT_MAX_GRADE', '11'),
-            'min_age': os.getenv('INIT_EVENT_MIN_AGE', '6'),
-            'max_age': os.getenv('INIT_EVENT_MAX_AGE', '17'),
-            'preview_picture': os.getenv('INIT_EVENT_PREVIEW_PICTURE', None),
-            'picture': os.getenv('INIT_EVENT_PICTURE', None),
-        }
-    )
-
 def show_random_events(quantity: int):
+    id = os.getenv('INIT_EVENT_ID', '111')
+    name = os.getenv('INIT_EVENT_NAME', 'my_events')
+    place = os.getenv('INIT_EVENT_PLACE', 'my_place')
+    min_grade = os.getenv('INIT_EVENT_MIN_GRADE', '1')
+    max_grade = os.getenv('INIT_EVENT_MAX_GRADE', '11')
+    min_age = os.getenv('INIT_EVENT_MIN_AGE', '6')
+    max_age = os.getenv('INIT_EVENT_MAX_AGE', '17')
+    preview_picture = os.getenv('INIT_EVENT_PREVIEW_PICTURE', None)
+    picture = os.getenv('INIT_EVENT_PICTURE', None)
     with Session() as session:
+        for i in range(quantity):
+            if not find_event_by_id(id):
+                add_event(
+                    {
+                        'id': id,
+                        'name': name,
+                        'place': place,
+                        'min_grade': min_grade,
+                        'max_grade': max_grade,
+                        'min_age': min_age,
+                        'max_age': max_age,
+                        'preview_picture': preview_picture,
+                        'picture': picture,
+                    }
+                )
+                id+='1'
         return session.query(Events).filter(Events.isActive == True).limit(quantity).all()
 
 def close_session():

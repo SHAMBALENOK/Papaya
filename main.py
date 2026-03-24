@@ -223,6 +223,64 @@ def user_details(user_id):
         }), 404
     return render_template('user_detail.html', user=user)
 
+@app.route('/user/<user_id>/edit_info', methods=['POST'])
+@login_required
+def user_edit_details(user_id):
+    try:
+        user = db.find_user_by_id(user_id)
+        if not user:
+            logger.error(f"Произошла ошибка при воспроизведении информации о пользователе", exc_info=True)
+            return jsonify({
+                "status": "page_not_found",
+                "hint": "страница не найдена"
+            }), 404
+        try:
+            data = request.get_json()
+        except JSONDecodeError as e:
+            logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
+            return jsonify({'status': 'badRequest',
+                            'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
+        data = {
+            'email': data.get('email', 'null').strip(),
+            'password': data.get('password', 'null'),
+            'fullname': data.get('fullName', 'null').strip(),
+            'gender': data.get('gender', 'null'),
+            'bday': data.get('bday', 'null'),
+            'bio': data.get('bio', 'null'),
+            'phone': data.get('phone', 'null'),
+            'region': data.get('region', 'null'),
+            'status': data.get('status', 'null'),
+        }
+        for key, value in data.values():
+            if value is 'null':
+                del data[key]
+
+        if not re_check.is_valid_email(data['email']):
+            logger.debug(f"email {data['email']} не прошел проверку", exc_info=True)
+            return jsonify({'status': 'badRequest',
+                            'hint': 'Неверный email'}), 400
+        if not re_check.is_valid_fullname(data['fullname'])[0]:
+            logger.debug(f"имя {data['fullname']} не прошло проверку", exc_info=True)
+            return jsonify({'status': 'badRequest',
+                            'hint': re_check.is_valid_fullname(data['fullname'])[1]}), 400
+        if not re_check.is_valid_password(data['password'])[0]:
+            logger.debug(f"пароль {data['password']} не прошел проверку", exc_info=True)
+            return jsonify({'status': 'badRequest',
+                            'hint': re_check.is_valid_password(data['password'])[1]}), 400
+
+        db.edit_user(user_id, data)
+        return jsonify({
+            'status': 'success',
+            'redirect': url_for('/user/<user_id>')
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Произошла ошибка {e}", exc_info=True)
+        return jsonify({
+            "status": "internal_error",
+            "hint": f"Ошибка сервера {e}"
+        }), 500
+
 
 if __name__ == '__main__':
   app.run(debug=True)

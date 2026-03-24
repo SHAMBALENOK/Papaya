@@ -7,11 +7,14 @@
     <style>
         :root {
             --primary-color: #ff6b6b;
+            --primary-hover: #ff5252;
             --bg-color: #f7f9fc;
             --card-bg: #ffffff;
             --text-color: #2d3436;
             --text-muted: #636e72;
             --border-color: #dfe6e9;
+            --success-color: #00b894;
+            --error-color: #d63031;
         }
 
         body {
@@ -21,13 +24,52 @@
             margin: 0;
             padding: 0;
             display: flex;
-            flex-direction: column; /* Изменили на column для правильного позиционирования */
+            flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            padding-top: 40px; /* Отступ сверху для кнопки и карточки */
-            padding-bottom: 40px;
+            padding-top: 30px;
+            padding-bottom: 30px;
         }
 
+        /* Кнопки навигации */
+        .nav-actions {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 20px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .back-btn, .edit-btn {
+            display: inline-flex;
+            align-items: center;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 20px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: none;
+            font-size: 0.95rem;
+        }
+
+        .back-btn {
+            color: var(--primary-color);
+            background: #fff0f0;
+        }
+        .back-btn:hover { background: #ffe0e0; transform: translateX(-5px); }
+        .back-btn svg { margin-right: 8px; }
+
+        .edit-btn {
+            color: white;
+            background: var(--primary-color);
+            box-shadow: 0 4px 6px rgba(255, 107, 107, 0.2);
+        }
+        .edit-btn:hover { background: var(--primary-hover); transform: translateY(-2px); }
+        .edit-btn svg { margin-right: 8px; }
+
+        /* Карточка профиля */
         .container {
             width: 100%;
             max-width: 800px;
@@ -35,47 +77,15 @@
             border-radius: 16px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.05);
             overflow: hidden;
-            margin: 0 20px; /* Отступы по бокам */
+            margin: 0 20px;
+            position: relative;
         }
 
-        /* Кнопка "Назад" теперь сверху */
-        .back-btn {
-            display: inline-flex;
-            align-items: center;
-            text-decoration: none;
-            color: var(--primary-color);
-            font-weight: 600;
-            padding: 10px 20px;
-            background: #fff0f0;
-            border-radius: 8px;
-            margin-bottom: 20px; /* Отступ снизу до карточки */
-            transition: all 0.2s;
-            align-self: flex-start; /* Прижимаем влево относительно контейнера body */
-            margin-left: 20px; /* Небольшой отступ слева если экран широкий */
-        }
-
-        @media (min-width: 840px) {
-            .back-btn {
-                margin-left: calc((100vw - 800px) / 2 + 20px); /* Центрирование относительно карточки на больших экранах */
-            }
-        }
-
-        .back-btn:hover {
-            background: #ffe0e0;
-            transform: translateX(-5px);
-        }
-
-        .back-btn svg {
-            margin-right: 8px;
-        }
-
-        /* Header Profile Section */
         .profile-header {
             background: linear-gradient(135deg, #ff6b6b 0%, #ff8787 100%);
             padding: 40px;
             color: white;
             text-align: center;
-            position: relative;
         }
 
         .avatar-placeholder {
@@ -88,15 +98,11 @@
             justify-content: center;
             margin: 0 auto 15px;
             font-size: 2.5rem;
+            font-weight: bold;
             border: 4px solid rgba(255,255,255,0.5);
         }
 
-        .profile-name {
-            font-size: 2rem;
-            margin: 0;
-            font-weight: 700;
-        }
-
+        .profile-name { font-size: 2rem; margin: 0; font-weight: 700; }
         .profile-role {
             display: inline-block;
             background: rgba(255,255,255,0.2);
@@ -105,9 +111,10 @@
             font-size: 0.9rem;
             margin-top: 8px;
             backdrop-filter: blur(5px);
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
 
-        /* Content Grid */
         .profile-content {
             padding: 40px;
             display: grid;
@@ -115,47 +122,37 @@
             gap: 30px;
         }
 
-        @media (max-width: 600px) {
-            .profile-content {
-                grid-template-columns: 1fr;
-            }
-            .back-btn {
-                margin-left: 20px; /* На мобильных просто отступ слева */
-                margin-right: 20px;
-                width: fit-content;
-            }
+        @media (max-width: 768px) {
+            .profile-content { grid-template-columns: 1fr; }
+            .nav-actions { flex-direction: column; gap: 10px; align-items: stretch; }
+            .back-btn, .edit-btn { justify-content: center; }
         }
 
-        .info-group {
-            margin-bottom: 20px;
-        }
-
+        .info-group { margin-bottom: 20px; }
         .info-label {
             display: block;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: var(--text-muted);
             margin-bottom: 6px;
             font-weight: 600;
         }
-
         .info-value {
             font-size: 1.1rem;
             color: var(--text-color);
             font-weight: 500;
             word-break: break-word;
         }
-
-        .full-width {
-            grid-column: 1 / -1;
-        }
+        .info-value.empty { color: #b2bec3; font-style: italic; font-size: 1rem; }
+        .full-width { grid-column: 1 / -1; }
 
         .bio-section {
             background: #f8f9fa;
             padding: 20px;
             border-radius: 12px;
             border: 1px solid var(--border-color);
+            margin-top: 10px;
         }
 
         .status-badge {
@@ -168,83 +165,236 @@
         .status-active { background: #d4edda; color: #155724; }
         .status-inactive { background: #f8d7da; color: #721c24; }
 
+        .meta-info {
+            grid-column: 1 / -1;
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+            margin-top: 10px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            backdrop-filter: blur(3px);
+        }
+        .modal-overlay.active { display: flex; }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            position: relative;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 15px;
+        }
+        .modal-title { font-size: 1.5rem; font-weight: bold; color: var(--text-color); margin: 0; }
+        .close-modal {
+            background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-muted);
+            transition: color 0.2s;
+        }
+        .close-modal:hover { color: var(--error-color); }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        @media (max-width: 500px) { .form-grid { grid-template-columns: 1fr; } }
+
+        .form-group { margin-bottom: 15px; }
+        .form-group.full { grid-column: 1 / -1; }
+
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+        }
+        .form-input, .form-textarea, .form-select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: inherit;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus, .form-textarea:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1);
+        }
+        .form-textarea { resize: vertical; min-height: 80px; }
+
+        .form-actions {
+            margin-top: 20px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .btn-submit {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-submit:hover { background: var(--primary-hover); }
+        .btn-submit:disabled { background: #ccc; cursor: not-allowed; }
+
+        .btn-cancel {
+            background: #f1f2f6;
+            color: var(--text-color);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-cancel:hover { background: #dfe4ea; }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transform: translateY(-100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 2000;
+        }
+        .notification.show { transform: translateY(0); opacity: 1; }
+        .notification.success { background: var(--success-color); }
+        .notification.error { background: var(--error-color); }
+
     </style>
 </head>
 <body>
 
-    <!-- Кнопка вынесена НАД карточкой -->
-    <a href="{{ url_for('main') }}" class="back-btn">
-        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M19 12H5m7 7l-7-7 7-7"></path>
-        </svg>
-        На главную
-    </a>
+    <!-- Уведомления -->
+    <div id="notification" class="notification"></div>
 
+    <!-- Навигация -->
+    <div class="nav-actions">
+        <a href="{{ url_for('main') }}" class="back-btn">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M19 12H5m7 7l-7-7 7-7"></path>
+            </svg>
+            На главную
+        </a>
+
+        {% if current_user.id == user.id %}
+        <button onclick="openEditModal()" class="edit-btn">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            Редактировать профиль
+        </button>
+        {% endif %}
+    </div>
+
+    <!-- Карточка профиля -->
     <div class="container">
         <div class="profile-header">
             <div class="avatar-placeholder">
-                {{ user.fullname[0] | upper }}
+                {{ user.fullname[0] | upper if user.fullname else '?' }}
             </div>
             <h1 class="profile-name">{{ user.fullname }}</h1>
             <span class="profile-role">{{ user.role }}</span>
         </div>
 
         <div class="profile-content">
-            <!-- Column 1 -->
+            <!-- Левая колонка -->
             <div>
                 <div class="info-group">
                     <span class="info-label">Email</span>
                     <div class="info-value">{{ user.email }}</div>
                 </div>
-
                 <div class="info-group">
                     <span class="info-label">Телефон</span>
-                    <div class="info-value">{{ user.phone if user.phone else 'Не указан' }}</div>
+                    <div class="info-value {% if not user.phone %}empty{% endif %}">
+                        {{ user.phone if user.phone else 'Не указан' }}
+                    </div>
                 </div>
-
                 <div class="info-group">
                     <span class="info-label">Дата рождения</span>
-                    <div class="info-value">{{ user.bday if user.bday else 'Не указана' }}</div>
+                    <div class="info-value {% if not user.bday %}empty{% endif %}">
+                        {{ user.bday if user.bday else 'Не указана' }}
+                    </div>
                 </div>
-
                 <div class="info-group">
                     <span class="info-label">Пол</span>
                     <div class="info-value">
                         {% if user.gender == 'male' %}Мужской
                         {% elif user.gender == 'female' %}Женский
-                        {% else %}{{ user.gender if user.gender else 'Не указан' }}{% endif %}
+                        {% else %}<span class="empty">Не указан</span>{% endif %}
                     </div>
                 </div>
             </div>
 
-            <!-- Column 2 -->
+            <!-- Правая колонка -->
             <div>
                 <div class="info-group">
                     <span class="info-label">Регион</span>
-                    <div class="info-value">{{ user.region if user.region else 'Не указан' }}</div>
+                    <div class="info-value {% if not user.region %}empty{% endif %}">
+                        {{ user.region if user.region else 'Не указан' }}
+                    </div>
                 </div>
-
                 <div class="info-group">
-                    <span class="info-label">Статус</span>
-                    <div class="info-value">{{ user.status if user.status else 'Не указан' }}</div>
+                    <span class="info-label">Статус (текстовый)</span>
+                    <div class="info-value {% if not user.status %}empty{% endif %}">
+                        {{ user.status if user.status else 'Не задан' }}
+                    </div>
                 </div>
-
                 <div class="info-group">
-                    <span class="info-label">Аккаунт</span>
+                    <span class="info-label">Статус аккаунта</span>
                     <div class="info-value">
                         <span class="status-badge {% if user.isActive %}status-active{% else %}status-inactive{% endif %}">
                             {% if user.isActive %}Активен{% else %}Заблокирован{% endif %}
                         </span>
                     </div>
                 </div>
-
                 <div class="info-group">
                     <span class="info-label">ID Пользователя</span>
                     <div class="info-value" style="font-family: monospace; font-size: 0.9rem; color: #888;">{{ user.id }}</div>
                 </div>
             </div>
 
-            <!-- Full Width Bio -->
+            <!-- Биография -->
             <div class="full-width bio-section">
                 <span class="info-label">О себе (Bio)</span>
                 <div class="info-value" style="line-height: 1.6;">
@@ -252,14 +402,157 @@
                 </div>
             </div>
 
-            <div class="full-width">
-                 <span class="info-label">Дата регистрации</span>
-                 <div class="info-value" style="font-size: 0.9rem; color: #888;">
-                    {{ user.createdAt if user.createdAt else 'Неизвестно' }}
-                 </div>
+            <!-- Мета-информация -->
+            <div class="meta-info">
+                <span>Зарегистрирован: {{ user.createdAt if user.createdAt else 'Неизвестно' }}</span>
+                {% if user.updatedAt %}
+                    <span>Обновлено: {{ user.updatedAt }}</span>
+                {% endif %}
             </div>
         </div>
     </div>
 
+    <!-- Модальное окно редактирования -->
+    <div id="editModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Редактирование профиля</h2>
+                <button onclick="closeEditModal()" class="close-modal">&times;</button>
+            </div>
+
+            <form id="editForm" onsubmit="submitEdit(event)">
+                <div class="form-grid">
+                    <div class="form-group full">
+                        <label class="form-label">ФИО</label>
+                        <input type="text" name="fullName" id="edit_fullname" class="form-input" required value="{{ user.fullname }}">
+                    </div>
+
+                    <div class="form-group full">
+                        <label class="form-label">Email</label>
+                        <input type="email" name="email" id="edit_email" class="form-input" required value="{{ user.email }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Пароль</label>
+                        <input type="password" name="password" id="edit_password" class="form-input" placeholder="Оставьте пустым, чтобы не менять">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Телефон</label>
+                        <input type="text" name="phone" id="edit_phone" class="form-input" value="{{ user.phone if user.phone else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Дата рождения</label>
+                        <input type="text" name="bday" id="edit_bday" class="form-input" value="{{ user.bday if user.bday else '' }}" placeholder="YYYY-MM-DD">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Пол</label>
+                        <select name="gender" id="edit_gender" class="form-select">
+                            {% set current_gender = user.gender if user.gender else '' %}
+
+                            <option value="" {% if current_gender=='' %}selected{% endif %}>Не указан</option>
+                            <option value="male" {% if current_gender=='male' %}selected{% endif %}>Мужской</option>
+                            <option value="female" {% if current_gender=='female' %}selected{% endif %}>Женский</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Регион</label>
+                        <input type="text" name="region" id="edit_region" class="form-input" value="{{ user.region if user.region else '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Статус</label>
+                        <input type="text" name="status" id="edit_status" class="form-input" value="{{ user.status if user.status else '' }}">
+                    </div>
+
+                    <div class="form-group full">
+                        <label class="form-label">О себе (Bio)</label>
+                        <textarea name="bio" id="edit_bio" class="form-textarea">{{ user.bio if user.bio else '' }}</textarea>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" onclick="closeEditModal()" class="btn-cancel">Отмена</button>
+                    <button type="submit" id="submitBtn" class="btn-submit">Сохранить изменения</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const modal = document.getElementById('editModal');
+        const notification = document.getElementById('notification');
+        const submitBtn = document.getElementById('submitBtn');
+        const userId = "{{ user.id }}";
+
+        function openEditModal() {
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden'; // Блокируем прокрутку фона
+        }
+
+        function closeEditModal() {
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        // Закрытие по клику вне окна
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeEditModal();
+        });
+
+        function showNotification(message, type) {
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        async function submitEdit(event) {
+            event.preventDefault();
+
+            // Блокируем кнопку во время отправки
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Сохранение...';
+
+            const formData = new FormData(event.target);
+            const data = Object.fromEntries(formData.entries());
+
+            // Логика удаления пустых/дефолтных значений, если нужно, но бэкенд сам обрабатывает 'null'
+            // В вашем бэкенде есть проверка: if value is 'null': del data[key]
+            // Убедимся, что пустые поля не отправляются как строки, если мы хотим их игнорировать,
+            // но так как у нас есть дефолтные значения в HTML, отправляем всё явно.
+            // Бэкенд сам решит, что обновлять.
+
+            try {
+                const response = await fetch(`/user/${userId}/edit_info`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.status === 'success') {
+                    showNotification('Профиль успешно обновлен!', 'success');
+                    setTimeout(() => {
+                        window.location.reload(); // Перезагружаем страницу, чтобы увидеть изменения
+                    }, 1000);
+                } else {
+                    throw new Error(result.hint || 'Ошибка при сохранении');
+                }
+
+            } catch (error) {
+                console.error(error);
+                showNotification(error.message || 'Произошла ошибка сервера', 'error');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Сохранить изменения';
+            }
+        }
+    </script>
 </body>
 </html>
