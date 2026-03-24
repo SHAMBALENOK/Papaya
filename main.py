@@ -26,7 +26,7 @@ user_namespace = uuid.NAMESPACE_DNS
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
 
-app.config['SERVER_NAME'] = os.getenv('SITE_NAME', 'localhost')
+# app.config['SERVER_NAME'] = os.getenv('SITE_NAME', 'localhost')
 app.config['PREFERRED_URL_SCHEME'] = 'https'
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -251,8 +251,8 @@ def user_edit_details(user_id):
             'region': data.get('region', 'null'),
             'status': data.get('status', 'null'),
         }
-        for key, value in data.values():
-            if value is 'null':
+        for key, value in data.items():
+            if value == 'null':
                 del data[key]
 
         if not re_check.is_valid_email(data['email']):
