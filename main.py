@@ -251,24 +251,23 @@ def user_edit_details(user_id):
             'region': data.get('region', 'null'),
             'status': data.get('status', 'null'),
         }
-        for key, value in data.items():
-            if value == 'null':
-                del data[key]
 
-        if not re_check.is_valid_email(data['email']):
-            logger.debug(f"email {data['email']} не прошел проверку", exc_info=True)
+        clean_data = {k: v for k, v in data.items() if v != 'null'}
+
+        if not re_check.is_valid_email(clean_data['email']):
+            logger.debug(f"email {clean_data['email']} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Неверный email'}), 400
-        if not re_check.is_valid_fullname(data['fullname'])[0]:
-            logger.debug(f"имя {data['fullname']} не прошло проверку", exc_info=True)
+        if not re_check.is_valid_fullname(clean_data['fullname'])[0]:
+            logger.debug(f"имя {clean_data['fullname']} не прошло проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
-                            'hint': re_check.is_valid_fullname(data['fullname'])[1]}), 400
-        if not re_check.is_valid_password(data['password'])[0]:
-            logger.debug(f"пароль {data['password']} не прошел проверку", exc_info=True)
+                            'hint': re_check.is_valid_fullname(clean_data['fullname'])[1]}), 400
+        if not re_check.is_valid_password(clean_data['password'])[0]:
+            logger.debug(f"пароль {clean_data['password']} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
-                            'hint': re_check.is_valid_password(data['password'])[1]}), 400
+                            'hint': re_check.is_valid_password(clean_data['password'])[1]}), 400
 
-        db.edit_user(user_id, data)
+        db.edit_user(user_id, clean_data)
         return jsonify({
             'status': 'success',
             'redirect': url_for('/user/<user_id>')
