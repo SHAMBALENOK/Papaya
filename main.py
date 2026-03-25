@@ -269,7 +269,7 @@ def user_edit_details(user_id):
 
         db.edit_user(user_id, clean_data)
         return jsonify({
-            'status': 'success',ы
+            'status': 'success',
             'redirect': url_for('user_details', user_id=user_id)
         }), 200
 
