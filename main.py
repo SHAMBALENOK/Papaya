@@ -269,8 +269,8 @@ def user_edit_details(user_id):
 
         db.edit_user(user_id, clean_data)
         return jsonify({
-            'status': 'success',
-            'redirect': url_for('/user/<user_id>')
+            'status': 'success',ы
+            'redirect': url_for('user_details', user_id=user_id)
         }), 200
 
     except Exception as e:
