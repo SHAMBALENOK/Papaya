@@ -452,15 +452,48 @@
 
     </div>
 
-    <script>
+        <script>
         const userId = "{{ user.id }}";
         const notification = document.getElementById('notification');
 
-        // --- Уведомления ---
+        // --- Утилиты ---
+
+        // Функция показа уведомлений
         function showNotification(message, type) {
             notification.textContent = message;
             notification.className = `notification ${type} show`;
-            setTimeout(() => notification.classList.remove('show'), 3000);
+            setTimeout(() => notification.classList.remove('show'), 4000);
+        }
+
+        // Универсальная функция отправки JSON запросов с обработкой ошибок
+        async function sendJsonRequest(url, data) {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                // Читаем ответ как текст сначала, чтобы избежать ошибки парсинга HTML
+                const text = await response.text();
+                let result;
+
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    console.error("Сервер вернул не JSON:", text);
+                    throw new Error(`Сервер вернул ошибку (HTML вместо JSON). Статус: ${response.status}. Проверьте консоль (F12).`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(result.hint || `Ошибка сервера: ${response.status}`);
+                }
+
+                return result;
+            } catch (error) {
+                console.error("Request failed:", error);
+                throw error;
+            }
         }
 
         // --- Профиль: Показать/Скрыть форму ---
@@ -474,40 +507,47 @@
                 btn.innerHTML = `<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg> Редактировать профиль`;
             } else {
                 section.classList.add('active');
-                btn.innerHTML = `Скрыть форму`;
-                // Прокрутка к форме
+                btn.innerText = 'Скрыть форму';
                 section.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         }
 
-        // --- Профиль: Отправка ---
+        // --- Профиль: Отправка данных ---
         async function submitProfileEdit(e) {
             e.preventDefault();
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
 
-            // Блокировка кнопки
+            // Подготовка данных (имена полей должны совпадать с main.py)
+            const payload = {
+                email: data.email,
+                password: data.password || '', // Пустой пароль игнорируется на бэкенде если есть проверка
+                fullName: data.fullName,       // Важно: camelCase как в main.py
+                gender: data.gender,           // Без пробелов
+                bday: data.bday,
+                bio: data.bio,
+                phone: data.phone,
+                region: data.region,
+                status: data.status
+            };
+
             const btn = e.target.querySelector('button[type="submit"]');
             const originalText = btn.innerText;
             btn.disabled = true;
             btn.innerText = 'Сохранение...';
 
             try {
-                const res = await fetch(`/user/${userId}/edit_info`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(data)
-                });
-                const result = await res.json();
+                const result = await sendJsonRequest(`/user/${userId}/edit_info`, payload);
 
-                if (res.ok && result.status === 'success') {
-                    showNotification('Профиль обновлен!', 'success');
+                if (result.status === 'success') {
+                    showNotification('Профиль успешно обновлен!', 'success');
                     setTimeout(() => window.location.reload(), 1000);
                 } else {
-                    throw new Error(result.hint || 'Ошибка сохранения');
+                    throw new Error(result.hint || 'Неизвестная ошибка');
                 }
             } catch (err) {
                 showNotification(err.message, 'error');
+            } finally {
                 btn.disabled = false;
                 btn.innerText = originalText;
             }
@@ -533,27 +573,40 @@
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
 
-            // Преобразуем числа, так как input type="number" возвращает строки, а БД ждет int
-            ['min_grade', 'max_grade', 'min_age', 'max_age'].forEach(key => {
-                if(data[key]) data[key] = parseInt(data[key]);
-            });
+            // Преобразование чисел и подготовка payload
+            const payload = {
+                name: data.name,
+                place: data.place,
+                min_grade: parseInt(data.min_grade),
+                max_grade: parseInt(data.max_grade),
+                min_age: parseInt(data.min_age),
+                max_age: parseInt(data.max_age),
+                preview_picture: data.preview_picture || null,
+                picture: data.picture || null
+            };
+
+            // Валидация чисел
+            if ([payload.min_grade, payload.max_grade, payload.min_age, payload.max_age].some(isNaN)) {
+                showNotification('Поля классов и возраста должны быть числами', 'error');
+                return;
+            }
 
             const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.innerText;
             btn.disabled = true;
             btn.innerText = 'Создание...';
 
             try {
-                const res = await fetch(`/user/${userId}/add_event`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(data)
-                });
-                const result = await res.json();
+                const result = await sendJsonRequest(`/user/${userId}/add_event`, payload);
 
-                if (res.ok) {
-                    showNotification('Событие создано!', 'success');
+                if (result.status === 'success' || result.status === 'Created') {
+                    showNotification('Событие успешно создано!', 'success');
                     e.target.reset();
-                    // Можно переключить на вкладку редактирования или просто очистить
+                    // Опционально: переключить на вкладку редактирования или показать ID
+                    if (result.id) {
+                        document.getElementById('editEventIdInput').value = result.id;
+                        switchEventTab('edit');
+                    }
                 } else {
                     throw new Error(result.hint || 'Ошибка создания');
                 }
@@ -561,36 +614,42 @@
                 showNotification(err.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.innerText = 'Создать событие';
+                btn.innerText = originalText;
             }
         }
 
-        // --- События: Заполнение формы редактирования (Имитация) ---
-        // В реальном проекте здесь был бы fetch для получения данных события по ID
+        // --- События: Загрузка данных для редактирования ---
+        // Так как у нас нет отдельного API для получения JSON события,
+        // мы просто проверяем существование ID и позволяем пользователю ввести данные вручную,
+        // либо (в идеале) нужно добавить эндпоинт /api/event/<id>.
+        // Здесь реализована базовая проверка.
         document.getElementById('editEventIdInput').addEventListener('change', async function() {
             const eventId = this.value.trim();
             if (!eventId) return;
 
-            // Попытка получить данные события (используем тот же эндпоинт, что и для просмотра)
+            const btn = this;
+            btn.style.borderColor = '#ccc';
+
             try {
-                // Примечание: этот запрос может потребовать авторизации, которая уже есть
-                const res = await fetch(`/event/${eventId}`);
-                if (res.ok) {
-                    // Парсим HTML ответ, чтобы вытащить данные, или лучше сделать отдельный API endpoint для JSON
-                    // Так как у нас только HTML рендеринг для GET, пользователю придется ввести данные вручную
-                    // ИЛИ мы можем попробовать спарсить страницу (не рекомендуется в продакшене).
+                // Пытаемся получить страницу события. Если 200 OK - значит существует.
+                // Мы не можем распарсить HTML легко, поэтому просто подтверждаем существование.
+                const response = await fetch(`/event/${eventId}`);
 
-                    // ДЛЯ УПРОЩЕНИЯ: Просто сообщим пользователю, что нужно ввести данные вручную,
-                    // либо предположим, что он знает данные.
-                    // В идеале нужен endpoint /api/event/<id> возвращающий JSON.
-
-                    showNotification(`ID установлен: ${eventId}. Заполните поля ниже вручную (API для получения JSON отсутствует).`, 'success');
+                if (response.ok) {
+                    showNotification(`Событие ${eventId} найдено. Заполните поля ниже.`, 'success');
+                    btn.style.borderColor = '#00b894';
+                    // Сохраняем ID в dataset формы для отправки
                     document.getElementById('editEventForm').dataset.eventId = eventId;
+                } else if (response.status === 404) {
+                    showNotification('Событие с таким ID не найдено', 'error');
+                    btn.style.borderColor = '#d63031';
+                    delete document.getElementById('editEventForm').dataset.eventId;
                 } else {
-                    showNotification('Событие не найдено', 'error');
+                    throw new Error('Ошибка проверки');
                 }
-            } catch (e) {
-                showNotification('Ошибка сети', 'error');
+            } catch (err) {
+                showNotification('Ошибка сети при проверке ID', 'error');
+                btn.style.borderColor = '#d63031';
             }
         });
 
@@ -598,43 +657,55 @@
         async function submitEditEvent(e) {
             e.preventDefault();
             const form = e.target;
+            // Берем ID из dataset (если загрузили) или из инпута
             const eventId = form.dataset.eventId || document.getElementById('editEventIdInput').value.trim();
 
             if (!eventId) {
-                showNotification('Введите ID события', 'error');
+                showNotification('Введите или выберите ID события', 'error');
                 return;
             }
 
             const formData = new FormData(form);
             const data = Object.fromEntries(formData.entries());
 
-            ['min_grade', 'max_grade', 'min_age', 'max_age'].forEach(key => {
-                if(data[key]) data[key] = parseInt(data[key]);
-            });
+            const payload = {
+                name: data.name,
+                place: data.place,
+                min_grade: parseInt(data.min_grade),
+                max_grade: parseInt(data.max_grade), // Исправлено имя ключа
+                min_age: parseInt(data.min_age),
+                max_age: parseInt(data.max_age),
+                preview_picture: data.preview_picture || null, // Исправлено имя ключа
+                picture: data.picture || null
+            };
+
+            if ([payload.min_grade, payload.max_grade, payload.min_age, payload.max_age].some(isNaN)) {
+                showNotification('Поля классов и возраста должны быть числами', 'error');
+                return;
+            }
 
             const btn = form.querySelector('button[type="submit"]');
+            const originalText = btn.innerText;
             btn.disabled = true;
             btn.innerText = 'Обновление...';
 
             try {
-                // Путь соответствует вашему main.py: /user/<user_id>/<event_id>/edit_event
-                const res = await fetch(`/user/${userId}/${eventId}/edit_event`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(data)
-                });
-                const result = await res.json();
+                // URL должен точно соответствовать route в main.py
+                const result = await sendJsonRequest(`/user/${userId}/${eventId}/edit_event`, payload);
 
-                if (res.ok && result.status === 'success') {
+                if (result.status === 'success') {
                     showNotification('Событие обновлено!', 'success');
-                    setTimeout(() => window.location.href = result.redirect || `/event/${eventId}`, 1000);
+                    setTimeout(() => {
+                        window.location.href = result.redirect || `/event/${eventId}`;
+                    }, 1000);
                 } else {
                     throw new Error(result.hint || 'Ошибка обновления');
                 }
             } catch (err) {
                 showNotification(err.message, 'error');
+            } finally {
                 btn.disabled = false;
-                btn.innerText = 'Обновить событие';
+                btn.innerText = originalText;
             }
         }
     </script>
