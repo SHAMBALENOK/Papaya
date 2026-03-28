@@ -187,7 +187,7 @@ def logout():
 @app.route('/', methods=['GET'])
 @login_required
 def main():
-    random_events = db.show_random_events(2)
+    random_events = db.show_random_events(10)
 
     return render_template(
         'main.html',
