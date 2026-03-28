@@ -187,7 +187,7 @@ def logout():
 @app.route('/', methods=['GET'])
 @login_required
 def main():
-    random_events = db.show_random_events(1)
+    random_events = db.show_random_events(5)
 
     return render_template(
         'main.html',
@@ -271,6 +271,108 @@ def user_edit_details(user_id):
         return jsonify({
             'status': 'success',
             'redirect': url_for('user_details', user_id=user_id)
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Произошла ошибка {e}", exc_info=True)
+        return jsonify({
+            "status": "internal_error",
+            "hint": f"Ошибка сервера {e}"
+        }), 500
+
+@app.route('/user/<user_id>/add_event', methods=['POST'])
+@login_required
+def add_event(user_id):
+    try:
+        try:
+            data = request.get_json()
+        except JSONDecodeError as e:
+            logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
+            return jsonify({'status': 'badRequest',
+                            'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
+        if data.get('name', 'null').strip()=='null':
+            logger.debug(f"имя не прошло проверку", exc_info=True)
+            return jsonify({'status': 'badRequest',
+                            'hint': 'Неверное имя'}), 400
+        idd = str(uuid.uuid5(user_namespace, data.get('name', 'null').strip()))
+        ins={
+                'id': idd,
+                'name': data.get('name', 'null').strip(),
+                'place': data.get('place', 'null').strip(),
+                'min_grade': data.get('min_grade', 'null'),
+                'max_grade': data.get('max_grade', 'null'),
+                'min_age': data.get('min_age', 'null'),
+                'max_age': data.get('max_age', 'null'),
+                'preview_picture': data.get('preview_picture', None),
+                'picture': data.get('picture', None),
+
+            }
+
+        for key, value in ins.items():
+            if key != 'preview_picture' or key != 'picture':
+                if value == 'null':
+                    logger.debug(f"{key} прошло проверку", exc_info=True)
+                    return jsonify({'status': 'badRequest',
+                                    'hint': f'Неверное {key}'}), 400
+
+        db.add_event(ins)
+
+    except Exception as e:
+        logger.error(f"Произошла ошибка {e}", exc_info=True)
+        return jsonify({
+            "status": "internal_error",
+            "hint": f"Ошибка сервера {e}"
+        }), 500
+
+
+@app.route('/user/<user_id>/<event_id>/edit_event', methods=['POST'])
+@login_required
+def event_edit_details(event_id):
+    try:
+        event = db.find_user_by_id(event_id)
+        if not event:
+            logger.error(f"Произошла ошибка при воспроизведении информации о событии", exc_info=True)
+            return jsonify({
+                "status": "page_not_found",
+                "hint": "страница не найдена"
+            }), 404
+        try:
+            data = request.get_json()
+        except JSONDecodeError as e:
+            logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
+            return jsonify({'status': 'badRequest',
+                            'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
+
+        data = {
+            'name': data.get('name', 'null').strip(),
+            'place': data.get('place', 'null'),
+            'min_grade': data.get('min_grade', 'null').strip(),
+            'max_grade': data.get('max_grade', 'null'),
+            'min_age': data.get('min_age', 'null'),
+            'max_age': data.get('max_age', 'null'),
+            'preview_picture': data.get('preview_picture', 'null'),
+            'picture': data.get('picture', 'null'),
+        }
+
+        clean_data = {k: v for k, v in data.items() if v != 'null'}
+
+        # if not re_check.is_valid_email(clean_data['email']):
+        #     logger.debug(f"email {clean_data['email']} не прошел проверку", exc_info=True)
+        #     return jsonify({'status': 'badRequest',
+        #                     'hint': 'Неверный email'}), 400
+        # if not re_check.is_valid_fullname(clean_data['fullname'])[0]:
+        #     logger.debug(f"имя {clean_data['fullname']} не прошло проверку", exc_info=True)
+        #     return jsonify({'status': 'badRequest',
+        #                     'hint': re_check.is_valid_fullname(clean_data['fullname'])[1]}), 400
+        # if not re_check.is_valid_password(clean_data['password'])[0]:
+        #     logger.debug(f"пароль {clean_data['password']} не прошел проверку", exc_info=True)
+        #     return jsonify({'status': 'badRequest',
+        #                     'hint': re_check.is_valid_password(clean_data['password'])[1]}), 400
+
+        db.edit_event(event_id, clean_data)
+        return jsonify({
+            'status': 'success',
+            'redirect': url_for('eventdetails', event_id=event_id)
         }), 200
 
     except Exception as e:

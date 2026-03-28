@@ -8,6 +8,7 @@
         :root {
             --primary-color: #ff6b6b;
             --primary-hover: #ff5252;
+            --secondary-color: #4ecdc4;
             --bg-color: #f7f9fc;
             --card-bg: #ffffff;
             --text-color: #2d3436;
@@ -31,7 +32,7 @@
             padding-bottom: 30px;
         }
 
-        /* Кнопки навигации */
+        /* Навигация */
         .nav-actions {
             width: 100%;
             max-width: 800px;
@@ -41,7 +42,7 @@
             align-items: center;
         }
 
-        .back-btn, .edit-btn {
+        .btn {
             display: inline-flex;
             align-items: center;
             text-decoration: none;
@@ -54,22 +55,24 @@
             font-size: 0.95rem;
         }
 
-        .back-btn {
-            color: var(--primary-color);
-            background: #fff0f0;
-        }
-        .back-btn:hover { background: #ffe0e0; transform: translateX(-5px); }
-        .back-btn svg { margin-right: 8px; }
+        .btn-back { color: var(--primary-color); background: #fff0f0; }
+        .btn-back:hover { background: #ffe0e0; transform: translateX(-5px); }
+        .btn-back svg { margin-right: 8px; }
 
-        .edit-btn {
-            color: white;
-            background: var(--primary-color);
-            box-shadow: 0 4px 6px rgba(255, 107, 107, 0.2);
-        }
-        .edit-btn:hover { background: var(--primary-hover); transform: translateY(-2px); }
-        .edit-btn svg { margin-right: 8px; }
+        .btn-edit { color: white; background: var(--primary-color); box-shadow: 0 4px 6px rgba(255, 107, 107, 0.2); }
+        .btn-edit:hover { background: var(--primary-hover); transform: translateY(-2px); }
+        .btn-edit svg { margin-right: 8px; }
 
-        /* Карточка профиля */
+        .btn-save { background: var(--success-color); color: white; }
+        .btn-save:hover { background: #00a383; }
+
+        .btn-cancel { background: #f1f2f6; color: var(--text-color); }
+        .btn-cancel:hover { background: #dfe4ea; }
+
+        .btn-action { background: var(--secondary-color); color: white; }
+        .btn-action:hover { background: #3dbdb4; }
+
+        /* Контейнер */
         .container {
             width: 100%;
             max-width: 800px;
@@ -78,7 +81,6 @@
             box-shadow: 0 10px 25px rgba(0,0,0,0.05);
             overflow: hidden;
             margin: 0 20px;
-            position: relative;
         }
 
         .profile-header {
@@ -89,16 +91,12 @@
         }
 
         .avatar-placeholder {
-            width: 100px;
-            height: 100px;
+            width: 100px; height: 100px;
             background: rgba(255,255,255,0.3);
             border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: flex; align-items: center; justify-content: center;
             margin: 0 auto 15px;
-            font-size: 2.5rem;
-            font-weight: bold;
+            font-size: 2.5rem; font-weight: bold;
             border: 4px solid rgba(255,255,255,0.5);
         }
 
@@ -106,195 +104,114 @@
         .profile-role {
             display: inline-block;
             background: rgba(255,255,255,0.2);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            margin-top: 8px;
+            padding: 4px 12px; border-radius: 20px;
+            font-size: 0.9rem; margin-top: 8px;
             backdrop-filter: blur(5px);
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            text-transform: uppercase; letter-spacing: 1px;
         }
 
-        .profile-content {
-            padding: 40px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-        }
-
-        @media (max-width: 768px) {
-            .profile-content { grid-template-columns: 1fr; }
-            .nav-actions { flex-direction: column; gap: 10px; align-items: stretch; }
-            .back-btn, .edit-btn { justify-content: center; }
-        }
+        .profile-content { padding: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+        @media (max-width: 768px) { .profile-content { grid-template-columns: 1fr; } }
 
         .info-group { margin-bottom: 20px; }
         .info-label {
-            display: block;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--text-muted);
-            margin-bottom: 6px;
-            font-weight: 600;
+            display: block; font-size: 0.8rem; text-transform: uppercase;
+            letter-spacing: 0.5px; color: var(--text-muted);
+            margin-bottom: 6px; font-weight: 600;
         }
-        .info-value {
-            font-size: 1.1rem;
-            color: var(--text-color);
-            font-weight: 500;
-            word-break: break-word;
-        }
-        .info-value.empty { color: #b2bec3; font-style: italic; font-size: 1rem; }
+        .info-value { font-size: 1.1rem; color: var(--text-color); font-weight: 500; word-break: break-word; }
+        .info-value.empty { color: #b2bec3; font-style: italic; }
         .full-width { grid-column: 1 / -1; }
 
         .bio-section {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-            margin-top: 10px;
+            background: #f8f9fa; padding: 20px; border-radius: 12px;
+            border: 1px solid var(--border-color); margin-top: 10px;
         }
 
         .status-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            font-weight: 600;
+            display: inline-block; padding: 4px 10px; border-radius: 6px;
+            font-size: 0.9rem; font-weight: 600;
         }
         .status-active { background: #d4edda; color: #155724; }
         .status-inactive { background: #f8d7da; color: #721c24; }
 
         .meta-info {
-            grid-column: 1 / -1;
+            grid-column: 1 / -1; border-top: 1px solid var(--border-color);
+            padding-top: 20px; margin-top: 10px;
+            display: flex; justify-content: space-between;
+            font-size: 0.85rem; color: var(--text-muted);
+        }
+
+        /* Секции форм (Профиль и События) */
+        .form-section {
+            background: #fff;
             border-top: 1px solid var(--border-color);
-            padding-top: 20px;
-            margin-top: 10px;
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.85rem;
-            color: var(--text-muted);
+            padding: 30px 40px;
+            display: none; /* Скрыто по умолчанию */
+            animation: slideDown 0.3s ease-out;
+        }
+        .form-section.active { display: block; }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        /* Modal Styles */
-        .modal-overlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            backdrop-filter: blur(3px);
-        }
-        .modal-overlay.active { display: flex; }
-
-        .modal-content {
-            background: white;
-            padding: 30px;
-            border-radius: 16px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 90vh;
-            overflow-y: auto;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
-            position: relative;
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 15px;
-        }
-        .modal-title { font-size: 1.5rem; font-weight: bold; color: var(--text-color); margin: 0; }
-        .close-modal {
-            background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-muted);
-            transition: color 0.2s;
-        }
-        .close-modal:hover { color: var(--error-color); }
-
-        .form-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-        @media (max-width: 500px) { .form-grid { grid-template-columns: 1fr; } }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
 
         .form-group { margin-bottom: 15px; }
         .form-group.full { grid-column: 1 / -1; }
 
         .form-label {
-            display: block;
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: var(--text-muted);
-            margin-bottom: 5px;
+            display: block; font-size: 0.85rem; font-weight: 600;
+            color: var(--text-muted); margin-bottom: 5px;
         }
         .form-input, .form-textarea, .form-select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 1rem;
-            font-family: inherit;
-            box-sizing: border-box;
-            transition: border-color 0.2s;
+            width: 100%; padding: 10px; border: 1px solid var(--border-color);
+            border-radius: 8px; font-size: 1rem; font-family: inherit;
+            box-sizing: border-box; transition: border-color 0.2s;
         }
         .form-input:focus, .form-textarea:focus, .form-select:focus {
-            outline: none;
-            border-color: var(--primary-color);
+            outline: none; border-color: var(--primary-color);
             box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1);
         }
         .form-textarea { resize: vertical; min-height: 80px; }
 
-        .form-actions {
-            margin-top: 20px;
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
+        .form-actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; }
 
-        .btn-submit {
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
+        /* Управление событиями */
+        .events-manager {
+            border-top: 1px solid var(--border-color);
+            padding: 30px 40px;
+            background: #fafafa;
         }
-        .btn-submit:hover { background: var(--primary-hover); }
-        .btn-submit:disabled { background: #ccc; cursor: not-allowed; }
-
-        .btn-cancel {
-            background: #f1f2f6;
-            color: var(--text-color);
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .tab-btn {
+            background: none; border: none; padding: 8px 16px;
+            font-weight: 600; color: var(--text-muted); cursor: pointer;
+            border-radius: 6px 6px 0 0; transition: all 0.2s;
         }
-        .btn-cancel:hover { background: #dfe4ea; }
+        .tab-btn.active {
+            color: var(--primary-color);
+            background: #fff0f0;
+            border-bottom: 2px solid var(--primary-color);
+            margin-bottom: -12px;
+        }
+        .event-list-item {
+            background: white; border: 1px solid var(--border-color);
+            padding: 15px; border-radius: 8px; margin-bottom: 10px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .event-list-info h4 { margin: 0 0 5px 0; font-size: 1.1rem; }
+        .event-list-info p { margin: 0; font-size: 0.9rem; color: var(--text-muted); }
 
         .notification {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 15px 25px;
-            border-radius: 8px;
-            color: white;
-            font-weight: 600;
+            position: fixed; top: 20px; right: 20px; padding: 15px 25px;
+            border-radius: 8px; color: white; font-weight: 600;
             box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-            transform: translateY(-100px);
-            opacity: 0;
-            transition: all 0.3s ease;
-            z-index: 2000;
+            transform: translateY(-100px); opacity: 0;
+            transition: all 0.3s ease; z-index: 2000;
         }
         .notification.show { transform: translateY(0); opacity: 1; }
         .notification.success { background: var(--success-color); }
@@ -304,24 +221,18 @@
 </head>
 <body>
 
-    <!-- Уведомления -->
     <div id="notification" class="notification"></div>
 
     <!-- Навигация -->
     <div class="nav-actions">
-        <a href="{{ url_for('main') }}" class="back-btn">
-            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M19 12H5m7 7l-7-7 7-7"></path>
-            </svg>
+        <a href="{{ url_for('main') }}" class="btn btn-back">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 12H5m7 7l-7-7 7-7"></path></svg>
             На главную
         </a>
 
         {% if current_user.id == user.id %}
-        <button onclick="openEditModal()" class="edit-btn">
-            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
+        <button onclick="toggleProfileForm()" class="btn btn-edit" id="toggleProfileBtn">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
             Редактировать профиль
         </button>
         {% endif %}
@@ -330,9 +241,7 @@
     <!-- Карточка профиля -->
     <div class="container">
         <div class="profile-header">
-            <div class="avatar-placeholder">
-                {{ user.fullname[0] | upper if user.fullname else '?' }}
-            </div>
+            <div class="avatar-placeholder">{{ user.fullname[0] | upper if user.fullname else '?' }}</div>
             <h1 class="profile-name">{{ user.fullname }}</h1>
             <span class="profile-role">{{ user.role }}</span>
         </div>
@@ -340,22 +249,9 @@
         <div class="profile-content">
             <!-- Левая колонка -->
             <div>
-                <div class="info-group">
-                    <span class="info-label">Email</span>
-                    <div class="info-value">{{ user.email }}</div>
-                </div>
-                <div class="info-group">
-                    <span class="info-label">Телефон</span>
-                    <div class="info-value {% if not user.phone %}empty{% endif %}">
-                        {{ user.phone if user.phone else 'Не указан' }}
-                    </div>
-                </div>
-                <div class="info-group">
-                    <span class="info-label">Дата рождения</span>
-                    <div class="info-value {% if not user.bday %}empty{% endif %}">
-                        {{ user.bday if user.bday else 'Не указана' }}
-                    </div>
-                </div>
+                <div class="info-group"><span class="info-label">Email</span><div class="info-value">{{ user.email }}</div></div>
+                <div class="info-group"><span class="info-label">Телефон</span><div class="info-value {% if not user.phone %}empty{% endif %}">{{ user.phone if user.phone else 'Не указан' }}</div></div>
+                <div class="info-group"><span class="info-label">Дата рождения</span><div class="info-value {% if not user.bday %}empty{% endif %}">{{ user.bday if user.bday else 'Не указана' }}</div></div>
                 <div class="info-group">
                     <span class="info-label">Пол</span>
                     <div class="info-value">
@@ -365,192 +261,380 @@
                     </div>
                 </div>
             </div>
-
             <!-- Правая колонка -->
             <div>
+                <div class="info-group"><span class="info-label">Регион</span><div class="info-value {% if not user.region %}empty{% endif %}">{{ user.region if user.region else 'Не указан' }}</div></div>
+                <div class="info-group"><span class="info-label">Статус</span><div class="info-value {% if not user.status %}empty{% endif %}">{{ user.status if user.status else 'Не задан' }}</div></div>
                 <div class="info-group">
-                    <span class="info-label">Регион</span>
-                    <div class="info-value {% if not user.region %}empty{% endif %}">
-                        {{ user.region if user.region else 'Не указан' }}
-                    </div>
-                </div>
-                <div class="info-group">
-                    <span class="info-label">Статус (текстовый)</span>
-                    <div class="info-value {% if not user.status %}empty{% endif %}">
-                        {{ user.status if user.status else 'Не задан' }}
-                    </div>
-                </div>
-                <div class="info-group">
-                    <span class="info-label">Статус аккаунта</span>
+                    <span class="info-label">Аккаунт</span>
                     <div class="info-value">
                         <span class="status-badge {% if user.isActive %}status-active{% else %}status-inactive{% endif %}">
                             {% if user.isActive %}Активен{% else %}Заблокирован{% endif %}
                         </span>
                     </div>
                 </div>
-                <div class="info-group">
-                    <span class="info-label">ID Пользователя</span>
-                    <div class="info-value" style="font-family: monospace; font-size: 0.9rem; color: #888;">{{ user.id }}</div>
-                </div>
+                <div class="info-group"><span class="info-label">ID</span><div class="info-value" style="font-family: monospace; font-size: 0.9rem; color: #888;">{{ user.id }}</div></div>
             </div>
-
-            <!-- Биография -->
+            <!-- Био -->
             <div class="full-width bio-section">
-                <span class="info-label">О себе (Bio)</span>
-                <div class="info-value" style="line-height: 1.6;">
-                    {{ user.bio if user.bio else 'Пользователь не заполнил информацию о себе.' }}
-                </div>
+                <span class="info-label">О себе</span>
+                <div class="info-value" style="line-height: 1.6;">{{ user.bio if user.bio else 'Нет информации.' }}</div>
             </div>
-
-            <!-- Мета-информация -->
+            <!-- Мета -->
             <div class="meta-info">
-                <span>Зарегистрирован: {{ user.createdAt if user.createdAt else 'Неизвестно' }}</span>
-                {% if user.updatedAt %}
-                    <span>Обновлено: {{ user.updatedAt }}</span>
-                {% endif %}
+                <span>Зарегистрирован: {{ user.createdAt if user.createdAt else 'Н/Д' }}</span>
             </div>
         </div>
-    </div>
 
-    <!-- Модальное окно редактирования -->
-    <div id="editModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Редактирование профиля</h2>
-                <button onclick="closeEditModal()" class="close-modal">&times;</button>
-            </div>
-
-            <form id="editForm" onsubmit="submitEdit(event)">
+        <!-- ФОРМА РЕДАКТИРОВАНИЯ ПРОФИЛЯ (Встроена, не модальная) -->
+        {% if current_user.id == user.id %}
+        <div id="profileFormSection" class="form-section">
+            <h3 style="margin-top:0;">Изменение данных профиля</h3>
+            <form id="profileForm" onsubmit="submitProfileEdit(event)">
                 <div class="form-grid">
                     <div class="form-group full">
                         <label class="form-label">ФИО</label>
-                        <input type="text" name="fullName" id="edit_fullname" class="form-input" required value="{{ user.fullname }}">
+                        <input type="text" name="fullName" class="form-input" required value="{{ user.fullname }}">
                     </div>
-
                     <div class="form-group full">
                         <label class="form-label">Email</label>
-                        <input type="email" name="email" id="edit_email" class="form-input" required value="{{ user.email }}">
+                        <input type="email" name="email" class="form-input" required value="{{ user.email }}">
                     </div>
-
                     <div class="form-group">
-                        <label class="form-label">Пароль</label>
-                        <input type="password" name="password" id="edit_password" class="form-input" placeholder="Оставьте пустым, чтобы не менять">
+                        <label class="form-label">Пароль (оставьте пустым, чтобы не менять)</label>
+                        <input type="password" name="password" class="form-input" placeholder="Новый пароль">
                     </div>
-
                     <div class="form-group">
                         <label class="form-label">Телефон</label>
-                        <input type="text" name="phone" id="edit_phone" class="form-input" value="{{ user.phone if user.phone else '' }}">
+                        <input type="text" name="phone" class="form-input" value="{{ user.phone if user.phone else '' }}">
                     </div>
-
                     <div class="form-group">
-                        <label class="form-label">Дата рождения</label>
-                        <input type="text" name="bday" id="edit_bday" class="form-input" value="{{ user.bday if user.bday else '' }}" placeholder="YYYY-MM-DD">
+                        <label class="form-label">Дата рождения (YYYY-MM-DD)</label>
+                        <input type="text" name="bday" class="form-input" value="{{ user.bday if user.bday else '' }}" placeholder="2000-01-01">
                     </div>
-
                     <div class="form-group">
                         <label class="form-label">Пол</label>
-                        <select name="gender" id="edit_gender" class="form-select">
-                            {% set current_gender = user.gender if user.gender else '' %}
-
-                            <option value="" {% if current_gender=='' %}selected{% endif %}>Не указан</option>
-                            <option value="male" {% if current_gender=='male' %}selected{% endif %}>Мужской</option>
-                            <option value="female" {% if current_gender=='female' %}selected{% endif %}>Женский</option>
+                        {% set current_gender = user.gender if user.gender else '' %}
+                        <select name="gender" class="form-select">
+                            <option value="" {% if current_gender =='' %}selected{% endif %}>Не указан</option>
+                            <option value="male" {% if current_gender =='male' %}selected{% endif %}>Мужской</option>
+                            <option value="female" {% if current_gender =='female' %}selected{% endif %}>Женский</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Регион</label>
-                        <input type="text" name="region" id="edit_region" class="form-input" value="{{ user.region if user.region else '' }}">
+                        <input type="text" name="region" class="form-input" value="{{ user.region if user.region else '' }}">
                     </div>
-
                     <div class="form-group">
-                        <label class="form-label">Статус</label>
-                        <input type="text" name="status" id="edit_status" class="form-input" value="{{ user.status if user.status else '' }}">
+                        <label class="form-label">Статус (текст)</label>
+                        <input type="text" name="status" class="form-input" value="{{ user.status if user.status else '' }}">
                     </div>
-
                     <div class="form-group full">
-                        <label class="form-label">О себе (Bio)</label>
-                        <textarea name="bio" id="edit_bio" class="form-textarea">{{ user.bio if user.bio else '' }}</textarea>
+                        <label class="form-label">О себе</label>
+                        <textarea name="bio" class="form-textarea">{{ user.bio if user.bio else '' }}</textarea>
                     </div>
                 </div>
-
                 <div class="form-actions">
-                    <button type="button" onclick="closeEditModal()" class="btn-cancel">Отмена</button>
-                    <button type="submit" id="submitBtn" class="btn-submit">Сохранить изменения</button>
+                    <button type="button" onclick="toggleProfileForm()" class="btn btn-cancel">Отмена</button>
+                    <button type="submit" class="btn btn-save">Сохранить</button>
                 </div>
             </form>
         </div>
+        {% endif %}
+
+        <!-- МЕНЕДЖЕР СОБЫТИЙ (Добавление и Редактирование) -->
+        {% if current_user.id == user.id or current_user.role == 'ADMIN' %}
+        <div class="events-manager">
+            <h3 style="margin-top:0;">Управление событиями</h3>
+
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchEventTab('create')">Создать событие</button>
+                <button class="tab-btn" onclick="switchEventTab('edit')">Редактировать существующее</button>
+            </div>
+
+            <!-- Вкладка: Создание -->
+            <div id="createEventTab" class="event-tab-content">
+                <form id="createEventForm" onsubmit="submitCreateEvent(event)">
+                    <div class="form-grid">
+                        <div class="form-group full">
+                            <label class="form-label">Название события *</label>
+                            <input type="text" name="name" class="form-input" required placeholder="Например: Олимпиада по математике">
+                        </div>
+                        <div class="form-group full">
+                            <label class="form-label">Место проведения *</label>
+                            <input type="text" name="place" class="form-input" required placeholder="Город, улица, дом">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Мин. класс *</label>
+                            <input type="number" name="min_grade" class="form-input" required min="1" max="11">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Макс. класс *</label>
+                            <input type="number" name="max_grade" class="form-input" required min="1" max="11">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Мин. возраст *</label>
+                            <input type="number" name="min_age" class="form-input" required min="5">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Макс. возраст *</label>
+                            <input type="number" name="max_age" class="form-input" required min="5">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">URL превью</label>
+                            <input type="url" name="preview_picture" class="form-input" placeholder="https://...">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">URL полное фото</label>
+                            <input type="url" name="picture" class="form-input" placeholder="https://...">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-action">Создать событие</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Вкладка: Редактирование -->
+            <div id="editEventTab" class="event-tab-content" style="display:none;">
+                <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:15px;">Выберите событие для редактирования:</p>
+                <div id="userEventsList">
+                    <!-- Сюда JS загрузит список событий пользователя (если бы мы их фильтровали) -->
+                    <!-- Для демонстрации покажем форму, которая ждет ID -->
+                    <div class="form-group full">
+                        <label class="form-label">ID события для редактирования</label>
+                        <input type="text" id="editEventIdInput" class="form-input" placeholder="Вставьте ID события">
+                    </div>
+
+                    <form id="editEventForm" onsubmit="submitEditEvent(event)">
+                        <div class="form-grid">
+                            <div class="form-group full">
+                                <label class="form-label">Название *</label>
+                                <input type="text" name="name" id="edit_name" class="form-input" required>
+                            </div>
+                            <div class="form-group full">
+                                <label class="form-label">Место *</label>
+                                <input type="text" name="place" id="edit_place" class="form-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Мин. класс *</label>
+                                <input type="number" name="min_grade" id="edit_min_grade" class="form-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Макс. класс *</label>
+                                <input type="number" name="max_grade" id="edit_max_grade" class="form-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Мин. возраст *</label>
+                                <input type="number" name="min_age" id="edit_min_age" class="form-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Макс. возраст *</label>
+                                <input type="number" name="max_age" id="edit_max_age" class="form-input" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">URL превью</label>
+                                <input type="url" name="preview_picture" id="edit_preview_picture" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">URL полное фото</label>
+                                <input type="url" name="picture" id="edit_picture" class="form-input">
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-save">Обновить событие</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
     </div>
 
     <script>
-        const modal = document.getElementById('editModal');
-        const notification = document.getElementById('notification');
-        const submitBtn = document.getElementById('submitBtn');
         const userId = "{{ user.id }}";
+        const notification = document.getElementById('notification');
 
-        function openEditModal() {
-            modal.classList.add('active');
-            document.body.style.overflow = 'hidden'; // Блокируем прокрутку фона
-        }
-
-        function closeEditModal() {
-            modal.classList.remove('active');
-            document.body.style.overflow = '';
-        }
-
-        // Закрытие по клику вне окна
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) closeEditModal();
-        });
-
+        // --- Уведомления ---
         function showNotification(message, type) {
             notification.textContent = message;
             notification.className = `notification ${type} show`;
-            setTimeout(() => {
-                notification.classList.remove('show');
-            }, 3000);
+            setTimeout(() => notification.classList.remove('show'), 3000);
         }
 
-        async function submitEdit(event) {
-            event.preventDefault();
+        // --- Профиль: Показать/Скрыть форму ---
+        function toggleProfileForm() {
+            const section = document.getElementById('profileFormSection');
+            const btn = document.getElementById('toggleProfileBtn');
+            const isActive = section.classList.contains('active');
 
-            // Блокируем кнопку во время отправки
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Сохранение...';
+            if (isActive) {
+                section.classList.remove('active');
+                btn.innerHTML = `<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg> Редактировать профиль`;
+            } else {
+                section.classList.add('active');
+                btn.innerHTML = `Скрыть форму`;
+                // Прокрутка к форме
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
 
-            const formData = new FormData(event.target);
+        // --- Профиль: Отправка ---
+        async function submitProfileEdit(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
 
-            // Логика удаления пустых/дефолтных значений, если нужно, но бэкенд сам обрабатывает 'null'
-            // В вашем бэкенде есть проверка: if value is 'null': del data[key]
-            // Убедимся, что пустые поля не отправляются как строки, если мы хотим их игнорировать,
-            // но так как у нас есть дефолтные значения в HTML, отправляем всё явно.
-            // Бэкенд сам решит, что обновлять.
+            // Блокировка кнопки
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'Сохранение...';
 
             try {
-                const response = await fetch(`/user/${userId}/edit_info`, {
+                const res = await fetch(`/user/${userId}/edit_info`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(data)
                 });
+                const result = await res.json();
 
-                const result = await response.json();
-
-                if (response.ok && result.status === 'success') {
-                    showNotification('Профиль успешно обновлен!', 'success');
-                    setTimeout(() => {
-                        window.location.reload(); // Перезагружаем страницу, чтобы увидеть изменения
-                    }, 1000);
+                if (res.ok && result.status === 'success') {
+                    showNotification('Профиль обновлен!', 'success');
+                    setTimeout(() => window.location.reload(), 1000);
                 } else {
-                    throw new Error(result.hint || 'Ошибка при сохранении');
+                    throw new Error(result.hint || 'Ошибка сохранения');
                 }
+            } catch (err) {
+                showNotification(err.message, 'error');
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        }
 
-            } catch (error) {
-                console.error(error);
-                showNotification(error.message || 'Произошла ошибка сервера', 'error');
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Сохранить изменения';
+        // --- События: Переключение вкладок ---
+        function switchEventTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.event-tab-content').forEach(c => c.style.display = 'none');
+
+            if (tabName === 'create') {
+                document.querySelectorAll('.tab-btn')[0].classList.add('active');
+                document.getElementById('createEventTab').style.display = 'block';
+            } else {
+                document.querySelectorAll('.tab-btn')[1].classList.add('active');
+                document.getElementById('editEventTab').style.display = 'block';
+            }
+        }
+
+        // --- События: Создание ---
+        async function submitCreateEvent(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+
+            // Преобразуем числа, так как input type="number" возвращает строки, а БД ждет int
+            ['min_grade', 'max_grade', 'min_age', 'max_age'].forEach(key => {
+                if(data[key]) data[key] = parseInt(data[key]);
+            });
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.innerText = 'Создание...';
+
+            try {
+                const res = await fetch(`/user/${userId}/add_event`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+
+                if (res.ok) {
+                    showNotification('Событие создано!', 'success');
+                    e.target.reset();
+                    // Можно переключить на вкладку редактирования или просто очистить
+                } else {
+                    throw new Error(result.hint || 'Ошибка создания');
+                }
+            } catch (err) {
+                showNotification(err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Создать событие';
+            }
+        }
+
+        // --- События: Заполнение формы редактирования (Имитация) ---
+        // В реальном проекте здесь был бы fetch для получения данных события по ID
+        document.getElementById('editEventIdInput').addEventListener('change', async function() {
+            const eventId = this.value.trim();
+            if (!eventId) return;
+
+            // Попытка получить данные события (используем тот же эндпоинт, что и для просмотра)
+            try {
+                // Примечание: этот запрос может потребовать авторизации, которая уже есть
+                const res = await fetch(`/event/${eventId}`);
+                if (res.ok) {
+                    // Парсим HTML ответ, чтобы вытащить данные, или лучше сделать отдельный API endpoint для JSON
+                    // Так как у нас только HTML рендеринг для GET, пользователю придется ввести данные вручную
+                    // ИЛИ мы можем попробовать спарсить страницу (не рекомендуется в продакшене).
+
+                    // ДЛЯ УПРОЩЕНИЯ: Просто сообщим пользователю, что нужно ввести данные вручную,
+                    // либо предположим, что он знает данные.
+                    // В идеале нужен endpoint /api/event/<id> возвращающий JSON.
+
+                    showNotification(`ID установлен: ${eventId}. Заполните поля ниже вручную (API для получения JSON отсутствует).`, 'success');
+                    document.getElementById('editEventForm').dataset.eventId = eventId;
+                } else {
+                    showNotification('Событие не найдено', 'error');
+                }
+            } catch (e) {
+                showNotification('Ошибка сети', 'error');
+            }
+        });
+
+        // --- События: Редактирование ---
+        async function submitEditEvent(e) {
+            e.preventDefault();
+            const form = e.target;
+            const eventId = form.dataset.eventId || document.getElementById('editEventIdInput').value.trim();
+
+            if (!eventId) {
+                showNotification('Введите ID события', 'error');
+                return;
+            }
+
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            ['min_grade', 'max_grade', 'min_age', 'max_age'].forEach(key => {
+                if(data[key]) data[key] = parseInt(data[key]);
+            });
+
+            const btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.innerText = 'Обновление...';
+
+            try {
+                // Путь соответствует вашему main.py: /user/<user_id>/<event_id>/edit_event
+                const res = await fetch(`/user/${userId}/${eventId}/edit_event`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+
+                if (res.ok && result.status === 'success') {
+                    showNotification('Событие обновлено!', 'success');
+                    setTimeout(() => window.location.href = result.redirect || `/event/${eventId}`, 1000);
+                } else {
+                    throw new Error(result.hint || 'Ошибка обновления');
+                }
+            } catch (err) {
+                showNotification(err.message, 'error');
+                btn.disabled = false;
+                btn.innerText = 'Обновить событие';
             }
         }
     </script>

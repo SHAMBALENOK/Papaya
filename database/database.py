@@ -214,5 +214,17 @@ def show_random_events(quantity: int):
             id += '1'
         return session.query(Events).filter(Events.isActive == True).limit(quantity).all()
 
+def edit_event(event_id:str, ins:dict):
+    with Session() as session:
+        now = datetime.now(timezone.utc)
+        formatted_time = now.isoformat().split('.')[0] + 'Z'
+        event = session.query(Events).filter(Events.id == event_id).first()
+        for key, value in ins.items():
+            setattr(event, key, value)
+        event.updatedAt = formatted_time
+        session.commit()
+        session.refresh(event)
+        return event
+
 def close_session():
     Session.remove()
