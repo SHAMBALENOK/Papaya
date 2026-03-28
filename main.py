@@ -187,7 +187,7 @@ def logout():
 @app.route('/', methods=['GET'])
 @login_required
 def main():
-    random_events = db.show_random_events(5)
+    random_events = db.show_random_events(2)
 
     return render_template(
         'main.html',
@@ -290,11 +290,7 @@ def add_event(user_id):
             logger.error(f"Произошла ошибка при регистрации: {e}", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
-        if data.get('name', 'null').strip()=='null':
-            logger.debug(f"имя не прошло проверку", exc_info=True)
-            return jsonify({'status': 'badRequest',
-                            'hint': 'Неверное имя'}), 400
-        idd = str(uuid.uuid5(user_namespace, data.get('name', 'null').strip()))
+        idd = str(uuid.uuid4())
         ins={
                 'id': idd,
                 'name': data.get('name', 'null').strip(),
@@ -316,6 +312,10 @@ def add_event(user_id):
                                     'hint': f'Неверное {key}'}), 400
 
         db.add_event(ins)
+        return jsonify({
+            'status': 'success',
+            'redirect': url_for('event_details', event_id=idd)
+        }), 200
 
     except Exception as e:
         logger.error(f"Произошла ошибка {e}", exc_info=True)
@@ -329,7 +329,7 @@ def add_event(user_id):
 @login_required
 def event_edit_details(event_id):
     try:
-        event = db.find_user_by_id(event_id)
+        event = db.find_event_by_id(event_id)
         if not event:
             logger.error(f"Произошла ошибка при воспроизведении информации о событии", exc_info=True)
             return jsonify({
@@ -372,7 +372,7 @@ def event_edit_details(event_id):
         db.edit_event(event_id, clean_data)
         return jsonify({
             'status': 'success',
-            'redirect': url_for('eventdetails', event_id=event_id)
+            'redirect': url_for('event_details', event_id=event_id)
         }), 200
 
     except Exception as e:

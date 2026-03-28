@@ -184,6 +184,10 @@ def find_event_by_id(event_id: str):
         return session.query(Events).filter(Events.id == event_id).first()
 
 def show_random_events(quantity: int):
+    with Session() as session:
+        return session.query(Events).filter(Events.isActive == True).limit(quantity).all()
+
+def show_and_create_random_events(quantity: int):
     id = os.getenv('INIT_EVENT_ID', '111')
     name = os.getenv('INIT_EVENT_NAME', 'my_events')
     place = os.getenv('INIT_EVENT_PLACE', 'my_place')
