@@ -452,20 +452,17 @@
 
     </div>
 
-        <script>
+    <script>
         const userId = "{{ user.id }}";
         const notification = document.getElementById('notification');
 
         // --- Утилиты ---
-
-        // Функция показа уведомлений
         function showNotification(message, type) {
             notification.textContent = message;
             notification.className = `notification ${type} show`;
             setTimeout(() => notification.classList.remove('show'), 4000);
         }
 
-        // Универсальная функция отправки JSON запросов с обработкой ошибок
         async function sendJsonRequest(url, data) {
             try {
                 const response = await fetch(url, {
@@ -474,7 +471,6 @@
                     body: JSON.stringify(data)
                 });
 
-                // Читаем ответ как текст сначала, чтобы избежать ошибки парсинга HTML
                 const text = await response.text();
                 let result;
 
@@ -482,7 +478,7 @@
                     result = JSON.parse(text);
                 } catch (e) {
                     console.error("Сервер вернул не JSON:", text);
-                    throw new Error(`Сервер вернул ошибку (HTML вместо JSON). Статус: ${response.status}. Проверьте консоль (F12).`);
+                    throw new Error(`Сервер вернул ошибку (HTML). Статус: ${response.status}. Проверьте консоль.`);
                 }
 
                 if (!response.ok) {
@@ -518,12 +514,11 @@
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
 
-            // Подготовка данных (имена полей должны совпадать с main.py)
             const payload = {
                 email: data.email,
-                password: data.password || '', // Пустой пароль игнорируется на бэкенде если есть проверка
-                fullName: data.fullName,       // Важно: camelCase как в main.py
-                gender: data.gender,           // Без пробелов
+                password: data.password || '',
+                fullName: data.fullName,
+                gender: data.gender,
                 bday: data.bday,
                 bio: data.bio,
                 phone: data.phone,
@@ -538,12 +533,11 @@
 
             try {
                 const result = await sendJsonRequest(`/user/${userId}/edit_info`, payload);
-
                 if (result.status === 'success') {
-                    showNotification('Профиль успешно обновлен!', 'success');
+                    showNotification('Профиль обновлен!', 'success');
                     setTimeout(() => window.location.reload(), 1000);
                 } else {
-                    throw new Error(result.hint || 'Неизвестная ошибка');
+                    throw new Error(result.hint || 'Ошибка');
                 }
             } catch (err) {
                 showNotification(err.message, 'error');
@@ -573,7 +567,6 @@
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
 
-            // Преобразование чисел и подготовка payload
             const payload = {
                 name: data.name,
                 place: data.place,
@@ -585,7 +578,6 @@
                 picture: data.picture || null
             };
 
-            // Валидация чисел
             if ([payload.min_grade, payload.max_grade, payload.min_age, payload.max_age].some(isNaN)) {
                 showNotification('Поля классов и возраста должны быть числами', 'error');
                 return;
@@ -598,11 +590,9 @@
 
             try {
                 const result = await sendJsonRequest(`/user/${userId}/add_event`, payload);
-
                 if (result.status === 'success' || result.status === 'Created') {
-                    showNotification('Событие успешно создано!', 'success');
+                    showNotification('Событие создано!', 'success');
                     e.target.reset();
-                    // Опционально: переключить на вкладку редактирования или показать ID
                     if (result.id) {
                         document.getElementById('editEventIdInput').value = result.id;
                         switchEventTab('edit');
@@ -618,69 +608,56 @@
             }
         }
 
-        // --- События: Загрузка данных для редактирования ---
-        // Так как у нас нет отдельного API для получения JSON события,
-        // мы просто проверяем существование ID и позволяем пользователю ввести данные вручную,
-        // либо (в идеале) нужно добавить эндпоинт /api/event/<id>.
-        // Здесь реализована базовая проверка.
+        // --- События: Проверка ID ---
         document.getElementById('editEventIdInput').addEventListener('change', async function() {
             const eventId = this.value.trim();
             if (!eventId) return;
-
-            const btn = this;
-            btn.style.borderColor = '#ccc';
-
             try {
-                // Пытаемся получить страницу события. Если 200 OK - значит существует.
-                // Мы не можем распарсить HTML легко, поэтому просто подтверждаем существование.
                 const response = await fetch(`/event/${eventId}`);
-
                 if (response.ok) {
-                    showNotification(`Событие ${eventId} найдено. Заполните поля ниже.`, 'success');
-                    btn.style.borderColor = '#00b894';
-                    // Сохраняем ID в dataset формы для отправки
+                    showNotification(`Событие найдено. Заполните поля.`, 'success');
+                    this.style.borderColor = '#00b894';
                     document.getElementById('editEventForm').dataset.eventId = eventId;
-                } else if (response.status === 404) {
-                    showNotification('Событие с таким ID не найдено', 'error');
-                    btn.style.borderColor = '#d63031';
-                    delete document.getElementById('editEventForm').dataset.eventId;
                 } else {
-                    throw new Error('Ошибка проверки');
+                    showNotification('Событие не найдено', 'error');
+                    this.style.borderColor = '#d63031';
+                    delete document.getElementById('editEventForm').dataset.eventId;
                 }
             } catch (err) {
-                showNotification('Ошибка сети при проверке ID', 'error');
-                btn.style.borderColor = '#d63031';
+                showNotification('Ошибка сети', 'error');
+                this.style.borderColor = '#d63031';
             }
         });
 
-        // --- События: Редактирование ---
+        // --- События: Редактирование (ИСПРАВЛЕНО) ---
         async function submitEditEvent(e) {
             e.preventDefault();
             const form = e.target;
-            // Берем ID из dataset (если загрузили) или из инпута
             const eventId = form.dataset.eventId || document.getElementById('editEventIdInput').value.trim();
 
             if (!eventId) {
-                showNotification('Введите или выберите ID события', 'error');
+                showNotification('Введите ID события', 'error');
                 return;
             }
 
             const formData = new FormData(form);
             const data = Object.fromEntries(formData.entries());
 
+            // Формируем данные точно так, как их ждет ваш main.py (с учетом опечаток в ключах, если они там есть)
+            // Но лучше отправлять правильные ключи, а main.py исправить. Здесь отправляем правильные.
             const payload = {
                 name: data.name,
                 place: data.place,
                 min_grade: parseInt(data.min_grade),
-                max_grade: parseInt(data.max_grade), // Исправлено имя ключа
+                max_grade: parseInt(data.max_grade),
                 min_age: parseInt(data.min_age),
                 max_age: parseInt(data.max_age),
-                preview_picture: data.preview_picture || null, // Исправлено имя ключа
+                preview_picture: data.preview_picture || null,
                 picture: data.picture || null
             };
 
             if ([payload.min_grade, payload.max_grade, payload.min_age, payload.max_age].some(isNaN)) {
-                showNotification('Поля классов и возраста должны быть числами', 'error');
+                showNotification('Числовые поля заполнены неверно', 'error');
                 return;
             }
 
@@ -690,8 +667,14 @@
             btn.innerText = 'Обновление...';
 
             try {
-                // URL должен точно соответствовать route в main.py
-                const result = await sendJsonRequest(`/user/${userId}/${eventId}/edit_event`, payload);
+                // ВАЖНО: URL должен содержать И user_id, И event_id, потому что в main.py маршрут:
+                // '/user/<user_id>/<event_id>/edit_event'
+                const url = `/user/${userId}/${eventId}/edit_event`;
+
+                console.log(`Отправка запроса на: ${url}`);
+                console.log(`Данные:`, payload);
+
+                const result = await sendJsonRequest(url, payload);
 
                 if (result.status === 'success') {
                     showNotification('Событие обновлено!', 'success');
@@ -702,6 +685,7 @@
                     throw new Error(result.hint || 'Ошибка обновления');
                 }
             } catch (err) {
+                console.error(err);
                 showNotification(err.message, 'error');
             } finally {
                 btn.disabled = false;

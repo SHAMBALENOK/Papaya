@@ -187,7 +187,7 @@ def logout():
 @app.route('/', methods=['GET'])
 @login_required
 def main():
-    random_events = db.show_random_events(10)
+    random_events = db.show_random_events(2)
 
     return render_template(
         'main.html',
@@ -327,7 +327,7 @@ def add_event(user_id):
 
 @app.route('/user/<user_id>/<event_id>/edit_event', methods=['POST'])
 @login_required
-def event_edit_details(event_id):
+def event_edit_details(event_id, user_id):
     try:
         event = db.find_event_by_id(event_id)
         if not event:
@@ -355,19 +355,6 @@ def event_edit_details(event_id):
         }
 
         clean_data = {k: v for k, v in data.items() if v != 'null'}
-
-        # if not re_check.is_valid_email(clean_data['email']):
-        #     logger.debug(f"email {clean_data['email']} не прошел проверку", exc_info=True)
-        #     return jsonify({'status': 'badRequest',
-        #                     'hint': 'Неверный email'}), 400
-        # if not re_check.is_valid_fullname(clean_data['fullname'])[0]:
-        #     logger.debug(f"имя {clean_data['fullname']} не прошло проверку", exc_info=True)
-        #     return jsonify({'status': 'badRequest',
-        #                     'hint': re_check.is_valid_fullname(clean_data['fullname'])[1]}), 400
-        # if not re_check.is_valid_password(clean_data['password'])[0]:
-        #     logger.debug(f"пароль {clean_data['password']} не прошел проверку", exc_info=True)
-        #     return jsonify({'status': 'badRequest',
-        #                     'hint': re_check.is_valid_password(clean_data['password'])[1]}), 400
 
         db.edit_event(event_id, clean_data)
         return jsonify({
