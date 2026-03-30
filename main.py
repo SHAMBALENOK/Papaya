@@ -345,8 +345,8 @@ def event_edit_details(event_id, user_id):
 
         data = {
             'name': data.get('name', 'null').strip(),
-            'place': data.get('place', 'null'),
-            'min_grade': data.get('min_grade', 'null').strip(),
+            'place': data.get('place', 'null').strip(),
+            'min_grade': data.get('min_grade', 'null'),
             'max_grade': data.get('max_grade', 'null'),
             'min_age': data.get('min_age', 'null'),
             'max_age': data.get('max_age', 'null'),
