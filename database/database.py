@@ -227,7 +227,7 @@ def edit_event(event_id:str, ins:dict):
             setattr(event, key, value)
         event.updatedAt = formatted_time
         session.commit()
-        session.refresh(event)s
+        session.refresh(event)
         return event
 
 
