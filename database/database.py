@@ -227,8 +227,13 @@ def edit_event(event_id:str, ins:dict):
             setattr(event, key, value)
         event.updatedAt = formatted_time
         session.commit()
-        session.refresh(event)
+        session.refresh(event)s
         return event
+
+
+def get_amount_of_events():
+    with Session() as session:
+        return len(session.query(Events).all())
 
 def close_session():
     Session.remove()
