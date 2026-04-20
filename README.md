@@ -4,6 +4,10 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 
+| 🌐 Язык / Language |
+|-------------------|
+| [🇷🇺 Русский](README.md) • [🇬🇧 English](English.md) |
+
 Papaya — это веб-сервис для школьников, где собрана информация о всероссийских и региональных олимпиадах в одном удобном месте. Платформа позволяет регистрироваться, управлять профилем.
 
 Демо-версия проекта доступна по адресу: https://papaya-poxq.onrender.com
