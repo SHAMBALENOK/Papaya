@@ -1,8 +1,10 @@
 import pdf_processing as pdf
 import image_processing as image
 
-def process(pdfname):
-    pdf.cns(pdfname)
-    image.finalize()
+def extract_data(pdfname):
+    quantity = pdf.convert_to_image(pdfname)
+    image.detect_and_extract(pdfname, quantity)
 
-process('example.pdf')
+extract_data('example.pdf')
+
+#TODO: make it universal and add error handling

@@ -9,14 +9,20 @@ def mkdir(path):
   except OSError:
     pass
 
-def cns(file):
+def convert_to_image(path):
   # Open the PDF
-  doc = pymupdf.open(file)
-  # Select a page (0 is the first page)
-  page = doc[0]
-  # Render the page to a pixmap (image)
-  pix = page.get_pixmap(dpi=300)
-  filename = file.split('.')[0]
-  # Save the image
-  pix.save(f"{filename}.png")
+  doc = pymupdf.open(path)
+  num = 0
+  filename = path.split('.')[0]
+  dir = SAVING_PATH+filename+'/images/'
+  mkdir(dir)
+  for i in doc:
+    # Select a page (0 is the first page)
+    # page = doc[num]
+    # Render the page to a pixmap (image)
+    pix = i.get_pixmap(dpi=300)
+    # Save the image
+    pix.save(f"{dir+filename+str(num)}.png")
+    num+=1
   doc.close()
+  return num
