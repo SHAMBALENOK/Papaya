@@ -22,7 +22,9 @@ def convert_to_image(path):
     # Render the page to a pixmap (image)
     pix = i.get_pixmap(dpi=300)
     # Save the image
-    pix.save(f"{dir+filename+str(num)}.png")
+    pix.save(f"{dir+filename}_{str(num)}.png")
     num+=1
   doc.close()
   return num
+
+convert_to_image('example.pdf')
