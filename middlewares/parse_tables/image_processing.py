@@ -15,14 +15,15 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model.to(device)
 
 
-def detect_and_extract(file, quantity):
+def extract_tables(file, quantity):
     filename = file.split('.')[0]
     try:
-        os.makedirs(SCANNING_PATH + f'{filename}/tables')
+        os.makedirs(os.path.join(SCANNING_PATH, filename, 'tables'))
     except FileExistsError:
         pass
+
     for i in range(quantity):
-        # 2. Load the input image
+        # 2. Load the input image (используем ваш формат с нижним подчеркиванием)
         img_path = SCANNING_PATH + filename + '/images/' + filename + f'_{i}.png'
 
         if not os.path.exists(img_path):
@@ -49,36 +50,51 @@ def detect_and_extract(file, quantity):
 
             if label_str == "table":
                 box = box.tolist()
+                # Исправлено: извлекаем конкретные координаты из списка box
                 x_mins.append(box[0])
                 y_mins.append(box[1])
                 x_maxs.append(box[2])
                 y_maxs.append(box[3])
                 high_confidence_score = max(high_confidence_score, score.item())
 
-        # 5. Если таблицы найдены, объединяем их координаты в один общий Box
+        # 5. Если таблицы найдены, объединяем их координаты в один общий Box с защитой колонок
         if x_mins:
-            # Находим крайние точки, чтобы объединить все куски в одно изображение
+            # Находим базовые крайние точки среди всех фрагментов таблицы
             global_xmin = max(0, min(x_mins))
             global_ymin = max(0, min(y_mins))
             global_xmax = min(img.width, max(x_maxs))
             global_ymax = min(img.height, max(y_maxs))
 
-            # Добавим небольшой отступ (padding) в 5 пикселей по краям, чтобы текст не прижимался к границе
-            padding = 5
-            global_xmin = max(0, global_xmin - padding)
-            global_ymin = max(0, global_ymin - padding)
-            global_xmax = min(img.width, global_xmax + padding)
-            global_ymax = min(img.height, global_ymax + padding)
+            # --- АЛГОРИТМ ЗАЩИТЫ ОТ ПОТЕРИ КРАЙНИХ КОЛОНОК ---
+            # Вычисляем ширину найденной области
+            detected_width = global_xmax - global_xmin
+
+            # Если область занимает более 55% ширины листа, значит таблица широкоформатная,
+            # и модель, скорее всего, проигнорировала невидимую левую рамку / скрытые поля.
+            if detected_width > (img.width * 0.55):
+                print(f"[{filename}_{i}.png] Обнаружена полностраничная таблица. Расширяем границы до краев документа.")
+                global_xmin = 0
+                global_xmax = img.width
+            else:
+                # Если таблица занимает лишь часть страницы, даем безопасный боковой отступ в 35 пикселей
+                global_xmin = max(0, global_xmin - 35)
+                global_xmax = min(img.width, global_xmax + 35)
+
+            # Вертикальный отступ (чтобы гарантированно захватить шапку и нижнюю границу)
+            vertical_padding = 20
+            global_ymin = max(0, global_ymin - vertical_padding)
+            global_ymax = min(img.height, global_ymax + vertical_padding)
 
             print(
-                f"[{filename}{i}.png] Объединено фрагментов таблицы. Итоговые координаты: [{global_xmin:.1f}, {global_ymin:.1f}, {global_xmax:.1f}, {global_ymax:.1f}]")
+                f"[{filename}_{i}.png] Объединено фрагментов таблицы. Итоговые координаты: [{global_xmin:.1f}, {global_ymin:.1f}, {global_xmax:.1f}, {global_ymax:.1f}]")
 
             # Вырезаем объединенную таблицу
             cropped_table = img.crop((global_xmin, global_ymin, global_xmax, global_ymax))
 
-            # Сохраняем итоговое изображение
+            # Сохраняем итоговое изображение в вашу целевую папку
             output_filename = f"table_{filename}_{i}.png"
-            cropped_table.save(SCANNING_PATH+f'{filename}/tables/'+output_filename)
-            print(f"Успешно сохранено: {output_filename}")
+            output_path = os.path.join(SCANNING_PATH, filename, 'tables', output_filename)
+            cropped_table.save(output_path)
+            print(f"Успешно сохранено: {output_path}")
         else:
-            print(f"[{filename}{i}.png] Таблицы на изображении не обнаружены.")
+            print(f"[{filename}_{i}.png] Таблицы на изображении не обнаружены.")
