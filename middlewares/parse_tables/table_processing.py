@@ -1,265 +1,329 @@
 import re
+import cv2
+import numpy as np
 from pathlib import Path
-
 import easyocr
 from openpyxl import Workbook
-from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 
 
-# ── Стили ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# ДИАГНОСТИКА
+# ─────────────────────────────────────────────────────────────────────────────
 
-THIN     = Side(style="thin")
-BORDER   = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-HDR_FILL = PatternFill("solid", fgColor="4F81BD")
-HDR_FONT = Font(bold=True, color="FFFFFF", size=11)
-ALT_FILL = PatternFill("solid", fgColor="DCE6F1")
-STD_FILL = PatternFill("solid", fgColor="FFFFFF")
-STD_FONT = Font(size=11)
+def _save_debug_stages(img: np.ndarray, binary: np.ndarray,
+                        h_lines: np.ndarray, v_lines: np.ndarray,
+                        row_ys: list[int], col_xs: list[int],
+                        out_dir: Path) -> None:
+    """Сохраняет промежуточные изображения каждого этапа обработки."""
+    h, w = img.shape[:2]
+
+    # 1. Бинаризованное
+    cv2.imwrite(str(out_dir / "debug_1_binary.png"), binary)
+
+    # 2. Выделенные горизонтальные линии
+    cv2.imwrite(str(out_dir / "debug_2_hlines.png"), h_lines)
+
+    # 3. Выделенные вертикальные линии
+    cv2.imwrite(str(out_dir / "debug_3_vlines.png"), v_lines)
+
+    # 4. Горизонтальная проекция (h_proj) как график
+    h_proj = h_lines.sum(axis=1).astype(float)
+    h_proj_img = np.ones((h, 300), dtype=np.uint8) * 255
+    if h_proj.max() > 0:
+        for y, val in enumerate(h_proj):
+            bar_len = int(val / h_proj.max() * 290)
+            cv2.line(h_proj_img, (0, y), (bar_len, y), 0, 1)
+    cv2.imwrite(str(out_dir / "debug_4_hproj.png"), h_proj_img)
+
+    # 5. Вертикальная проекция (v_proj) как график
+    v_proj = v_lines.sum(axis=0).astype(float)
+    v_proj_img = np.ones((300, w), dtype=np.uint8) * 255
+    if v_proj.max() > 0:
+        for x, val in enumerate(v_proj):
+            bar_len = int(val / v_proj.max() * 290)
+            cv2.line(v_proj_img, (x, 300), (x, 300 - bar_len), 0, 1)
+    cv2.imwrite(str(out_dir / "debug_5_vproj.png"), v_proj_img)
+
+    # 6. Итоговая сетка поверх оригинала
+    grid_img = img.copy()
+    for y in row_ys:
+        cv2.line(grid_img, (0, y), (w, y), (0, 0, 255), 2)
+    for x in col_xs:
+        cv2.line(grid_img, (x, 0), (x, h), (0, 255, 0), 2)
+    cv2.imwrite(str(out_dir / "debug_6_grid.png"), grid_img)
+
+    print(f"\n   [debug] Сохранено в {out_dir}:")
+    print(f"           debug_1_binary.png  — бинаризация")
+    print(f"           debug_2_hlines.png  — горизонтальные линии")
+    print(f"           debug_3_vlines.png  — вертикальные линии")
+    print(f"           debug_4_hproj.png   — проекция по Y")
+    print(f"           debug_5_vproj.png   — проекция по X")
+    print(f"           debug_6_grid.png    — итоговая сетка\n")
 
 
-# ── OCR + кластеризация ──────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Склейка
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_rows_from_image(
-    img_path: Path,
-    reader: easyocr.Reader,
-    row_tolerance: int = 15,
-) -> list[list[str]]:
+def _merge_images(img_paths: list[Path]) -> np.ndarray:
+    """Склеивает PNG вертикально, приводя к одинаковой ширине."""
+    images = [cv2.imread(str(p)) for p in img_paths]
+    images = [img for img in images if img is not None]
+    if not images:
+        raise ValueError("Не удалось загрузить ни одного изображения.")
+
+    max_w = max(img.shape[1] for img in images)
+    resized = []
+    for img in images:
+        h, w = img.shape[:2]
+        if w != max_w:
+            img = cv2.resize(
+                img, (max_w, int(h * max_w / w)),
+                interpolation=cv2.INTER_AREA,
+            )
+        resized.append(img)
+
+    return np.vstack(resized)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. Детекция сетки
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _detect_table_grid(
+    img: np.ndarray,
+    debug_dir: Path | None = None,
+) -> tuple[list[int], list[int]]:
     """
-    Распознаёт текст на изображении и группирует слова в строки и столбцы.
+    Детектирует линии таблицы.
 
-    Args:
-        img_path:       Путь к PNG-файлу.
-        reader:         Инициализированный EasyOCR Reader.
-        row_tolerance:  Допуск по Y (px) для объединения слов в одну строку.
-
-    Returns:
-        Двумерный список: строки × столбцы.
+    Стратегия:
+      - Адаптивная бинаризация (устойчива к фону любого цвета)
+      - Отдельные ядра для H и V линий с размерами,
+        не зависящими от полной высоты склеенного изображения
+      - После проекции — подавление ложных пиков через медианный фильтр
     """
-    # EasyOCR возвращает: [(bbox, text, confidence), ...]
-    # bbox = [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-    raw_results = reader.readtext(
-        str(img_path),
-        detail=1,
-        paragraph=False,
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Адаптивная бинаризация: локальный порог в окне 15×15
+    binary = cv2.adaptiveThreshold(
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        15, 4,
     )
 
-    # Фильтруем: только уверенные и непустые
-    words = []
-    for bbox, text, conf in raw_results:
-        text = text.strip()
-        if not text or conf < 0.25:
-            continue
-        # Средняя Y-координата (центр слова по вертикали)
-        y_center = sum(pt[1] for pt in bbox) / len(bbox)
-        # Левая X-координата
-        x_left = min(pt[0] for pt in bbox)
-        # Правая X-координата
-        x_right = max(pt[0] for pt in bbox)
-        words.append({
-            "text":    text,
-            "y":       y_center,
-            "x_left":  x_left,
-            "x_right": x_right,
-        })
+    h, w = binary.shape
 
-    if not words:
-        return []
+    # ── Горизонтальные линии ──────────────────────────────────────────────
+    # Длина ядра = 40% ширины (достаточно для сплошной линии через всю таблицу)
+    h_len = max(int(w * 0.4), 30)
+    hk    = cv2.getStructuringElement(cv2.MORPH_RECT, (h_len, 1))
+    h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, hk, iterations=1)
 
-    # ── 1. Кластеризация по Y → строки ───────────────────────────────────────
-    words.sort(key=lambda w: w["y"])
+    # ── Вертикальные линии ────────────────────────────────────────────────
+    # Фиксированная высота ядра = 30 px — не зависит от высоты склейки
+    # Это позволяет находить вертикальные сегменты внутри каждого фрагмента
+    v_len = 30
+    vk    = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_len))
+    v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vk, iterations=1)
 
-    rows: list[list[dict]] = []
-    current_row: list[dict] = [words[0]]
-    row_y = words[0]["y"]
-
-    for word in words[1:]:
-        if abs(word["y"] - row_y) <= row_tolerance:
-            current_row.append(word)
-        else:
-            rows.append(current_row)
-            current_row = [word]
-            row_y = word["y"]
-    rows.append(current_row)
-
-    # Сортируем слова внутри каждой строки по X
-    for row in rows:
-        row.sort(key=lambda w: w["x_left"])
-
-    # ── 2. Определение столбцов ──────────────────────────────────────────────
-    # Находим глобальные X-границы всех слов для определения колонок
-    # Используем самую длинную строку как референс
-    ref_row = max(rows, key=len)
-    n_cols = len(ref_row)
-
-    if n_cols == 0:
-        return []
-
-    # Центры столбцов из референсной строки
-    col_centers = [
-        (w["x_left"] + w["x_right"]) / 2 for w in ref_row
-    ]
-
-    def assign_col(word: dict) -> int:
-        """Назначает слово ближайшему столбцу по X-координате."""
-        word_center = (word["x_left"] + word["x_right"]) / 2
-        return min(range(n_cols), key=lambda c: abs(word_center - col_centers[c]))
-
-    # ── 3. Сборка таблицы ────────────────────────────────────────────────────
-    table: list[list[str]] = []
-    for row_words in rows:
-        cells = [""] * n_cols
-        for word in row_words:
-            col = assign_col(word)
-            if cells[col]:
-                cells[col] += " " + word["text"]
+    # ── Проекция → пики ───────────────────────────────────────────────────
+    def _find_peaks(proj: np.ndarray, min_gap: int, rel_thresh: float) -> list[int]:
+        """Находит позиции пиков в проекции."""
+        if proj.max() == 0:
+            return []
+        thresh    = proj.max() * rel_thresh
+        positions = np.where(proj > thresh)[0].tolist()
+        if not positions:
+            return []
+        groups, cur = [], [positions[0]]
+        for p in positions[1:]:
+            if p - cur[-1] <= min_gap:
+                cur.append(p)
             else:
-                cells[col] = word["text"]
-        table.append(cells)
+                groups.append(cur)
+                cur = [p]
+        groups.append(cur)
+        return [int(np.mean(g)) for g in groups]
 
-    return table
+    h_proj = h_lines.sum(axis=1).astype(float)
+    v_proj = v_lines.sum(axis=0).astype(float)
 
+    row_ys = _find_peaks(h_proj, min_gap=6,  rel_thresh=0.25)
+    col_xs = _find_peaks(v_proj, min_gap=6,  rel_thresh=0.10)
 
-# ── Запись в Excel ───────────────────────────────────────────────────────────
+    # ── Фильтрация: убираем линии слишком близко к краям ─────────────────
+    margin = 5
+    row_ys = [y for y in row_ys if margin < y < h - margin]
+    col_xs = [x for x in col_xs if margin < x < w - margin]
 
-def _write_table_to_sheet(
-    ws,
-    all_rows: list[list[str]],
-    has_header: bool = True,
-) -> None:
-    """Записывает единую таблицу на лист Excel со стилями."""
-    if not all_rows:
-        ws.cell(row=1, column=1, value="Таблиц не обнаружено")
-        return
+    # ── Debug ─────────────────────────────────────────────────────────────
+    if debug_dir is not None:
+        _save_debug_stages(img, binary, h_lines, v_lines, row_ys, col_xs, debug_dir)
 
-    n_cols = max(len(row) for row in all_rows)
-
-    for row_idx, row_data in enumerate(all_rows):
-        excel_row = row_idx + 1
-        is_header = has_header and row_idx == 0
-        is_alt    = (not is_header) and (row_idx % 2 == 0)
-
-        for col_idx in range(n_cols):
-            value = row_data[col_idx] if col_idx < len(row_data) else ""
-            cell  = ws.cell(row=excel_row, column=col_idx + 1, value=value)
-
-            cell.border    = BORDER
-            cell.alignment = Alignment(
-                wrap_text=True,
-                vertical="center",
-                horizontal="center" if is_header else "left",
-            )
-
-            if is_header:
-                cell.fill = HDR_FILL
-                cell.font = HDR_FONT
-            elif is_alt:
-                cell.fill = ALT_FILL
-                cell.font = STD_FONT
-            else:
-                cell.fill = STD_FILL
-                cell.font = STD_FONT
-
-        ws.row_dimensions[excel_row].height = 18
-
-    # Авто-ширина столбцов
-    for col_idx in range(1, n_cols + 1):
-        max_len = max(
-            (len(str(row[col_idx - 1]))
-             for row in all_rows if col_idx - 1 < len(row)),
-            default=8,
-        )
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 60)
+    return row_ys, col_xs
 
 
-# ── Основная функция ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Ячейки
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_cells(
+    row_ys: list[int],
+    col_xs: list[int],
+) -> list[list[tuple[int, int, int, int]]]:
+    """Строит сетку ячеек (x0, y0, x1, y1) из линий."""
+    cells = []
+    for i in range(len(row_ys) - 1):
+        row = []
+        for j in range(len(col_xs) - 1):
+            row.append((col_xs[j], row_ys[i], col_xs[j + 1], row_ys[i + 1]))
+        cells.append(row)
+    return cells
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. OCR ячейки
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ocr_cell(
+    img: np.ndarray,
+    x0: int, y0: int,
+    x1: int, y1: int,
+    reader: easyocr.Reader,
+    padding: int = 4,
+) -> str:
+    """
+    Вырезает ячейку и распознаёт текст.
+    Если обычный проход пустой — пробует повёрнутое изображение
+    (для вертикального текста в шапке).
+    """
+    H, W = img.shape[:2]
+    cx0, cy0 = max(x0 + padding, 0), max(y0 + padding, 0)
+    cx1, cy1 = min(x1 - padding, W), min(y1 - padding, H)
+
+    if cx1 <= cx0 or cy1 <= cy0:
+        return ""
+
+    cell_img = img[cy0:cy1, cx0:cx1]
+    if cell_img.shape[0] < 5 or cell_img.shape[1] < 5:
+        return ""
+
+    # Увеличиваем для лучшего OCR
+    scale    = 2
+    cell_img = cv2.resize(
+        cell_img,
+        (cell_img.shape[1] * scale, cell_img.shape[0] * scale),
+        interpolation=cv2.INTER_CUBIC,
+    )
+
+    def _read(im: np.ndarray) -> str:
+        res = reader.readtext(im, detail=0, paragraph=True)
+        return " ".join(r.strip() for r in res if r.strip())
+
+    text = _read(cell_img)
+
+    # Попытка с поворотом — для вертикального текста шапки
+    if not text:
+        text = _read(cv2.rotate(cell_img, cv2.ROTATE_90_COUNTERCLOCKWISE))
+    if not text:
+        text = _read(cv2.rotate(cell_img, cv2.ROTATE_90_CLOCKWISE))
+
+    return text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Основная функция
+# ─────────────────────────────────────────────────────────────────────────────
 
 def convert_to_xlsx(pdfname: str) -> Path:
     """
-    Извлекает таблицы из PNG-изображений и объединяет их
-    в единую таблицу на одном листе .xlsx.
-
-    Использует EasyOCR (без Tesseract, без img2table).
-
-    Args:
-        pdfname: Имя файла (например, "document.pdf" или "document").
-
-    Returns:
-        Путь к созданному .xlsx-файлу.
+    Склеивает PNG → детектирует сетку → OCR каждой ячейки → xlsx без дизайна.
     """
-    # ── 1. Пути ──────────────────────────────────────────────────────────────
+    # ── Пути ─────────────────────────────────────────────────────────────
     folder_name = pdfname.split(".")[0]
     base_dir    = Path("../../tables") / folder_name
     input_dir   = base_dir / "tables"
     output_file = base_dir / f"{folder_name}_tables.xlsx"
+    debug_dir   = base_dir / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
 
     if not input_dir.exists():
-        raise FileNotFoundError(
-            f"Входная папка не найдена: {input_dir.resolve()}"
-        )
+        raise FileNotFoundError(f"Папка не найдена: {input_dir.resolve()}")
 
-    # ── 2. Поиск и сортировка файлов ─────────────────────────────────────────
+    # ── Файлы ─────────────────────────────────────────────────────────────
     file_pattern = re.compile(r"^table_.*_(\d+)\.png$")
-
-    matched: list[tuple[int, Path]] = [
-        (int(m.group(1)), f)
-        for f in input_dir.iterdir()
-        if (m := file_pattern.match(f.name))
-    ]
-
+    matched = sorted(
+        [
+            (int(m.group(1)), f)
+            for f in input_dir.iterdir()
+            if (m := file_pattern.match(f.name))
+        ],
+        key=lambda t: t[0],
+    )
     if not matched:
+        raise ValueError(f"Файлы не найдены в {input_dir.resolve()}")
+
+    img_paths = [p for _, p in matched]
+
+    # ── Склейка ───────────────────────────────────────────────────────────
+    print("🔗 Склейка изображений ...", flush=True)
+    merged = _merge_images(img_paths)
+    cv2.imwrite(str(debug_dir / "debug_0_merged.png"), merged)
+    print(f"   Размер: {merged.shape[1]}×{merged.shape[0]} px")
+
+    # ── Сетка ─────────────────────────────────────────────────────────────
+    print("📐 Детекция сетки ...", flush=True)
+    row_ys, col_xs = _detect_table_grid(merged, debug_dir=debug_dir)
+
+    n_rows = len(row_ys) - 1
+    n_cols = len(col_xs) - 1
+    print(f"   Строк: {n_rows}  |  Столбцов: {n_cols}")
+
+    if n_rows < 1 or n_cols < 1:
         raise ValueError(
-            f"Файлы по маске не найдены в {input_dir.resolve()}"
+            f"Сетка не построена (строк={n_rows}, столбцов={n_cols}).\n"
+            f"Проверьте debug-изображения в {debug_dir.resolve()}"
         )
 
-    matched.sort(key=lambda t: t[0])
+    cells = _build_cells(row_ys, col_xs)
 
-    # ── 3. Инициализация EasyOCR ─────────────────────────────────────────────
-    # Модели скачиваются один раз в ~/.EasyOCR/model/
-    print("Инициализация EasyOCR ...", flush=True)
-    reader = easyocr.Reader(["ru", "en"], gpu=False, verbose=False)
+    # ── OCR ───────────────────────────────────────────────────────────────
+    print("🔍 OCR ...", flush=True)
+    reader     = easyocr.Reader(["ru", "en"], gpu=False, verbose=False)
+    table_data = []
 
-    # ── 4. Сбор всех строк ───────────────────────────────────────────────────
-    all_rows: list[list[str]] = []
-    header_saved = False
+    for r_idx, row_cells in enumerate(cells):
+        row_texts = [
+            _ocr_cell(merged, x0, y0, x1, y1, reader)
+            for x0, y0, x1, y1 in row_cells
+        ]
+        table_data.append(row_texts)
+        print(f"   [{r_idx+1}/{n_rows}] {row_texts}")
 
-    for rank, (index, img_path) in enumerate(matched, start=1):
-        print(f"  [{rank}/{len(matched)}] {img_path.name} ...", end=" ", flush=True)
-
-        try:
-            rows = _extract_rows_from_image(img_path, reader)
-        except Exception as exc:
-            print(f"ОШИБКА: {exc}")
-            continue
-
-        if not rows:
-            print("пусто")
-            continue
-
-        if not header_saved:
-            # Первый файл — берём целиком (с заголовком)
-            all_rows.extend(rows)
-            header_saved = True
-        else:
-            # Последующие — пропускаем первую строку (дубль заголовка)
-            all_rows.extend(rows[1:])
-
-        print(f"OK ({len(rows)} строк)")
-
-    # ── 5. Запись в Excel ────────────────────────────────────────────────────
+    # ── Excel (без дизайна) ───────────────────────────────────────────────
+    print("💾 Запись в Excel ...", flush=True)
     wb = Workbook()
     ws = wb.active
     ws.title = folder_name[:31]
 
-    _write_table_to_sheet(ws, all_rows, has_header=True)
-    ws.freeze_panes = "A2"
+    for r_idx, row in enumerate(table_data, start=1):
+        for c_idx, val in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=val)
 
-    # ── 6. Сохранение ────────────────────────────────────────────────────────
+    for c_idx in range(1, n_cols + 1):
+        max_len = max(
+            (len(str(table_data[r][c_idx-1]))
+             for r in range(len(table_data))
+             if c_idx-1 < len(table_data[r])),
+            default=8,
+        )
+        ws.column_dimensions[get_column_letter(c_idx)].width = min(max_len + 4, 60)
+
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
 
-    total_data = max(len(all_rows) - 1, 0)
-    total_cols = max((len(r) for r in all_rows), default=0)
-    print(f"\n✓ Готово: {output_file.resolve()}")
-    print(f"  Строк данных: {total_data}  |  Столбцов: {total_cols}")
-    return output_file
+    print(f"\n✅ {output_file.resolve()}")
+    print(f"   Строк: {len(table_data)}  |  Столбцов: {n_cols}")
