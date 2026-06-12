@@ -1,7 +1,8 @@
+from img2table.ocr import EasyOCR
+from img2table.document import PDF
 import os
-import pymupdf
 
-SAVING_PATH = '../../tables/'
+ocr = EasyOCR(lang=["en", 'ru'])
 
 def mkdir(path):
   try:
@@ -9,22 +10,12 @@ def mkdir(path):
   except OSError:
     pass
 
-def convert_to_image(path):
-  # Open the PDF
-  doc = pymupdf.open(path)
-  num = 0
-  filename = path.split('.')[0]
-  dir = SAVING_PATH+filename+'/images/'
-  mkdir(dir)
-  for i in doc:
-    # Select a page (0 is the first page)
-    # page = doc[num]
-    # Render the page to a pixmap (image)
-    pix = i.get_pixmap(dpi=300)
-    # Save the image
-    pix.save(f"{dir+filename}_{str(num)}.png")
-    num+=1
-  doc.close()
-  return num
-
-convert_to_image('example.pdf')
+def extract_data(pdfname):
+    pdf = PDF(src=pdfname)
+    mkdir(f'../../tables/{pdfname}')
+    # Export to file
+    pdf.to_xlsx(f'../../tables/{pdfname}/{pdfname.split(".")[0]}.xlsx',
+                ocr=ocr,
+                implicit_columns=True,
+                borderless_tables=False,
+                min_confidence=70)

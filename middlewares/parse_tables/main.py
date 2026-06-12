@@ -1,12 +1,8 @@
 import pdf_processing as pdf
-import image_processing as image
-import table_processing as table
 
-def extract_data(pdfname):
-    quantity = pdf.convert_to_image(pdfname)
-    image.extract_tables(pdfname, quantity)
-    table.convert_to_xlsx(pdfname.split(".")[0])
+def pdf_to_db(pdfname):
+    pdf.extract_data(pdfname)
 
-extract_data('example.pdf')
+pdf_to_db('example.pdf')
 
 #TODO: make it universal and add error handling
