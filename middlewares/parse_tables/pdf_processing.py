@@ -12,9 +12,10 @@ def mkdir(path):
 
 def extract_data(pdfname):
     pdf = PDF(src=pdfname)
+    pdfname = pdfname.split('.')[0]
     mkdir(f'../../tables/{pdfname}')
-    # Export to file
-    pdf.to_xlsx(f'../../tables/{pdfname}/{pdfname.split(".")[0]}.xlsx',
+    output_path = f'../../tables/{pdfname}/{pdfname}.xlsx'
+    pdf.to_xlsx(output_path,
                 ocr=ocr,
                 implicit_columns=True,
                 borderless_tables=False,
