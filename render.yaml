@@ -12,8 +12,8 @@ services:
         generateValue: true
       - key: DB_URL
         fromDatabase:
-          name: postgresql://postgres:JeJB$HXr%XFs2@db.xbiauujzrxoduwgfnzhr.supabase.co:5432/postgres
-          property: url
+          name: papaya-db
+          property: connectionString
       - key: INIT_EVENT_ID
         value: "111"
       - key: INIT_EVENT_NAME

@@ -11,7 +11,7 @@ import os
 load_dotenv()
 # USER = os.getenv('DB_USER', 'postgres')
 # PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
-# HOST = os.getenv('DB_HOST', 'localhost')ыыыы
+# HOST = os.getenv('DB_HOST', 'localhost')
 # PORT = os.getenv('DB_PORT', '5432')
 # DB_NAME = os.getenv('DB_NAME', 'papaya_db')
 #
@@ -64,11 +64,15 @@ class Events(Base):
 
     id = Column(String, primary_key=True)
     name = Column(String)
-    place = Column(String)
-    min_grade = Column(Integer)
-    max_grade = Column(Integer)
-    min_age = Column(Integer)
-    max_age = Column(Integer)
+    course = Column(String, nullable=True)
+    profile = Column(String, nullable=True)
+    level = Column(String, nullable=True)
+    diploma = Column(String, nullable=True)
+    min_grade = Column(Integer, nullable=True)
+    max_grade = Column(Integer, nullable=True)
+    min_age = Column(Integer, nullable=True)
+    max_age = Column(Integer, nullable=True)
+    place = Column(String, nullable=True)
     preview_picture = Column(String, nullable=True)
     picture = Column(String, nullable=True)
     isActive = Column(Boolean, default=True)
@@ -162,6 +166,10 @@ def add_event(ins: dict):
         event = Events(
             id=ins['id'],
             name=ins['name'],
+            course=ins['course'],
+            profile = ins['profile'],
+            level = ins['level'],
+            diploma = ins['diploma'],
             place=ins['place'],
             min_grade=ins['min_grade'],
             max_grade=ins['max_grade'],
