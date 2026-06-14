@@ -344,110 +344,79 @@
 
         <!-- МЕНЕДЖЕР СОБЫТИЙ (Добавление и Редактирование) -->
         {% if current_user.id == user.id or current_user.role == 'ADMIN' %}
-        <div class="events-manager">
-            <h3 style="margin-top:0;">Управление событиями</h3>
+        <h2>Управление событиями</h2>
 
-            <div class="tabs">
-                <button class="tab-btn active" onclick="switchEventTab('create')">Создать событие</button>
-                <button class="tab-btn" onclick="switchEventTab('edit')">Редактировать существующее</button>
-            </div>
+        <!-- 1. Существующая форма: Создать событие -->
+        <h3>Создать событие</h3>
+        <form action="{{ url_for('add_event', user_id=user.id) }}" method="POST">
+            <label>Название события *</label>
+            <input type="text" name="name" required>
 
-            <!-- Вкладка: Создание -->
-            <div id="createEventTab" class="event-tab-content">
-                <form id="createEventForm" onsubmit="submitCreateEvent(event)">
-                    <div class="form-grid">
-                        <div class="form-group full">
-                            <label class="form-label">Название события *</label>
-                            <input type="text" name="name" class="form-input" required placeholder="Например: Олимпиада по математике">
-                        </div>
-                        <div class="form-group full">
-                            <label class="form-label">Место проведения *</label>
-                            <input type="text" name="place" class="form-input" required placeholder="Город, улица, дом">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Мин. класс *</label>
-                            <input type="number" name="min_grade" class="form-input" required min="1" max="11">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Макс. класс *</label>
-                            <input type="number" name="max_grade" class="form-input" required min="1" max="11">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Мин. возраст *</label>
-                            <input type="number" name="min_age" class="form-input" required min="5">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Макс. возраст *</label>
-                            <input type="number" name="max_age" class="form-input" required min="5">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">URL превью</label>
-                            <input type="url" name="preview_picture" class="form-input" placeholder="https://...">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">URL полное фото</label>
-                            <input type="url" name="picture" class="form-input" placeholder="https://...">
-                        </div>
-                    </div>
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-action">Создать событие</button>
-                    </div>
-                </form>
-            </div>
+            <label>Место проведения *</label>
+            <input type="text" name="place" required>
 
-            <!-- Вкладка: Редактирование -->
-            <div id="editEventTab" class="event-tab-content" style="display:none;">
-                <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:15px;">Выберите событие для редактирования:</p>
-                <div id="userEventsList">
-                    <!-- Сюда JS загрузит список событий пользователя (если бы мы их фильтровали) -->
-                    <!-- Для демонстрации покажем форму, которая ждет ID -->
-                    <div class="form-group full">
-                        <label class="form-label">ID события для редактирования</label>
-                        <input type="text" id="editEventIdInput" class="form-input" placeholder="Вставьте ID события">
-                    </div>
+            <label>Мин. класс *</label>
+            <input type="number" name="min_grade" required>
 
-                    <form id="editEventForm" onsubmit="submitEditEvent(event)">
-                        <div class="form-grid">
-                            <div class="form-group full">
-                                <label class="form-label">Название *</label>
-                                <input type="text" name="name" id="edit_name" class="form-input" required>
-                            </div>
-                            <div class="form-group full">
-                                <label class="form-label">Место *</label>
-                                <input type="text" name="place" id="edit_place" class="form-input" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Мин. класс *</label>
-                                <input type="number" name="min_grade" id="edit_min_grade" class="form-input" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Макс. класс *</label>
-                                <input type="number" name="max_grade" id="edit_max_grade" class="form-input" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Мин. возраст *</label>
-                                <input type="number" name="min_age" id="edit_min_age" class="form-input" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Макс. возраст *</label>
-                                <input type="number" name="max_age" id="edit_max_age" class="form-input" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">URL превью</label>
-                                <input type="url" name="preview_picture" id="edit_preview_picture" class="form-input">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">URL полное фото</label>
-                                <input type="url" name="picture" id="edit_picture" class="form-input">
-                            </div>
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-save">Обновить событие</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
+            <label>Макс. класс *</label>
+            <input type="number" name="max_grade" required>
+
+            <label>Мин. возраст *</label>
+            <input type="number" name="min_age" required>
+
+            <label>Макс. возраст *</label>
+            <input type="number" name="max_age" required>
+
+            <label>URL превью</label>
+            <input type="text" name="preview_picture">
+
+            <label>URL полное фото</label>
+            <input type="text" name="picture">
+
+            <button type="submit">Создать событие</button>
+        </form>
+
+        <!-- 2. НОВАЯ ФОРМА: Добавить события из PDF -->
+        <h3>Добавить события из PDF-таблицы</h3>
+        <form action="{{ url_for('add_events_via_pdf_tables', user_id=user.id) }}" method="POST" enctype="multipart/form-data">
+            <label for="pdf_file">Выберите PDF файл:</label>
+            <!-- Атрибут name="file" критически важен, так как main.py проверяет именно request.files['file'] -->
+            <input type="file" id="pdf_file" name="file" accept=".pdf" required>
+            <button type="submit">Загрузить и добавить</button>
+        </form>
+
+        <!-- 3. Существующая форма: Редактировать существующее -->
+        <h3>Редактировать существующее</h3>
+        <form action="{{ url_for('event_edit_details', user_id=user.id, event_id='ID_СОБЫТИЯ') }}" method="POST">
+            <label>ID события для редактирования</label>
+            <input type="text" name="event_id" required>
+
+            <label>Название *</label>
+            <input type="text" name="name" required>
+
+            <label>Место *</label>
+            <input type="text" name="place" required>
+
+            <label>Мин. класс *</label>
+            <input type="number" name="min_grade" required>
+
+            <label>Макс. класс *</label>
+            <input type="number" name="max_grade" required>
+
+            <label>Мин. возраст *</label>
+            <input type="number" name="min_age" required>
+
+            <label>Макс. возраст *</label>
+            <input type="number" name="max_age" required>
+
+            <label>URL превью</label>
+            <input type="text" name="preview_picture">
+
+            <label>URL полное фото</label>
+            <input type="text" name="picture">
+
+            <button type="submit">Обновить событие</button>
+        </form>
         {% endif %}
 
     </div>
