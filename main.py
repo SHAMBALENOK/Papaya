@@ -1,17 +1,24 @@
 import os
 from json import JSONDecodeError
-from flask import Flask, request, jsonify, redirect, url_for, render_template
+from flask import Flask, flash, request, jsonify, redirect, url_for, render_template
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 # import database.database_users as db
 # import database.database_events as db
 import database.database as db
+from middlewares.parse_tables import main as table_handling
+from middlewares import tools as middletools
 import middlewares.re_check as re_check
 from werkzeug.security import check_password_hash
+from werkzeug.utils import secure_filename
 import uuid
 from datetime import datetime, timezone
 import logging
 import sys
 
+from middlewares.tools import mkdir
+
+UPLOAD_FOLDER = './tables'
+ALLOWED_EXTENSIONS = {'pdf'}
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -28,6 +35,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY')
 
 # app.config['SERVER_NAME'] = os.getenv('SITE_NAME', 'localhost')
 app.config['PREFERRED_URL_SCHEME'] = 'https'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -305,11 +313,10 @@ def add_event(user_id):
             }
 
         for key, value in ins.items():
-            if key != 'preview_picture' or key != 'picture':
-                if value == 'null':
-                    logger.debug(f"{key} прошло проверку", exc_info=True)
-                    return jsonify({'status': 'badRequest',
-                                    'hint': f'Неверное {key}'}), 400
+            if key == 'name' and value == 'null':
+                logger.debug(f"{key} не прошло проверку", exc_info=True)
+                return jsonify({'status': 'badRequest',
+                                'hint': f'Неверное {key}'}), 400
 
         db.add_event(ins)
         return jsonify({
@@ -369,6 +376,26 @@ def event_edit_details(event_id, user_id):
             "hint": f"Ошибка сервера {e}"
         }), 500
 
+@app.route('/user/<user_id>/add_events_via_pdf_tables', methods=['POST'])
+@login_required
+def add_events_via_pdf_tables(user_id):
+    if 'file' not in request.files:
+        flash('No file part')
+        return redirect(request.url)
+
+    file = request.files['file']
+    if file.filename == '':
+        flash('No selected file')
+        return redirect(request.url)
+    if file and middletools.allowed_file(file.filename, ALLOWED_EXTENSIONS):
+        filename = secure_filename(file.filename)
+        middletools.mkdir(filename.split('.')[0])
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename.split('.')[0], filename))
+        table_handling.pdf_to_db(str(os.path.join(app.config['UPLOAD_FOLDER'], filename.split('.')[0], filename)))
+        return jsonify({
+            'status': 'success',
+            'redirect': url_for('user', event_id=user_id)
+        }), 200
 
 if __name__ == '__main__':
   app.run(debug=True)
