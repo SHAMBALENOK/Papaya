@@ -4,6 +4,10 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 
+| 🌐 Language |
+|-------------|
+| [🇷🇺 Russian](README.md) • [🇬🇧 English](English.md) |
+
 Papaya is a web service for school students that consolidates information about nationwide and regional academic competitions in one convenient platform. The platform allows users to register, manage their profiles, and explore educational events.
 
 Demo version of the project is available at: https://papaya-poxq.onrender.com
@@ -11,13 +15,16 @@ Demo version of the project is available at: https://papaya-poxq.onrender.com
 ## Features
 
 - **Authentication & Registration:** Secure login system with password hashing and data validation.
+- `COMING SOON` **JWT Authentication:** Authentication mechanism will soon be migrated to JWT.
 - **Competitions Catalog:** Browse a list of active academic events and olympiads.
-- **Detailed Views:** Dedicated pages for each event and user profile with comprehensive information.
-- **Event Creation:** Ability to create and publish new events.
-- **Profile Editing:** Users can update their personal information and preferences.
-- `NEW` **Event Management:** Ability to edit and update event details.
-- `COMING SOON` **Roles & Tabs:** Upcoming feature for user roles and categorized event tabs.
-- `COMING SOON` **Administration Panel:** Soon you'll be able to conveniently administer the site.
+- **Profile Editing:** Users can update their personal information on a dedicated profile page.
+- **Event Creation & Editing:** Ability to create and edit events.
+- `COMING SOON` **Event Management Improvements:** The mechanism for updating and adding events will change, along with the interface and possibly the management page.
+- `NEW` **Table Import:** Users can insert olympiad information directly from PDF tables.
+- `NEW` **Auto-setup:** The web service can be configured using **setup.bat/setup.sh** (downloads AI model for table recognition).
+- `COMING SOON` **Roles & Tabs:** User roles (student/teacher/educational organization) with different capabilities and categorized event tabs coming soon.
+- `COMING SOON` **Administration Panel:** Convenient web-based administration panel coming soon.
+- `COMING SOON` **Free Access:** Ability to use certain pages without authentication.
 
 ## Technology Stack
 
@@ -145,6 +152,11 @@ Main application endpoints:
 | `GET` | `/logout` | User logout | Authenticated |
 | `GET` | `/` | Main page with olympiad list | Authenticated |
 | `GET` | `/event/<id>` | Event/olympiad details | Authenticated |
+| `GET` | `/user/<user_id>` | User profile details | Authenticated |
+| `POST` | `/user/<user_id>/edit_info` | Edit user profile | Authenticated |
+| `POST` | `/user/<user_id>/add_event` | Create new event | Authenticated |
+| `POST` | `/user/<user_id>/<event_id>/edit_event` | Edit event | Authenticated |
+| `POST` | `/user/<user_id>/add_events_via_pdf_tables` | Import events from PDF tables | Authenticated |
 
 ## License
 
