@@ -4,16 +4,20 @@ services:
     env: python
     region: frankfurt
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app --bind 0.0.0.0:$PORT
+    repo: https://github.com/SHAMBALENOK/Papaya
+    branch: main
+    buildCommand: pip install -r requirements.txt && python -c "import easyocr; easyocr.Reader(['en', 'ru'])"
+    startCommand: gunicorn main:app --bind 0.0.0.0:$PORT --timeout 120
     healthCheckPath: /
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true
-      - key: DB_URL
+      - key: DATABASE_URL
         fromDatabase:
           name: papaya-db
           property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
       - key: INIT_EVENT_ID
         value: "111"
       - key: INIT_EVENT_NAME
@@ -28,6 +32,7 @@ services:
         value: "6"
       - key: INIT_EVENT_MAX_AGE
         value: "17"
+
 databases:
   - name: papaya-db
     databaseName: papaya
