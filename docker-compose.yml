@@ -1,47 +1,54 @@
-version: '3.8'
-
+version: "3.9"
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: papaya_db
+  postgres:
+    image: postgres:14.8-alpine3.18
     environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ../2. Init Database:/docker-entrypoint-initdb.d
+      - habrdb-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 5s
+      test: [ "CMD-SHELL", "pg_isready -U habrpguser -d habrdb" ]
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 4G
+    networks:
+      - project
 
   web:
     build: .
     container_name: papaya_web
-    command: gunicorn --bind 0.0.0.0:5000 main:app
+    environment:
+      - FLASK_SECRET_KEY=change_this_super_secret_key_12345
+      - SITE_NAME=localhost
+      # Формируем DATABASE_URL напрямую
+      - DATABASE_URL=postgresql://papaya_admin:strong_password_here@db:5432/papaya_events
     ports:
       - "5000:5000"
-    environment:
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db  # Важно: имя сервиса базы данных в docker-compose
-      - DB_PORT=5432
-      - DB_NAME=${DB_NAME}
-      - INIT_EVENT_ID=111
-      - INIT_EVENT_NAME=my_event
-      - INIT_EVENT_PLACE=my_place
-      - INIT_EVENT_MIN_GRADE=1
-      - INIT_EVENT_MAX_GRADE=11
-      - INIT_EVENT_MIN_AGE=6
-      - INIT_EVENT_MAX_AGE=17
+    volumes:
+      - ./tables:/app/tables
     depends_on:
       db:
         condition: service_healthy
-    restart: always
+    restart: unless-stopped
+    networks:
+      - project
 
 volumes:
-  pgdata:
+  habrdb-data:
+  pgadmin-data:
+
+networks:
+  project:
