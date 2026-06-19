@@ -9,6 +9,12 @@ img2table
 easyocr
 openpyxl
 pyjwt
-dotenv
 pandas
-transformers
+numpy==1.26.4
+transformers==4.40.2
+opencv-python-headless
+deep_translator
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu

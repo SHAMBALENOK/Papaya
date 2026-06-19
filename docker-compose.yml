@@ -1,7 +1,10 @@
 version: "3.9"
+
+name: papaya
+
 services:
   postgres:
-    image: postgres:14.8-alpine3.18
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: "postgres"
       POSTGRES_USER: "postgres"
@@ -9,11 +12,11 @@ services:
       PGDATA: "/var/lib/postgresql/data/pgdata"
     volumes:
       - ../2. Init Database:/docker-entrypoint-initdb.d
-      - habrdb-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U habrpguser -d habrdb" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -27,28 +30,65 @@ services:
     networks:
       - project
 
+  pgadmin:
+    container_name: pgadmin_container
+    image: dpage/pgadmin4:7.2
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "postgres@postgres.com"
+      PGADMIN_DEFAULT_PASSWORD: "postgres"
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+    networks:
+      - project
+
   web:
     build: .
-    container_name: papaya_web
+    command: gunicorn main:app --bind 0.0.0.0:5000 --timeout 300 --workers 1
+    container_name: web
     environment:
-      - FLASK_SECRET_KEY=change_this_super_secret_key_12345
-      - SITE_NAME=localhost
-      # Формируем DATABASE_URL напрямую
-      - DATABASE_URL=postgresql://papaya_admin:strong_password_here@db:5432/papaya_events
+      FLASK_SECRET_KEY: 'change_key'
+      DATABASE_URL: 'postgresql://postgres:postgres@postgres:5432/postgres'
+      # Указываем пути для кэша моделей внутри контейнера:
+      HF_HOME: /app/.cache/huggingface
+      EASYOCR_MODULE_PATH: /app/.cache/easyocr
     ports:
       - "5000:5000"
     volumes:
       - ./tables:/app/tables
+      # Сохраняем скачанные модели на хосте, чтобы они не раздували контейнер:
+      - ml-models-cache:/app/.cache
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - project
+    develop:
+      watch:
+        - action: sync+restart
+          path: .
+          target: /app
+        - action: rebuild
+          path: requirements.txt
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 6G
 
 volumes:
-  habrdb-data:
+  postgres-data:
   pgadmin-data:
+  ml-models-cache:
 
 networks:
   project:

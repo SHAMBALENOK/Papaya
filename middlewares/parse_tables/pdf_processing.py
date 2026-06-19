@@ -4,7 +4,13 @@ import os
 import openpyxl
 from openpyxl.utils import get_column_letter
 
-ocr = EasyOCR(lang=["en", 'ru'])
+_ocr = None
+
+def get_ocr():
+    global _ocr
+    if _ocr is None:
+        _ocr = EasyOCR(lang=["en", "ru"])
+    return _ocr
 
 # Импортируйте ваши модули для PDF и mkdir, если они не импортированы ранее:
 # from ВашаБиблиотека import PDF, mkdir
@@ -19,7 +25,7 @@ def extract_data(pdfname):
 
     pdf = PDF(src=pdfname)
     pdf.to_xlsx(temp_output_path,
-                ocr=ocr,
+                ocr=get_ocr(),
                 implicit_columns=True,
                 borderless_tables=False,
                 min_confidence=70)
