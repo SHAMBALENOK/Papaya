@@ -10,7 +10,16 @@
         /* Header */
         header { background: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         .logo { text-decoration: none; color: #ff6b6b; font-size: 1.5em; font-weight: bold; }
-        .user-menu a { text-decoration: none; color: #333; margin-left: 20px; font-weight: 500; }
+        .user-menu { display: flex; gap: 15px; align-items: center; }
+        .user-menu a { text-decoration: none; color: #333; font-weight: 500; }
+        .btn-profile { 
+            background: #ff6b6b; 
+            color: white !important; 
+            padding: 8px 16px; 
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+        .btn-profile:hover { background: #ff5252; }
         .btn-logout { color: #e74c3c !important; }
 
         /* Grid Layout */
@@ -37,7 +46,7 @@
     <header>
         <a href="{{ url_for('main') }}" class="logo">🍈 Papaya</a>
         <div class="user-menu">
-            <a href="{{ url_for('user_details', user_id=current_user.id) }}">{{ fullname }}</a>
+            <a href="{{ url_for('user_details', user_id=current_user.id) }}" class="btn-profile">Профиль</a>
             <a href="{{ url_for('logout') }}" class="btn-logout">Выйти</a>
         </div>
     </header>
