@@ -1,21 +1,38 @@
+import os
 import pandas as pd
-from transformers import pipeline
-from deep_translator import GoogleTranslator
+from huggingface_hub import InferenceClient
 import database.database as db
+from googletrans import Translator
+import asyncio
+import uuid
+
+translator = Translator()
+
+client = InferenceClient(
+    model="facebook/bart-large-mnli",
+    token=os.getenv('HF_TOKEN')
+)
 
 LABELS = ['profile', 'course', 'name', 'level', 'diploma']
 
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+def translate_text(text):
+    translator = Translator()
+    result = asyncio.run(translator.translate(text, dest='en'))
+
+    return result.text
 
 def _classify(sentences: list) -> dict:
     """
     Функция, которая определяет принадлежность заголовка из таблицы к стандартизированным из sql DB
     """
     output = {}
-    translator_en = GoogleTranslator(source='auto', target='en')
     for sentence in sentences:
-        data = classifier(translator_en.translate(sentence), LABELS)
-        output[sentences.index(sentence)] = (sentence, data['scores'][0], data['labels'][0])
+        data = client.zero_shot_classification(
+            translate_text(sentence),
+            candidate_labels=LABELS,
+            )
+
+        output[sentences.index(sentence)] = (sentence, data[0].score, data[0].label)
 
     check=[]
     deletion = []
@@ -55,4 +72,6 @@ def tabulate(xlsx_path: str):
             except KeyError:
                 pass
 
-        if payload.get('name', 'null') == 'null': db.add_event(payload)
+        idd = str(uuid.uuid4())
+        payload['id'] = idd
+        if payload.get('name', 'null') != 'null': db.add_event(payload)

@@ -6,7 +6,28 @@ services:
     plan: free
     repo: https://github.com/SHAMBALENOK/Papaya
     branch: main
-    buildCommand: pip install -r requirements.txt && python -c "import easyocr; easyocr.Reader(['en', 'ru'])"
+    # Render uses a standard Python buildpack, but we need to install system-level dependencies
+    # that are normally handled in the Dockerfile (tesseract, libgl, etc.).
+    # We use the 'buildCommand' to install these via apt-get before installing Python packages.
+    buildCommand: |
+      apt-get update && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-rus \
+        tesseract-ocr-eng \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        gcc \
+        python3-dev \
+        ca-certificates \
+        curl \
+        wget \
+        unzip && \
+      update-ca-certificates && \
+      pip install --no-cache-dir --upgrade pip && \
+      pip install --no-cache-dir torch==2.2.2+cpu torchvision==0.17.2+cpu --index-url https://download.pytorch.org/whl/cpu && \
+      pip install --no-cache-dir -r requirements.txt && \
+      python -c "import easyocr; easyocr.Reader(['en', 'ru'])"
     startCommand: gunicorn main:app --bind 0.0.0.0:$PORT --timeout 120
     healthCheckPath: /
     envVars:
@@ -32,6 +53,12 @@ services:
         value: "6"
       - key: INIT_EVENT_MAX_AGE
         value: "17"
+      - key: HF_HOME
+        value: /opt/render/project/src/.cache/huggingface
+      - key: EASYOCR_MODULE_PATH
+        value: /opt/render/project/src/.cache/easyocr
+      - key: HF_TOKEN
+        sync: false # You will need to set this manually in the Render dashboard if you use private models or have rate limits
 
 databases:
   - name: papaya-db

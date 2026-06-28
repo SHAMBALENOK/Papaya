@@ -37,9 +37,6 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY')
 app.config['PREFERRED_URL_SCHEME'] = 'https'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'auth'
@@ -389,12 +386,12 @@ def add_events_via_pdf_tables(user_id):
         return redirect(request.url)
     if file and middletools.allowed_file(file.filename, ALLOWED_EXTENSIONS):
         filename = secure_filename(file.filename)
-        middletools.mkdir(filename.split('.')[0])
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename.split('.')[0], filename))
-        table_handling.pdf_to_db(str(os.path.join(app.config['UPLOAD_FOLDER'], filename.split('.')[0], filename)))
+        middletools.mkdir(f"{app.config['UPLOAD_FOLDER']}/{filename.split('.')[0]}")
+        file.save(os.path.join(f"{app.config['UPLOAD_FOLDER']}/{filename.split('.')[0]}/{filename}"))
+        table_handling.pdf_to_db(str(os.path.join(f"{app.config['UPLOAD_FOLDER']}/{filename.split('.')[0]}/{filename}")))
         return jsonify({
             'status': 'success',
-            'redirect': url_for('user', event_id=user_id)
+            'redirect': url_for('user_details', user_id=user_id)
         }), 200
 
 if __name__ == '__main__':

@@ -5,260 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Papaya - Главная</title>
     <style>
-        :root {
-            --primary-color: #ff6b6b;
-            --secondary-color: #4ecdc4;
-            --bg-color: #f7f9fc;
-            --card-bg: #ffffff;
-            --text-color: #2d3436;
-            --text-muted: #636e72;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
+        body { font-family: sans-serif; margin: 0; padding: 0; background: #f4f6f8; }
 
         /* Header */
-        header {
-            background-color: var(--card-bg);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
+        header { background: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .logo { text-decoration: none; color: #ff6b6b; font-size: 1.5em; font-weight: bold; }
+        .user-menu a { text-decoration: none; color: #333; margin-left: 20px; font-weight: 500; }
+        .btn-logout { color: #e74c3c !important; }
 
-        .logo {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--primary-color);
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+        /* Grid Layout */
+        .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
+        .events-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 25px; }
 
-        .user-nav {
-            display: flex;
-            align-items: center;
-            gap: 15px;
+        /* Card Design */
+        .card {
+            background: white; border-radius: 12px; overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: transform 0.2s, box-shadow 0.2s;
+            text-decoration: none; color: inherit; display: block;
         }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
 
-        .user-link {
-            text-decoration: none;
-            color: var(--text-color);
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            border-radius: 8px;
-            transition: background 0.2s;
-        }
+        .card-img { width: 100%; height: 180px; object-fit: cover; background: #eee; }
+        .card-body { padding: 20px; }
+        .card-title { margin: 0; font-size: 1.1em; color: #2c3e50; line-height: 1.4; }
 
-        .user-link:hover {
-            background-color: #f0f0f0;
-        }
-
-        .logout-btn {
-            background-color: #ffebee;
-            color: #d32f2f;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-
-        .logout-btn:hover {
-            background-color: #ffcdd2;
-        }
-
-        /* Main Content */
-        main {
-            flex: 1;
-            padding: 2rem;
-            max-width: 1200px;
-            margin: 0 auto;
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        h1 {
-            margin-bottom: 2rem;
-            color: var(--text-color);
-            font-size: 2rem;
-        }
-
-        /* Events Grid */
-        .events-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 30px;
-        }
-
-        .event-card-link {
-            text-decoration: none;
-            color: inherit;
-            display: block;
-            height: 100%;
-        }
-
-        .event-card {
-            background: var(--card-bg);
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            border: 1px solid #eee;
-        }
-
-        .event-card-link:hover .event-card {
-            transform: translateY(-8px);
-            box-shadow: 0 15px 30px rgba(0,0,0,0.12);
-            border-color: var(--primary-color);
-        }
-
-        /* Image Container */
-        .event-image-wrapper {
-            width: 100%;
-            height: 200px;
-            background-color: #e9ecef;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .event-image {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: transform 0.5s ease;
-        }
-
-        .event-card-link:hover .event-image {
-            transform: scale(1.08);
-        }
-
-        .event-info {
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            flex-grow: 1;
-        }
-
-        .event-title {
-            font-size: 1.35rem;
-            margin: 0 0 10px 0;
-            color: var(--text-color);
-            font-weight: 700;
-            line-height: 1.4;
-        }
-
-        .event-place {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: var(--text-muted);
-            font-size: 0.95rem;
-            margin-bottom: 15px;
-        }
-
-        .tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: auto;
-        }
-
-        .tag {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-
-        .tag-grade { background-color: #e3f2fd; color: #1565c0; }
-        .tag-age { background-color: #fff3e0; color: #ef6c00; }
-
-        .empty-state {
-            text-align: center;
-            padding: 3rem;
-            background: white;
-            border-radius: 12px;
-            color: var(--text-muted);
-        }
+        .empty-state { text-align: center; padding: 60px 20px; color: #95a5a6; }
     </style>
 </head>
 <body>
 
     <header>
-        <a href="{{ url_for('main') }}" class="logo">
-            <span>🍈</span> Papaya
-        </a>
-
-        <div class="user-nav">
-            <!-- Ссылка на профиль пользователя -->
-            <a href="{{ url_for('user_details', user_id=current_user.id) }}" class="user-link">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
-                </svg>
-                {{ fullname }}
-            </a>
-            <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>
+        <a href="{{ url_for('main') }}" class="logo">🍈 Papaya</a>
+        <div class="user-menu">
+            <a href="{{ url_for('user_details', user_id=current_user.id) }}">{{ fullname }}</a>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Выйти</a>
         </div>
     </header>
 
-    <main>
-        <h1>Актуальные события</h1>
+    <div class="container">
+        <h2 style="margin-bottom: 30px; color: #34495e;">Актуальные олимпиады</h2>
 
         {% if events %}
             <div class="events-grid">
                 {% for event in events %}
                     {% set img_src = event.preview_picture if event.preview_picture else 'https://placehold.co/600x400/e9ecef/95a5a6?text=No+Preview' %}
 
-                    <a href="{{ url_for('event_details', event_id=event.id) }}" class="event-card-link">
-                        <div class="event-card">
-                            <div class="event-image-wrapper">
-                                <img src="{{ img_src }}" alt="{{ event.name }}" class="event-image" onerror="this.src='https://placehold.co/600x400/e9ecef/95a5a6?text=Error'">
-                            </div>
-
-                            <div class="event-info">
-                                <h2 class="event-title">{{ event.name }}</h2>
-
-                                <div class="event-place">
-                                    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path>
-                                        <circle cx="12" cy="10" r="3"></circle>
-                                    </svg>
-                                    {{ event.place }}
-                                </div>
-
-                                <div class="tags">
-                                    <span class="tag tag-grade">
-                                        {{ event.min_grade }}-{{ event.max_grade }} кл.
-                                    </span>
-                                    <span class="tag tag-age">
-                                        {{ event.min_age }}-{{ event.max_age }} лет
-                                    </span>
-                                </div>
-                            </div>
+                    <a href="{{ url_for('event_details', event_id=event.id) }}" class="card">
+                        <img src="{{ img_src }}" alt="{{ event.name }}" class="card-img">
+                        <div class="card-body">
+                            <h3 class="card-title">{{ event.name }}</h3>
                         </div>
                     </a>
                 {% endfor %}
@@ -269,7 +64,7 @@
                 <p>Загляните позже, мы обязательно добавим что-нибудь интересное!</p>
             </div>
         {% endif %}
-    </main>
+    </div>
 
 </body>
 </html>

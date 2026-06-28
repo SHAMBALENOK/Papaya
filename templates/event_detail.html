@@ -5,188 +5,143 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ event.name }} - Papaya</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f7f6;
-            color: #333;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            min-height: 100vh;
-        }
-        .container {
-            background: white;
-            width: 100%;
-            max-width: 800px;
-            margin: 40px 20px;
-            border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
-            overflow: hidden;
-        }
+        body { font-family: sans-serif; margin: 0; background: #f4f6f8; color: #333; }
 
-        /* Banner Image Styles */
-        .event-banner {
-            width: 100%;
-            height: 350px;
-            background-color: #eee;
-            position: relative;
-            overflow: hidden;
+        /* Hero Section */
+        .hero {
+            position: relative; height: 400px; background-size: cover; background-position: center;
+            background-color: #e9ecef;
         }
-        .event-banner img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
+        .hero-overlay {
+            position: absolute; bottom: 0; left: 0; right: 0; top: 0;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.85));
+            display: flex; flex-direction: column; justify-content: flex-end; padding: 40px;
         }
-        .banner-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            padding: 20px;
-            background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
-            color: white;
-        }
-        .banner-title {
-            margin: 0;
-            font-size: 2.2rem;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-        }
-
-        .content {
-            padding: 40px;
-        }
-
-        .detail-row {
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #f0f0f0;
-        }
-        .detail-row:last-child {
-            border-bottom: none;
-        }
-
-        .detail-label {
-            font-weight: 700;
-            color: #888;
-            display: block;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            font-size: 0.8rem;
-            letter-spacing: 0.5px;
-        }
-
-        .detail-value {
-            font-size: 1.2rem;
-            color: #222;
-            font-weight: 500;
-        }
-
-        .badge-container {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 30px;
-            font-size: 0.95rem;
-            font-weight: 600;
-        }
-        .badge-grade { background-color: #e3f2fd; color: #1565c0; }
-        .badge-age { background-color: #fff3e0; color: #ef6c00; }
-        .badge-status {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #c8e6c9;
-        }
-        .badge-status.inactive {
-            background-color: #ffebee;
-            color: #c62828;
-            border: 1px solid #ffcdd2;
-        }
-
         .back-link {
-            display: inline-flex;
-            align-items: center;
-            margin-top: 30px;
-            text-decoration: none;
-            color: var(--primary-color, #ff6b6b);
-            font-weight: bold;
-            font-size: 1.1rem;
-            transition: transform 0.2s, color 0.2s;
-            padding: 10px 20px;
-            background: #fff0f0;
-            border-radius: 8px;
+            position: absolute; top: 30px; left: 30px; color: white; text-decoration: none;
+            background: rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 20px;
+            backdrop-filter: blur(5px); transition: background 0.2s;
         }
-        .back-link:hover {
-            color: #ff4757;
-            transform: translateX(-5px);
-            background: #ffe0e0;
+        .back-link:hover { background: rgba(255,255,255,0.3); }
+
+        .hero h1 { color: white; margin: 0 0 10px 0; font-size: 2.5em; text-shadow: 0 2px 4px rgba(0,0,0,0.3); max-width: 800px; }
+
+        /* Content Block */
+        .content-block {
+            max-width: 900px; margin: -60px auto 50px; background: white;
+            border-radius: 16px; padding: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            position: relative; z-index: 10;
         }
-        .back-link svg {
-            margin-right: 8px;
+
+        .section-title {
+            font-size: 0.9em; color: #95a5a6; text-transform: uppercase;
+            letter-spacing: 1px; margin-bottom: 20px; font-weight: bold;
         }
+
+        .info-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 30px; margin-bottom: 30px;
+        }
+        .info-item strong { display: block; color: #7f8c8d; font-size: 0.85em; margin-bottom: 6px; }
+        .info-item span { font-size: 1.1em; color: #2c3e50; font-weight: 500; word-break: break-word; }
+
+        .status-badge {
+            display: inline-block; padding: 6px 14px; border-radius: 20px;
+            font-size: 0.9em; font-weight: bold;
+        }
+        .status-active { background: #d4edda; color: #155724; }
+        .status-inactive { background: #f8d7da; color: #721c24; }
+
+        .meta-footer {
+            margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee;
+            font-size: 0.85em; color: #aaa; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+        }
+
+        /* Принудительное скрытие пустых блоков */
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Баннер с картинкой -->
-        <div class="event-banner">
-            {% set img_url = event.picture if event.picture else 'https://placehold.co/1200x600/e0e0e0/757575?text=No+Event+Photo' %}
-            <img src="{{ img_url }}" alt="{{ event.name }}" onerror="this.src='https://placehold.co/1200x600/e0e0e0/757575?text=Image+Error'">
 
-            <div class="banner-overlay">
-                <h1 class="banner-title">{{ event.name }}</h1>
-            </div>
-        </div>
+    {% set img_url = event.picture if event.picture else (event.preview_picture if event.preview_picture else None) %}
 
-        <div class="content">
-            <div class="detail-row">
-                <span class="detail-label">Место проведения</span>
-                <div class="detail-value" style="display: flex; align-items: center; gap: 10px;">
-                    <svg width="20" height="20" fill="none" stroke="#ff6b6b" stroke-width="2" viewBox="0 0 24 24">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path>
-                        <circle cx="12" cy="10" r="3"></circle>
-                    </svg>
-                    {{ event.place }}
-                </div>
-            </div>
-
-            <div class="detail-row">
-                <span class="detail-label">Параметры участия</span>
-                <div class="badge-container">
-                    <span class="badge badge-grade">
-                        {{ event.min_grade }} - {{ event.max_grade }} классы
-                    </span>
-                    <span class="badge badge-age">
-                        {{ event.min_age }} - {{ event.max_age }} лет
-                    </span>
-                </div>
-            </div>
-
-            <div class="detail-row">
-                <span class="detail-label">ID События</span>
-                <span class="detail-value" style="font-family: monospace; color: #888; font-size: 1rem;">{{ event.id }}</span>
-            </div>
-
-            <div class="detail-row">
-                <span class="detail-label">Статус</span>
-                <span class="badge badge-status {% if not event.isActive %}inactive{% endif %}">
-                    {% if event.isActive %}● Активно{% else %}○ Неактивно{% endif %}
-                </span>
-            </div>
-
-            <a href="{{ url_for('main') }}" class="back-link">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path d="M19 12H5m7 7l-7-7 7-7"></path>
-                </svg>
-                Вернуться к списку
-            </a>
+    <div class="hero" style="{% if img_url %}background-image: url('{{ img_url }}');{% endif %}">
+        <a href="{{ url_for('main') }}" class="back-link">← Вернуться к списку</a>
+        <div class="hero-overlay">
+            <h1>{{ event.name }}</h1>
         </div>
     </div>
+
+    <div class="content-block">
+
+        <!-- Блок параметров участия -->
+        <div class="section-title">Параметры участия</div>
+        <div class="info-grid">
+            {% if event.min_grade is not none and event.max_grade is not none and event.min_grade != '' and event.max_grade != '' %}
+            <div class="info-item">
+                <strong>Классы</strong>
+                <span>{{ event.min_grade }} - {{ event.max_grade }}</span>
+            </div>
+            {% endif %}
+
+            {% if event.min_age is not none and event.max_age is not none and event.min_age != '' and event.max_age != '' %}
+            <div class="info-item">
+                <strong>Возраст</strong>
+                <span>{{ event.min_age }} - {{ event.max_age }} лет</span>
+            </div>
+            {% endif %}
+
+            {% if event.place and event.place != 'null' and event.place.strip() != '' %}
+            <div class="info-item">
+                <strong>Место проведения</strong>
+                <span>{{ event.place }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Блок деталей олимпиады (из PDF/Excel) -->
+        {% set has_details = (event.course and event.course != 'null') or (event.profile and event.profile != 'null') or (event.level and event.level != 'null') or (event.diploma and event.diploma != 'null') %}
+
+        {% if has_details %}
+        <div class="section-title">Детали мероприятия</div>
+        <div class="info-grid">
+            {% if event.course and event.course != 'null' and event.course.strip() != '' %}
+            <div class="info-item"><strong>Курс / Направление</strong><span>{{ event.course }}</span></div>
+            {% endif %}
+
+            {% if event.profile and event.profile != 'null' and event.profile.strip() != '' %}
+            <div class="info-item"><strong>Профиль</strong><span>{{ event.profile }}</span></div>
+            {% endif %}
+
+            {% if event.level and event.level != 'null' and event.level.strip() != '' %}
+            <div class="info-item"><strong>Уровень</strong><span>{{ event.level }}</span></div>
+            {% endif %}
+
+            {% if event.diploma and event.diploma != 'null' and event.diploma.strip() != '' %}
+            <div class="info-item"><strong>Награда / Диплом</strong><span>{{ event.diploma }}</span></div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Статус и мета-информация -->
+        <div class="section-title">Информация</div>
+        <div class="info-grid">
+            <div class="info-item">
+                <strong>Статус</strong>
+                {% if event.isActive %}
+                    <span class="status-badge status-active">● Активно</span>
+                {% else %}
+                    <span class="status-badge status-inactive">○ Неактивно</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="meta-footer">
+            <span>ID События: <code>{{ event.id }}</code></span>
+            <span>Обновлено: {{ event.updatedAt[:10] if event.updatedAt else 'Н/Д' }}</span>
+        </div>
+
+    </div>
+
 </body>
 </html>

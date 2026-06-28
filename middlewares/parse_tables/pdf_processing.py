@@ -1,4 +1,4 @@
-from img2table.ocr import EasyOCR
+from img2table.ocr import TesseractOCR
 from img2table.document import PDF
 import os
 import openpyxl
@@ -6,24 +6,25 @@ from openpyxl.utils import get_column_letter
 
 _ocr = None
 
+
 def get_ocr():
     global _ocr
     if _ocr is None:
-        _ocr = EasyOCR(lang=["en", "ru"])
+        _ocr = TesseractOCR(lang='rus')
     return _ocr
 
-# Импортируйте ваши модули для PDF и mkdir, если они не импортированы ранее:
-# from ВашаБиблиотека import PDF, mkdir
 
 def extract_data(pdfname):
-    base_name = pdfname.split('.')[0]
-
+    base_name = os.path.basename(pdfname).split('.')[0]
     dir_path = f'../../tables/{base_name}'
 
-    temp_output_path = f'{dir_path}/{base_name}_temp.xlsx'
-    final_output_path = f'{dir_path}/{base_name}.xlsx'
+    os.makedirs(dir_path, exist_ok=True)
+
+    temp_output_path = os.path.join(dir_path, f'{base_name}_temp.xlsx')
+    final_output_path = os.path.join(dir_path, f'{base_name}.xlsx')
 
     pdf = PDF(src=pdfname)
+
     pdf.to_xlsx(temp_output_path,
                 ocr=get_ocr(),
                 implicit_columns=True,
@@ -55,7 +56,6 @@ def extract_data(pdfname):
         source_col_count = ws_source.max_column
 
         # Вычисляем, сколько ПУСТЫХ столбцов нужно добавить СЛЕВА.
-        # Если текущая таблица шире первой, отступ равен 0.
         left_padding = max(0, base_col_count - source_col_count)
 
         # Итоговая ширина строки в финальном листе
@@ -85,7 +85,7 @@ def extract_data(pdfname):
 
                 if c <= left_padding:
                     # 1. ЗОНА ОТСТУПА: Добавляем пустые столбцы СЛЕВА
-                    dest_cell.value = ""  # Явно инициализируем ячейку
+                    dest_cell.value = ""
                     if first_valid_border:
                         dest_cell.border = openpyxl.styles.Border(
                             **{k: v for k, v in first_valid_border.__dict__.items() if not k.startswith('_')})
@@ -113,5 +113,5 @@ def extract_data(pdfname):
     if os.path.exists(temp_output_path):
         os.remove(temp_output_path)
 
-    print(f"Таблицы склеены. Пустые столбцы добавлены слева: {final_output_path}")
+    # print(f"Таблицы склеены. Пустые столбцы добавлены слева: {final_output_path}")
     return final_output_path

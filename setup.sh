@@ -1,4 +1,11 @@
-mkdir middlewares\parse_tables\models
-cd middlewares\parse_tables\models
-curl -L -O https://huggingface.co/bsmock/tatr-pubtables1m-v1.0/resolve/main/pubtables1m_detection_detr_r18.pth
-curl -l -O https://huggingface.co/bsmock/TATR-v1.1-All/resolve/main/TATR-v1.1-All-msft.pth
+#!/bin/sh
+set -e
+
+echo "Checking Tesseract OCR installation..."
+
+tesseract --version | head -1
+tesseract --list-langs
+
+echo "Starting application..."
+
+exec "$@"

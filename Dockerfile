@@ -14,6 +14,21 @@ WORKDIR /app
 
 COPY requirements.txt .
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    wget \
+    unzip \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-rus \
+    tesseract-ocr-eng \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
         torch==2.2.2+cpu \
@@ -25,6 +40,11 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     rm -rf /root/.cache /tmp/*
 
 COPY . .
+
+COPY setup.sh /setup.sh
+RUN chmod +x /setup.sh
+
+ENTRYPOINT ["/setup.sh"]
 
 EXPOSE 5000
 

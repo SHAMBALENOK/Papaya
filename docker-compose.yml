@@ -52,19 +52,17 @@ services:
 
   web:
     build: .
-    command: gunicorn main:app --bind 0.0.0.0:5000 --timeout 300 --workers 1
     container_name: web
     environment:
       FLASK_SECRET_KEY: 'change_key'
       DATABASE_URL: 'postgresql://postgres:postgres@postgres:5432/postgres'
-      # Указываем пути для кэша моделей внутри контейнера:
       HF_HOME: /app/.cache/huggingface
       EASYOCR_MODULE_PATH: /app/.cache/easyocr
+      HF_TOKEN: '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'
     ports:
       - "5000:5000"
     volumes:
       - ./tables:/app/tables
-      # Сохраняем скачанные модели на хосте, чтобы они не раздували контейнер:
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
@@ -83,7 +81,7 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 6G
+          memory: 12G
 
 volumes:
   postgres-data:
