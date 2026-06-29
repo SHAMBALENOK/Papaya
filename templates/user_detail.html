@@ -3,68 +3,240 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Papaya - Главная</title>
+    <title>Профиль {{ user.fullname }} - Papaya</title>
     <style>
-        body { font-family: sans-serif; margin: 0; padding: 0; background: #f4f6f8; }
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        .nav-link { text-decoration: none; color: #333; font-weight: bold; margin-right: 15px; }
+        .avatar { width: 100px; height: 100px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 10px; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .info-item strong { display: block; color: #666; font-size: 0.9em; }
 
-        /* Header */
-        header { background: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .logo { text-decoration: none; color: #ff6b6b; font-size: 1.5em; font-weight: bold; }
-        .user-menu a { text-decoration: none; color: #333; margin-left: 20px; font-weight: 500; }
-        .btn-logout { color: #e74c3c !important; }
+        /* Стили для форм управления событиями */
+        .event-forms-container { background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #e0e0e0; }
+        .form-section { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #ddd; }
+        .form-section:last-child { border-bottom: none; margin-bottom: 0; }
+        .form-section h3 { margin-top: 0; color: #2c3e50; }
 
-        /* Grid Layout */
-        .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
-        .events-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 25px; }
+        .form-row { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 15px; align-items: flex-end; }
+        .form-group { display: flex; flex-direction: column; flex: 1; min-width: 150px; }
+        .form-group label { font-size: 0.85em; margin-bottom: 5px; color: #444; }
+        .form-group input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
 
-        /* Card Design */
-        .card {
-            background: white; border-radius: 12px; overflow: hidden;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: transform 0.2s, box-shadow 0.2s;
-            text-decoration: none; color: inherit; display: block;
+        button[type="submit"] {
+            background-color: #ff6b6b; color: white; border: none; padding: 10px 20px;
+            border-radius: 4px; cursor: pointer; font-size: 1em; transition: background 0.2s;
         }
-        .card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+        button[type="submit"]:hover { background-color: #ee5253; }
 
-        .card-img { width: 100%; height: 180px; object-fit: cover; background: #eee; }
-        .card-body { padding: 20px; }
-        .card-title { margin: 0; font-size: 1.1em; color: #2c3e50; line-height: 1.4; }
-
-        .empty-state { text-align: center; padding: 60px 20px; color: #95a5a6; }
+        .pdf-upload-box {
+            background: #fff; border: 2px dashed #ccc; padding: 20px; border-radius: 6px; text-align: center;
+        }
+        .pdf-upload-box input[type="file"] { margin: 10px 0; }
     </style>
 </head>
 <body>
 
-    <header>
-        <a href="{{ url_for('main') }}" class="logo">🍈 Papaya</a>
-        <div class="user-menu">
-            <a href="{{ url_for('user_details', user_id=current_user.id) }}">{{ fullname }}</a>
-            <a href="{{ url_for('logout') }}" class="btn-logout">Выйти</a>
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <div>
+            <a href="{{ url_for('main') }}" class="nav-link">🍈 На главную</a>
+            {% if current_user.id == user.id %}
+                <button onclick="document.getElementById('edit-profile-form').scrollIntoView({behavior: 'smooth'})" style="background:none; border:none; color:#007bff; cursor:pointer; text-decoration:underline;">Редактировать профиль</button>
+            {% endif %}
         </div>
     </header>
 
-    <div class="container">
-        <h2 style="margin-bottom: 30px; color: #34495e;">Актуальные олимпиады</h2>
-
-        {% if events %}
-            <div class="events-grid">
-                {% for event in events %}
-                    {% set img_src = event.preview_picture if event.preview_picture else 'https://placehold.co/600x400/e9ecef/95a5a6?text=No+Preview' %}
-
-                    <a href="{{ url_for('event_details', event_id=event.id) }}" class="card">
-                        <img src="{{ img_src }}" alt="{{ event.name }}" class="card-img">
-                        <div class="card-body">
-                            <h3 class="card-title">{{ event.name }}</h3>
-                        </div>
-                    </a>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="empty-state">
-                <h3>Событий пока нет 😔</h3>
-                <p>Загляните позже, мы обязательно добавим что-нибудь интересное!</p>
-            </div>
-        {% endif %}
+    <div style="text-align: center; margin-bottom: 40px;">
+        <div class="avatar" style="margin: 0 auto;">{{ user.fullname[0] | upper if user.fullname else '?' }}</div>
+        <h1>{{ user.fullname }}</h1>
+        <p style="color: #666;">{{ user.role }}</p>
     </div>
 
+    <div class="info-grid">
+        <div class="info-item"><strong>Email</strong> {{ user.email }}</div>
+        <div class="info-item"><strong>Телефон</strong> {{ user.phone if user.phone else 'Не указан' }}</div>
+        <div class="info-item"><strong>Дата рождения</strong> {{ user.bday if user.bday else 'Не указана' }}</div>
+        <div class="info-item">
+            <strong>Пол</strong>
+            {% if user.gender == 'male' %}Мужской
+            {% elif user.gender == 'female' %}Женский
+            {% else %} Не указан {% endif %}
+        </div>
+        <div class="info-item"><strong>Регион</strong> {{ user.region if user.region else 'Не указан' }}</div>
+        <div class="info-item"><strong>Статус</strong> {{ user.status if user.status else 'Не задан' }}</div>
+        <div class="info-item">
+            <strong>Аккаунт</strong>
+            {% if user.isActive %}<span style="color:green">Активен</span>{% else %}<span style="color:red">Заблокирован</span>{% endif %}
+        </div>
+        <div class="info-item"><strong>ID</strong> <code>{{ user.id }}</code></div>
+    </div>
+
+    <div style="margin-bottom: 40px;">
+        <h3>О себе</h3>
+        <p>{{ user.bio if user.bio else 'Нет информации.' }}</p>
+        <small style="color:#999">Зарегистрирован: {{ user.createdAt if user.createdAt else 'Н/Д' }}</small>
+    </div>
+
+    {% if current_user.id == user.id %}
+    <div id="edit-profile-form" class="form-section" style="background: #f0f4f8; padding: 20px; border-radius: 8px;">
+        <h3>Изменение данных профиля</h3>
+        <form action="{{ url_for('user_edit_details', user_id=user.id) }}" method="POST" class="ajax-form">
+            <div class="form-row">
+                <div class="form-group"><label>ФИО</label><input type="text" name="fullName" value="{{ user.fullname }}" required></div>
+                <div class="form-group"><label>Email</label><input type="email" name="email" value="{{ user.email }}" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Пароль (оставьте пустым, чтобы не менять)</label><input type="password" name="password"></div>
+                <div class="form-group"><label>Телефон</label><input type="text" name="phone" value="{{ user.phone }}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Дата рождения (YYYY-MM-DD)</label><input type="text" name="bday" value="{{ user.bday }}"></div>
+                <div class="form-group">
+                    <label>Пол</label>
+                    <select name="gender" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
+                        <option value="" {% if not user.gender %}selected{% endif %}>Не указан</option>
+                        <option value="male" {% if user.gender == 'male' %}selected{% endif %}>Мужской</option>
+                        <option value="female" {% if user.gender == 'female' %}selected{% endif %}>Женский</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Регион</label><input type="text" name="region" value="{{ user.region }}"></div>
+                <div class="form-group"><label>Статус (текст)</label><input type="text" name="status" value="{{ user.status }}"></div>
+            </div>
+            <div class="form-group" style="margin-bottom: 15px;">
+                <label>О себе</label>
+                <textarea name="bio" rows="4" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;">{{ user.bio if user.bio else '' }}</textarea>
+            </div>
+            <button type="button" onclick="window.scrollTo(0,0)" style="background:#95a5a6; margin-right: 10px;">Отмена</button>
+            <button type="submit">Сохранить</button>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if current_user.id == user.id or current_user.role == 'ADMIN' %}
+    <div class="event-forms-container">
+        <h2>Управление событиями</h2>
+
+        <!-- 1. Создать событие -->
+        <div class="form-section">
+            <h3>Создать событие</h3>
+            <form action="{{ url_for('add_event', user_id=user.id) }}" method="POST" class="ajax-form">
+                <div class="form-row">
+                    <div class="form-group"><label>Название события *</label><input type="text" name="name" required></div>
+                    <div class="form-group"><label>Место проведения *</label><input type="text" name="place" required></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade" required></div>
+                    <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade" required></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age" required></div>
+                    <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age" required></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
+                    <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
+                </div>
+                <button type="submit">Создать событие</button>
+            </form>
+        </div>
+
+        <!-- 2. Добавить из PDF (Новый дизайн) -->
+        <div class="form-section">
+            <h3>Добавить события из PDF-таблицы</h3>
+            <div class="pdf-upload-box">
+                <p style="margin-top:0; color:#666;">Загрузите Excel/PDF таблицу со списком мероприятий для автоматического импорта.</p>
+                <form action="{{ url_for('add_events_via_pdf_tables', user_id=user.id) }}" method="POST" enctype="multipart/form-data" class="ajax-form">
+                    <input type="file" id="pdf_file" name="file" accept=".pdf,.xlsx,.xls" required>
+                    <br>
+                    <button type="submit" style="background-color: #2ecc71;">📥 Загрузить и добавить</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 3. Редактировать существующее -->
+        <div class="form-section">
+            <h3>Редактировать существующее</h3>
+            <form action="{{ url_for('event_edit_details', user_id=user.id, event_id='PLACEHOLDER_ID') }}" method="POST" class="ajax-form" id="edit-event-form">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 0 0 200px;"><label>ID события для редактирования</label><input type="text" name="event_id_input" placeholder="Вставьте ID" oninput="updateEditAction(this.value)"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Название *</label><input type="text" name="name"></div>
+                    <div class="form-group"><label>Место *</label><input type="text" name="place"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade"></div>
+                    <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age"></div>
+                    <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
+                    <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
+                </div>
+                <button type="submit">Обновить событие</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <script>
+        // Функция для динамического изменения action формы редактирования события
+        function updateEditAction(id) {
+            const form = document.getElementById('edit-event-form');
+            if(id) {
+                // Формируем URL согласно роуту /user/<user_id>/<event_id>/edit_event
+                form.action = "{{ url_for('event_edit_details', user_id=user.id, event_id='') }}" + id;
+            }
+        }
+
+        // Обработчик AJAX отправки форм для корректной обработки JSON-редиректа из main.py
+        document.querySelectorAll('.ajax-form').forEach(form => {
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                let formData;
+                let headers = {};
+
+                // Проверяем, является ли форма multipart (для файлов)
+                if (form.enctype === 'multipart/form-data') {
+                    formData = new FormData(form);
+                } else {
+                    // Для обычных форм собираем JSON, так как бэкенд ждет request.get_json()
+                    const data = {};
+                    new FormData(form).forEach((value, key) => {
+                        // Пропускаем поле event_id_input, оно нужно только для JS логики
+                        if (key !== 'event_id_input') data[key] = value;
+                    });
+                    formData = JSON.stringify(data);
+                    headers['Content-Type'] = 'application/json';
+                }
+
+                try {
+                    const response = await fetch(form.action, {
+                        method: 'POST',
+                        body: formData,
+                        headers: headers
+                    });
+
+                    const result = await response.json();
+
+                    if (result.redirect) {
+                        window.location.href = result.redirect;
+                    } else if (result.hint) {
+                        alert('Ошибка: ' + result.hint);
+                    } else {
+                        alert('Произошла неизвестная ошибка при обработке запроса.');
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('Ошибка соединения с сервером.');
+                }
+            });
+        });
+    </script>
 </body>
 </html>
