@@ -8,6 +8,8 @@ services:
     branch: main
     dockerfilePath: ./Dockerfile
     healthCheckPath: /
+    # Оптимизация для 512MB RAM: 1 воркер, preload моделей, увеличенный таймаут
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 --graceful-timeout 120 --workers 1 --preload main:app
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true
@@ -37,6 +39,11 @@ services:
         value: /app/.cache/easyocr
       - key: HF_TOKEN
         sync: false
+      # Ограничение потоков для экономии памяти на CPU
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
 
 databases:
   - name: papaya-db

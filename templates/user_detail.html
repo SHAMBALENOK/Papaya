@@ -5,33 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Профиль {{ user.fullname }} - Papaya</title>
     <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f4f6f8; }
         .nav-link { text-decoration: none; color: #333; font-weight: bold; margin-right: 15px; }
         .avatar { width: 100px; height: 100px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 10px; }
         .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
         .info-item strong { display: block; color: #666; font-size: 0.9em; }
 
-        /* Стили для форм управления событиями */
-        .event-forms-container { background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #e0e0e0; }
-        .form-section { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #ddd; }
-        .form-section:last-child { border-bottom: none; margin-bottom: 0; }
-        .form-section h3 { margin-top: 0; color: #2c3e50; }
-
-        .form-row { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 15px; align-items: flex-end; }
+        /* Стили для форм */
+        .form-section { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .form-row { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 15px; }
         .form-group { display: flex; flex-direction: column; flex: 1; min-width: 150px; }
         .form-group label { font-size: 0.85em; margin-bottom: 5px; color: #444; }
-        .form-group input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
-
-        button[type="submit"] {
-            background-color: #ff6b6b; color: white; border: none; padding: 10px 20px;
-            border-radius: 4px; cursor: pointer; font-size: 1em; transition: background 0.2s;
-        }
+        .form-group input, .form-group select, .form-group textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        button[type="submit"] { background-color: #ff6b6b; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
         button[type="submit"]:hover { background-color: #ee5253; }
 
-        .pdf-upload-box {
-            background: #fff; border: 2px dashed #ccc; padding: 20px; border-radius: 6px; text-align: center;
+        /* Стили для блока загрузки PDF */
+        .pdf-box {
+            position: relative; border: 2px dashed #ccc; padding: 30px;
+            text-align: center; border-radius: 8px; background: #fff; overflow: hidden;
         }
-        .pdf-upload-box input[type="file"] { margin: 10px 0; }
+        .pdf-desc { color: #666; margin-bottom: 20px; font-size: 0.95em; }
+
+        /* Оверлей загрузки */
+        .upload-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10; backdrop-filter: blur(2px);
+        }
+        .upload-overlay.active { display: flex; }
+
+        /* Спиннер */
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #f3f3f3;
+            border-top: 4px solid #2ecc71; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .btn-upload { background-color: #2ecc71 !important; font-size: 1.1em; padding: 12px 25px; }
+        .btn-upload:hover { background-color: #27ae60 !important; }
     </style>
 </head>
 <body>
@@ -77,7 +91,7 @@
     </div>
 
     {% if current_user.id == user.id %}
-    <div id="edit-profile-form" class="form-section" style="background: #f0f4f8; padding: 20px; border-radius: 8px;">
+    <div id="edit-profile-form" class="form-section">
         <h3>Изменение данных профиля</h3>
         <form action="{{ url_for('user_edit_details', user_id=user.id) }}" method="POST" class="ajax-form">
             <div class="form-row">
@@ -92,7 +106,7 @@
                 <div class="form-group"><label>Дата рождения (YYYY-MM-DD)</label><input type="text" name="bday" value="{{ user.bday }}"></div>
                 <div class="form-group">
                     <label>Пол</label>
-                    <select name="gender" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
+                    <select name="gender">
                         <option value="" {% if not user.gender %}selected{% endif %}>Не указан</option>
                         <option value="male" {% if user.gender == 'male' %}selected{% endif %}>Мужской</option>
                         <option value="female" {% if user.gender == 'female' %}selected{% endif %}>Женский</option>
@@ -105,7 +119,7 @@
             </div>
             <div class="form-group" style="margin-bottom: 15px;">
                 <label>О себе</label>
-                <textarea name="bio" rows="4" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;">{{ user.bio if user.bio else '' }}</textarea>
+                <textarea name="bio" rows="4">{{ user.bio if user.bio else '' }}</textarea>
             </div>
             <button type="button" onclick="window.scrollTo(0,0)" style="background:#95a5a6; margin-right: 10px;">Отмена</button>
             <button type="submit">Сохранить</button>
@@ -114,101 +128,112 @@
     {% endif %}
 
     {% if current_user.id == user.id or current_user.role == 'ADMIN' %}
-    <div class="event-forms-container">
+    <div class="form-section">
         <h2>Управление событиями</h2>
 
-        <!-- 1. Создать событие -->
-        <div class="form-section">
-            <h3>Создать событие</h3>
-            <form action="{{ url_for('add_event', user_id=user.id) }}" method="POST" class="ajax-form">
-                <div class="form-row">
-                    <div class="form-group"><label>Название события *</label><input type="text" name="name" required></div>
-                    <div class="form-group"><label>Место проведения *</label><input type="text" name="place" required></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade" required></div>
-                    <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade" required></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age" required></div>
-                    <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age" required></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
-                    <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
-                </div>
-                <button type="submit">Создать событие</button>
-            </form>
-        </div>
-
-        <!-- 2. Добавить из PDF (Новый дизайн) -->
-        <div class="form-section">
-            <h3>Добавить события из PDF-таблицы</h3>
-            <div class="pdf-upload-box">
-                <p style="margin-top:0; color:#666;">Загрузите Excel/PDF таблицу со списком мероприятий для автоматического импорта.</p>
-                <form action="{{ url_for('add_events_via_pdf_tables', user_id=user.id) }}" method="POST" enctype="multipart/form-data" class="ajax-form">
-                    <input type="file" id="pdf_file" name="file" accept=".pdf,.xlsx,.xls" required>
-                    <br>
-                    <button type="submit" style="background-color: #2ecc71;">📥 Загрузить и добавить</button>
-                </form>
+        <!-- Создать событие -->
+        <h3>Создать событие</h3>
+        <form action="{{ url_for('add_event', user_id=user.id) }}" method="POST" class="ajax-form">
+            <div class="form-row">
+                <div class="form-group"><label>Название события *</label><input type="text" name="name" required></div>
+                <div class="form-group"><label>Место проведения *</label><input type="text" name="place" required></div>
             </div>
-        </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade" required></div>
+                <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age" required></div>
+                <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
+                <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
+            </div>
+            <button type="submit">Создать событие</button>
+        </form>
 
-        <!-- 3. Редактировать существующее -->
-        <div class="form-section">
-            <h3>Редактировать существующее</h3>
-            <form action="{{ url_for('event_edit_details', user_id=user.id, event_id='PLACEHOLDER_ID') }}" method="POST" class="ajax-form" id="edit-event-form">
-                <div class="form-row">
-                    <div class="form-group" style="flex: 0 0 200px;"><label>ID события для редактирования</label><input type="text" name="event_id_input" placeholder="Вставьте ID" oninput="updateEditAction(this.value)"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Название *</label><input type="text" name="name"></div>
-                    <div class="form-group"><label>Место *</label><input type="text" name="place"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade"></div>
-                    <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age"></div>
-                    <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
-                    <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
-                </div>
-                <button type="submit">Обновить событие</button>
+        <!-- Добавить из PDF (С ОБНОВЛЕННЫМ ДИЗАЙНОМ И ЛОГИКОЙ) -->
+        <h3 style="margin-top: 30px;">Добавить события из PDF-таблицы</h3>
+        <div class="pdf-box" id="pdf-upload-container">
+            <!-- Оверлей загрузки -->
+            <div class="upload-overlay" id="upload-overlay">
+                <div class="spinner"></div>
+                <p style="font-weight: bold; color: #2c3e50;">Обработка файла...</p>
+                <small style="color: #7f8c8d;">Пожалуйста, подождите. Это может занять некоторое время.</small>
+            </div>
+
+            <!-- Форма -->
+            <p class="pdf-desc">Загрузите PDF таблицу со списком мероприятий для автоматического импорта.</p>
+            <form action="{{ url_for('add_events_via_pdf_tables', user_id=user.id) }}" method="POST" enctype="multipart/form-data" class="ajax-form" id="pdf-form">
+                <input type="file" id="pdf_file" name="file" accept=".pdf" required style="margin-bottom: 15px;">
+                <br>
+                <button type="submit" class="btn-upload">📥 Загрузить и добавить</button>
             </form>
         </div>
+
+        <!-- Редактировать существующее -->
+        <h3 style="margin-top: 30px;">Редактировать существующее</h3>
+        <form action="{{ url_for('event_edit_details', user_id=user.id, event_id='PLACEHOLDER_ID') }}" method="POST" class="ajax-form" id="edit-event-form">
+            <div class="form-row">
+                <div class="form-group" style="flex: 0 0 200px;"><label>ID события для редактирования</label><input type="text" name="event_id_input" placeholder="Вставьте ID" oninput="updateEditAction(this.value)"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Название *</label><input type="text" name="name"></div>
+                <div class="form-group"><label>Место *</label><input type="text" name="place"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade"></div>
+                <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age"></div>
+                <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
+                <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
+            </div>
+            <button type="submit">Обновить событие</button>
+        </form>
     </div>
     {% endif %}
 
     <script>
-        // Функция для динамического изменения action формы редактирования события
         function updateEditAction(id) {
             const form = document.getElementById('edit-event-form');
             if(id) {
-                // Формируем URL согласно роуту /user/<user_id>/<event_id>/edit_event
                 form.action = "{{ url_for('event_edit_details', user_id=user.id, event_id='') }}" + id;
             }
         }
 
-        // Обработчик AJAX отправки форм для корректной обработки JSON-редиректа из main.py
+        // AJAX обработчик для всех форм
         document.querySelectorAll('.ajax-form').forEach(form => {
             form.addEventListener('submit', async function(e) {
                 e.preventDefault();
 
+                // Специфичная логика для формы PDF
+                if (form.id === 'pdf-form') {
+                    const overlay = document.getElementById('upload-overlay');
+                    const fileInput = document.getElementById('pdf_file');
+
+                    if (!fileInput.files.length) {
+                        alert('Пожалуйста, выберите файл.');
+                        return;
+                    }
+
+                    // Показываем оверлей и блокируем форму
+                    overlay.classList.add('active');
+                }
+
                 let formData;
                 let headers = {};
 
-                // Проверяем, является ли форма multipart (для файлов)
                 if (form.enctype === 'multipart/form-data') {
                     formData = new FormData(form);
                 } else {
-                    // Для обычных форм собираем JSON, так как бэкенд ждет request.get_json()
                     const data = {};
                     new FormData(form).forEach((value, key) => {
-                        // Пропускаем поле event_id_input, оно нужно только для JS логики
                         if (key !== 'event_id_input') data[key] = value;
                     });
                     formData = JSON.stringify(data);
@@ -228,12 +253,22 @@
                         window.location.href = result.redirect;
                     } else if (result.hint) {
                         alert('Ошибка: ' + result.hint);
+                        // Если ошибка, убираем оверлей
+                        if (form.id === 'pdf-form') {
+                            document.getElementById('upload-overlay').classList.remove('active');
+                        }
                     } else {
-                        alert('Произошла неизвестная ошибка при обработке запроса.');
+                        alert('Произошла неизвестная ошибка.');
+                        if (form.id === 'pdf-form') {
+                            document.getElementById('upload-overlay').classList.remove('active');
+                        }
                     }
                 } catch (error) {
                     console.error('Error:', error);
                     alert('Ошибка соединения с сервером.');
+                    if (form.id === 'pdf-form') {
+                        document.getElementById('upload-overlay').classList.remove('active');
+                    }
                 }
             });
         });
