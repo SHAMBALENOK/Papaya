@@ -76,19 +76,15 @@ def register():
         check_fullname = re_check.is_valid_fullname(fullname)
         check_password = re_check.is_valid_password(password)
         if not re_check.is_valid_email(email):
-            logger.debug(f"email {email} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Неверный email'}), 400
         if not check_fullname[0]:
-            logger.debug(f"имя {fullname} не прошло проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': check_fullname[1]}), 400
         if not check_password[0]:
-            logger.debug(f"пароль {password} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': check_password[1]}), 400
         if db.find_user_by_email(email):
-            logger.debug(f"пользователь уже есть в системе", exc_info=True)
             return jsonify({'status': 'emailIsBusy',
                             'hint': 'Email уже зарегистрирован'}), 409
 
@@ -112,7 +108,6 @@ def register():
         user = db.find_user_by_id(user_id)
         login_user(user, remember=True)
 
-        logger.debug(f"Успешная регистрация {fullname} {email} под {user_id}, пароль {password}", exc_info=True)
         return jsonify({
             'status': 'Created',
             'redirect': url_for('main')
@@ -140,27 +135,22 @@ def login():
         # check_fullname = re_check.is_valid_fullname(fullname)
         check_password = re_check.is_valid_password(password)
         if not re_check.is_valid_email(email):
-            logger.debug(f"email {email} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Неверный email'}), 400
         if not check_password[0]:
-            logger.debug(f"пароль {password} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': check_password[1]}), 400
 
         db_user = db.find_user_by_email(email)
 
         if not db_user:
-            logger.debug(f"такого пользователя нет", exc_info=True)
             return jsonify({'status': 'unauthorized',
                             'hint': f'email {email} не занят, используйте register'}), 401
         else:
             if not check_password_hash(db_user.password, password):
-                logger.debug(f"пароль {password} или email {email} не прошел проверку", exc_info=True)
                 return jsonify({'status': 'unauthorized',
                                 'hint': f'Либо email {email} введен неправильно, либо - пароль'}), 401
             else:
-                logger.debug(f"Успешный логин {email}, пароль {password}", exc_info=True)
                 login_user(db_user, remember=True)
                 return jsonify({
                     'status': 'success',
@@ -179,7 +169,6 @@ def login():
 def logout():
     try:
         logout_user()
-        logger.debug(f"пользователь разлогинился", exc_info=True)
         return redirect(url_for('auth'))
     except Exception as e:
         logger.error(f"Произошла ошибка {e}", exc_info=True)
@@ -260,15 +249,12 @@ def user_edit_details(user_id):
         clean_data = {k: v for k, v in data.items() if v != 'null'}
 
         if not re_check.is_valid_email(clean_data['email']):
-            logger.debug(f"email {clean_data['email']} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': 'Неверный email'}), 400
         if not re_check.is_valid_fullname(clean_data['fullname'])[0]:
-            logger.debug(f"имя {clean_data['fullname']} не прошло проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': re_check.is_valid_fullname(clean_data['fullname'])[1]}), 400
         if not re_check.is_valid_password(clean_data['password'])[0]:
-            logger.debug(f"пароль {clean_data['password']} не прошел проверку", exc_info=True)
             return jsonify({'status': 'badRequest',
                             'hint': re_check.is_valid_password(clean_data['password'])[1]}), 400
 
@@ -311,7 +297,6 @@ def add_event(user_id):
 
         for key, value in ins.items():
             if key == 'name' and value == 'null':
-                logger.debug(f"{key} не прошло проверку", exc_info=True)
                 return jsonify({'status': 'badRequest',
                                 'hint': f'Неверное {key}'}), 400
 
