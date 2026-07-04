@@ -33,10 +33,6 @@ services:
         value: "6"
       - key: INIT_EVENT_MAX_AGE
         value: "17"
-      - key: HF_HOME
-        value: /app/.cache/huggingface
-      - key: EASYOCR_MODULE_PATH
-        value: /app/.cache/easyocr
       - key: HF_TOKEN
         sync: false
       # Ограничение потоков для экономии памяти на CPU

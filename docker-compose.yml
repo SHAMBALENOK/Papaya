@@ -56,8 +56,6 @@ services:
     environment:
       FLASK_SECRET_KEY: 'change_key'
       DATABASE_URL: 'postgresql://postgres:postgres@postgres:5432/postgres'
-      HF_HOME: /app/.cache/huggingface
-      EASYOCR_MODULE_PATH: /app/.cache/easyocr
       HF_TOKEN: 'your_token'
     ports:
       - "5000:5000"
