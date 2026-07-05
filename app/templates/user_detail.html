@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Профиль {{ user.fullname }} - Papaya</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f4f6f8; }
+        .nav-link { text-decoration: none; color: #333; font-weight: bold; margin-right: 15px; }
+        .avatar { width: 100px; height: 100px; border-radius: 50%; background: #eee; display: flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 10px; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .info-item strong { display: block; color: #666; font-size: 0.9em; }
+
+        /* Стили для форм */
+        .form-section { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .form-row { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 15px; }
+        .form-group { display: flex; flex-direction: column; flex: 1; min-width: 150px; }
+        .form-group label { font-size: 0.85em; margin-bottom: 5px; color: #444; }
+        .form-group input, .form-group select, .form-group textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        button[type="submit"] { background-color: #ff6b6b; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
+        button[type="submit"]:hover { background-color: #ee5253; }
+
+        /* Стили для блока загрузки PDF */
+        .pdf-box {
+            position: relative; border: 2px dashed #ccc; padding: 30px;
+            text-align: center; border-radius: 8px; background: #fff; overflow: hidden;
+        }
+        .pdf-desc { color: #666; margin-bottom: 20px; font-size: 0.95em; }
+
+        /* Оверлей загрузки */
+        .upload-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 10; backdrop-filter: blur(2px);
+        }
+        .upload-overlay.active { display: flex; }
+
+        /* Спиннер */
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #f3f3f3;
+            border-top: 4px solid #2ecc71; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .btn-upload { background-color: #2ecc71 !important; font-size: 1.1em; padding: 12px 25px; }
+        .btn-upload:hover { background-color: #27ae60 !important; }
+    </style>
+</head>
+<body>
+
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <div>
+            <a href="{{ url_for('main') }}" class="nav-link">🍈 На главную</a>
+            {% if current_user.id == user.id %}
+                <button onclick="document.getElementById('edit-profile-form').scrollIntoView({behavior: 'smooth'})" style="background:none; border:none; color:#007bff; cursor:pointer; text-decoration:underline;">Редактировать профиль</button>
+            {% endif %}
+        </div>
+    </header>
+
+    <div style="text-align: center; margin-bottom: 40px;">
+        <div class="avatar" style="margin: 0 auto;">{{ user.fullname[0] | upper if user.fullname else '?' }}</div>
+        <h1>{{ user.fullname }}</h1>
+        <p style="color: #666;">{{ user.role }}</p>
+    </div>
+
+    <div class="info-grid">
+        <div class="info-item"><strong>Email</strong> {{ user.email }}</div>
+        <div class="info-item"><strong>Телефон</strong> {{ user.phone if user.phone else 'Не указан' }}</div>
+        <div class="info-item"><strong>Дата рождения</strong> {{ user.bday if user.bday else 'Не указана' }}</div>
+        <div class="info-item">
+            <strong>Пол</strong>
+            {% if user.gender == 'male' %}Мужской
+            {% elif user.gender == 'female' %}Женский
+            {% else %} Не указан {% endif %}
+        </div>
+        <div class="info-item"><strong>Регион</strong> {{ user.region if user.region else 'Не указан' }}</div>
+        <div class="info-item"><strong>Статус</strong> {{ user.status if user.status else 'Не задан' }}</div>
+        <div class="info-item">
+            <strong>Аккаунт</strong>
+            {% if user.isActive %}<span style="color:green">Активен</span>{% else %}<span style="color:red">Заблокирован</span>{% endif %}
+        </div>
+        <div class="info-item"><strong>ID</strong> <code>{{ user.id }}</code></div>
+    </div>
+
+    <div style="margin-bottom: 40px;">
+        <h3>О себе</h3>
+        <p>{{ user.bio if user.bio else 'Нет информации.' }}</p>
+        <small style="color:#999">Зарегистрирован: {{ user.createdAt if user.createdAt else 'Н/Д' }}</small>
+    </div>
+
+    {% if current_user.id == user.id %}
+    <div id="edit-profile-form" class="form-section">
+        <h3>Изменение данных профиля</h3>
+        <form action="{{ url_for('user_edit_details', user_id=user.id) }}" method="POST" class="ajax-form">
+            <div class="form-row">
+                <div class="form-group"><label>ФИО</label><input type="text" name="fullName" value="{{ user.fullname }}" required></div>
+                <div class="form-group"><label>Email</label><input type="email" name="email" value="{{ user.email }}" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Пароль (оставьте пустым, чтобы не менять)</label><input type="password" name="password"></div>
+                <div class="form-group"><label>Телефон</label><input type="text" name="phone" value="{{ user.phone }}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Дата рождения (YYYY-MM-DD)</label><input type="text" name="bday" value="{{ user.bday }}"></div>
+                <div class="form-group">
+                    <label>Пол</label>
+                    <select name="gender">
+                        <option value="" {% if not user.gender %}selected{% endif %}>Не указан</option>
+                        <option value="male" {% if user.gender == 'male' %}selected{% endif %}>Мужской</option>
+                        <option value="female" {% if user.gender == 'female' %}selected{% endif %}>Женский</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Регион</label><input type="text" name="region" value="{{ user.region }}"></div>
+                <div class="form-group"><label>Статус (текст)</label><input type="text" name="status" value="{{ user.status }}"></div>
+            </div>
+            <div class="form-group" style="margin-bottom: 15px;">
+                <label>О себе</label>
+                <textarea name="bio" rows="4">{{ user.bio if user.bio else '' }}</textarea>
+            </div>
+            <button type="button" onclick="window.scrollTo(0,0)" style="background:#95a5a6; margin-right: 10px;">Отмена</button>
+            <button type="submit">Сохранить</button>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if current_user.id == user.id or current_user.role == 'ADMIN' %}
+    <div class="form-section">
+        <h2>Управление событиями</h2>
+
+        <!-- Создать событие -->
+        <h3>Создать событие</h3>
+        <form action="{{ url_for('add_event', user_id=user.id) }}" method="POST" class="ajax-form">
+            <div class="form-row">
+                <div class="form-group"><label>Название события *</label><input type="text" name="name" required></div>
+                <div class="form-group"><label>Место проведения *</label><input type="text" name="place" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade" required></div>
+                <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age" required></div>
+                <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age" required></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
+                <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
+            </div>
+            <button type="submit">Создать событие</button>
+        </form>
+
+        <!-- Добавить из PDF (С ОБНОВЛЕННЫМ ДИЗАЙНОМ И ЛОГИКОЙ) -->
+        <h3 style="margin-top: 30px;">Добавить события из PDF-таблицы</h3>
+        <div class="pdf-box" id="pdf-upload-container">
+            <!-- Оверлей загрузки -->
+            <div class="upload-overlay" id="upload-overlay">
+                <div class="spinner"></div>
+                <p style="font-weight: bold; color: #2c3e50;">Обработка файла...</p>
+                <small style="color: #7f8c8d;">Пожалуйста, подождите. Это может занять некоторое время.</small>
+            </div>
+
+            <!-- Форма -->
+            <p class="pdf-desc">Загрузите PDF таблицу со списком мероприятий для автоматического импорта.</p>
+            <form action="{{ url_for('add_events_via_pdf_tables', user_id=user.id) }}" method="POST" enctype="multipart/form-data" class="ajax-form" id="pdf-form">
+                <input type="file" id="pdf_file" name="file" accept=".pdf" required style="margin-bottom: 15px;">
+                <br>
+                <button type="submit" class="btn-upload">📥 Загрузить и добавить</button>
+            </form>
+        </div>
+
+        <!-- Редактировать существующее -->
+        <h3 style="margin-top: 30px;">Редактировать существующее</h3>
+        <form action="{{ url_for('event_edit_details', user_id=user.id, event_id='PLACEHOLDER_ID') }}" method="POST" class="ajax-form" id="edit-event-form">
+            <div class="form-row">
+                <div class="form-group" style="flex: 0 0 200px;"><label>ID события для редактирования</label><input type="text" name="event_id_input" placeholder="Вставьте ID" oninput="updateEditAction(this.value)"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Название *</label><input type="text" name="name"></div>
+                <div class="form-group"><label>Место *</label><input type="text" name="place"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. класс *</label><input type="number" name="min_grade"></div>
+                <div class="form-group"><label>Макс. класс *</label><input type="number" name="max_grade"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Мин. возраст *</label><input type="number" name="min_age"></div>
+                <div class="form-group"><label>Макс. возраст *</label><input type="number" name="max_age"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>URL превью</label><input type="text" name="preview_picture"></div>
+                <div class="form-group"><label>URL полное фото</label><input type="text" name="picture"></div>
+            </div>
+            <button type="submit">Обновить событие</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <script>
+        function updateEditAction(id) {
+            const form = document.getElementById('edit-event-form');
+            if(id) {
+                form.action = "{{ url_for('event_edit_details', user_id=user.id, event_id='') }}" + id;
+            }
+        }
+
+        // AJAX обработчик для всех форм
+        document.querySelectorAll('.ajax-form').forEach(form => {
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                // Специфичная логика для формы PDF
+                if (form.id === 'pdf-form') {
+                    const overlay = document.getElementById('upload-overlay');
+                    const fileInput = document.getElementById('pdf_file');
+
+                    if (!fileInput.files.length) {
+                        alert('Пожалуйста, выберите файл.');
+                        return;
+                    }
+
+                    // Показываем оверлей и блокируем форму
+                    overlay.classList.add('active');
+                }
+
+                let formData;
+                let headers = {};
+
+                if (form.enctype === 'multipart/form-data') {
+                    formData = new FormData(form);
+                } else {
+                    const data = {};
+                    new FormData(form).forEach((value, key) => {
+                        if (key !== 'event_id_input') data[key] = value;
+                    });
+                    formData = JSON.stringify(data);
+                    headers['Content-Type'] = 'application/json';
+                }
+
+                try {
+                    const response = await fetch(form.action, {
+                        method: 'POST',
+                        body: formData,
+                        headers: headers
+                    });
+
+                    const result = await response.json();
+
+                    if (result.redirect) {
+                        window.location.href = result.redirect;
+                    } else if (result.hint) {
+                        alert('Ошибка: ' + result.hint);
+                        // Если ошибка, убираем оверлей
+                        if (form.id === 'pdf-form') {
+                            document.getElementById('upload-overlay').classList.remove('active');
+                        }
+                    } else {
+                        alert('Произошла неизвестная ошибка.');
+                        if (form.id === 'pdf-form') {
+                            document.getElementById('upload-overlay').classList.remove('active');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('Ошибка соединения с сервером.');
+                    if (form.id === 'pdf-form') {
+                        document.getElementById('upload-overlay').classList.remove('active');
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
