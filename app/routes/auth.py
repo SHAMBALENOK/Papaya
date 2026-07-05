@@ -1,16 +1,28 @@
+import uuid
+from app import models as db
+from fastapi import APIRouter
 from json import JSONDecodeError
-from flask import Blueprint, flash, request, jsonify, redirect, url_for, render_template
+import app.middlewares.tools as tools
+from app.databse.database import get_db
+import app.middlewares.re_check as re_check
+import app.middlewares.tokenz.main as tokenz
+from sqlalchemy.ext.asyncio import AsyncSession
 
-auth_page = Blueprint('simple_page', __name__,
-                        template_folder='templates')
+USER_NAMESPACE = uuid.NAMESPACE_DNS
 
-@auth_page.route('/auth', methods=['GET'])
+auth_page = APIRouter(
+    prefix='/auth',
+    tags=['authentication']
+)
+
+@tokenz.jwt_check
+@auth_page.get('/')
 def auth():
     if current_user.is_authenticated:
         return redirect(url_for('main'))
     return render_template('auth.html')
 
-@auth_page.route('/auth/register', methods=['POST'])
+@auth_page.post('/register')
 def register():
     try:
         try:
@@ -44,7 +56,7 @@ def register():
                             'hint': 'Email уже зарегистрирован'}), 409
 
 
-        user_id = str(uuid.uuid5(user_namespace, email))
+        user_id = str(uuid.uuid5(USER_NAMESPACE, email))
         db.add_user({
             'id': user_id,
             'email': email,
@@ -75,7 +87,7 @@ def register():
         }), 500
 
 
-@auth_page.route('/auth/login', methods=['POST'])
+@auth_page.post('/login')
 def login():
     try:
         try:
@@ -116,8 +128,7 @@ def login():
             "hint": f"Ошибка сервера {e}"
         }), 500
 
-@auth_page.route('/logout')
-@login_required
+@auth_page.get('/logout')
 def logout():
     try:
         logout_user()
@@ -128,4 +139,3 @@ def logout():
             "hint": f"Ошибка сервера {e}"
         }), 500
 
-#TODO: сделать асинхронными, реализовать jwt

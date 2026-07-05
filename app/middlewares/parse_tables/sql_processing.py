@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from huggingface_hub import InferenceClient
-import database.database as db
+from app import models as db
 from googletrans import Translator
 import asyncio
 import uuid

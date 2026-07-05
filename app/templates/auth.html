@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход и Регистрация | Papaya</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 1.5rem;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box; /* Важно для padding */
+            font-size: 1rem;
+        }
+        input:focus {
+            border-color: #ff6b6b;
+            outline: none;
+        }
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background-color: #ff5252;
+        }
+        .toggle-link {
+            text-align: center;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        .toggle-link a {
+            color: #ff6b6b;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .toggle-link a:hover {
+            text-decoration: underline;
+        }
+        .error-message {
+            color: #d32f2f;
+            background-color: #ffebee;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            display: none; /* Скрыто по умолчанию */
+            text-align: center;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Блок ошибок -->
+    <div id="error-box" class="error-message"></div>
+
+    <!-- Форма Входа -->
+    <div id="login-section">
+        <h2>Вход</h2>
+        <form id="login-form">
+            <div class="form-group">
+                <label for="login-email">Email</label>
+                <input type="email" id="login-email" name="email" required placeholder="example@mail.com">
+            </div>
+            <div class="form-group">
+                <label for="login-password">Пароль</label>
+                <input type="password" id="login-password" name="password" required placeholder="Введите пароль">
+            </div>
+            <button type="submit">Войти</button>
+        </form>
+        <div class="toggle-link">
+            Нет аккаунта? <a onclick="toggleForms()">Зарегистрироваться</a>
+        </div>
+    </div>
+
+    <!-- Форма Регистрации -->
+    <div id="register-section" class="hidden">
+        <h2>Регистрация</h2>
+        <form id="register-form">
+            <div class="form-group">
+                <label for="reg-fullname">ФИО</label>
+                <input type="text" id="reg-fullname" name="fullName" required placeholder="Иванов Иван">
+            </div>
+            <div class="form-group">
+                <label for="reg-email">Email</label>
+                <input type="email" id="reg-email" name="email" required placeholder="example@mail.com">
+            </div>
+            <div class="form-group">
+                <label for="reg-password">Пароль</label>
+                <input type="password" id="reg-password" name="password" required placeholder="Минимум 8 символов">
+            </div>
+            <div class="form-group">
+                <label for="reg-confirm-password">Подтвердите пароль</label>
+                <input type="password" id="reg-confirm-password" name="confirmPassword" required placeholder="Повторите пароль">
+            </div>
+            <button type="submit">Зарегистрироваться</button>
+        </form>
+        <div class="toggle-link">
+            Уже есть аккаунт? <a onclick="toggleForms()">Войти</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    const loginSection = document.getElementById('login-section');
+    const registerSection = document.getElementById('register-section');
+    const errorBox = document.getElementById('error-box');
+
+    // Переключение между формами
+    function toggleForms() {
+        errorBox.style.display = 'none';
+        if (loginSection.classList.contains('hidden')) {
+            loginSection.classList.remove('hidden');
+            registerSection.classList.add('hidden');
+        } else {
+            loginSection.classList.add('hidden');
+            registerSection.classList.remove('hidden');
+        }
+    }
+
+    // Отображение ошибки
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.style.display = 'block';
+    }
+
+    // Обработка входа
+    document.getElementById('login-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        errorBox.style.display = 'none';
+
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+
+        try {
+            const response = await fetch('/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ email, password })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Успех: редирект согласно ответу сервера
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                } else {
+                    window.location.href = '/';
+                }
+            } else {
+                // Ошибка сервера/валидации
+                showError(data.hint || 'Ошибка входа');
+            }
+        } catch (err) {
+            console.error(err);
+            showError('Ошибка соединения с сервером');
+        }
+    });
+
+    // Обработка регистрации
+    document.getElementById('register-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        errorBox.style.display = 'none';
+
+        const fullName = document.getElementById('reg-fullname').value.trim();
+        const email = document.getElementById('reg-email').value.trim();
+        const password = document.getElementById('reg-password').value;
+        const confirmPassword = document.getElementById('reg-confirm-password').value;
+
+        // Клиентская проверка совпадения паролей
+        if (password !== confirmPassword) {
+            showError('Пароли не совпадают');
+            return;
+        }
+
+        try {
+            const response = await fetch('/auth/register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ fullName, email, password })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Успех (201 Created)
+                if (data.redirect) {
+                    window.location.href = data.redirect;
+                } else {
+                    window.location.href = '/';
+                }
+            } else {
+                // Ошибка (400, 409 и т.д.)
+                showError(data.hint || 'Ошибка регистрации');
+            }
+        } catch (err) {
+            console.error(err);
+            showError('Ошибка соединения с сервером');
+        }
+    });
+</script>
+
+</body>
+</html>
