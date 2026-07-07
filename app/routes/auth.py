@@ -1,12 +1,17 @@
 import uuid
-from app import models as db
-from fastapi import APIRouter
+from http.client import responses
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from json import JSONDecodeError
 import app.middlewares.tools as tools
-from app.databse.database import get_db
+from app.database.database import get_db
 import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
+from app import models, schemas, database
+
+#TODO: добавить itsdangerous from starlette.middleware.sessions import SessionMiddleware (чек google ai)
 
 USER_NAMESPACE = uuid.NAMESPACE_DNS
 
@@ -16,79 +21,84 @@ auth_page = APIRouter(
 )
 
 @tokenz.jwt_check
-@auth_page.get('/')
-def auth():
-    if current_user.is_authenticated:
-        return redirect(url_for('main'))
-    return render_template('auth.html')
+@auth_page.get('/',
+               response_model=RedirectResponse,
+               responses={
+                   403: {'model': RedirectResponse, 'hint': 'вы уже зарегестрированы'}
+               }
+               )
+async def auth(
+        user: schemas.users.UserBase,
+        jwt_response: bool = True,
+):
+    if jwt_response:
+        return RedirectResponse(status_code=403, url='/')#TODO: сделать отображение html я тупой
+    return RedirectResponse(status_code=200, url='/auth')
 
-@auth_page.post('/register')
-def register():
+@auth_page.post('/register',
+                response_model=RedirectResponse,
+                responses={
+                    400: {'model': HTTPException, 'hint': 'Неверный формат email или пароля'},
+                    409: {'model': HTTPException, 'hint': 'email уже зарегистрирован'},
+                    500: {'model': HTTPException, 'hint': 'Приложение сломалось ¯\_(ツ)_/¯'}
+                }
+                )
+async def register(
+        user: schemas.users.UserCreate,
+        db: AsyncSession = Depends(get_db)
+):
     try:
-        try:
-            data = request.get_json()
-        except JSONDecodeError as e:
-            return jsonify({'status': 'badRequest',
-                            'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
-        # user_ip = request.remote_addr
-        email = data.get('email', 'null').strip()
-        password = data.get('password', 'null')
-        fullname = data.get('fullName', 'null').strip()
-        gender = data.get('gender', 'null')
-        bday = data.get('bday', 'null')
-        bio = data.get('bio', 'null')
-        phone = data.get('phone', 'null')
-        region = data.get('region', 'null')
-        status = data.get('status', 'null')
-        check_fullname = re_check.is_valid_fullname(fullname)
-        check_password = re_check.is_valid_password(password)
-        if not re_check.is_valid_email(email):
-            return jsonify({'status': 'badRequest',
-                            'hint': 'Неверный email'}), 400
-        if not check_fullname[0]:
-            return jsonify({'status': 'badRequest',
-                            'hint': check_fullname[1]}), 400
+        check_password = re_check.is_valid_password(user.password)
+        if not re_check.is_valid_email(str(user.email)):
+            raise HTTPException(status_code=400, detail='Неверный формат email')
         if not check_password[0]:
-            return jsonify({'status': 'badRequest',
-                            'hint': check_password[1]}), 400
-        if db.find_user_by_email(email):
-            return jsonify({'status': 'emailIsBusy',
-                            'hint': 'Email уже зарегистрирован'}), 409
+            raise HTTPException(status_code=400, detail=check_password[1])
+        if await database.users.find_user_by_email(user.email, db, models.users):
+            raise HTTPException(status_code=409, detail='email уже зарегистрирован')
 
+        user_data = await database.users.add_user(
+            ins={
+                'name': user.name,
+                'surname': user.surname,
+                'email': user.email,
+                'password': user.password
+            },
+            session=db,
+            model=models.users,
+        )
 
-        user_id = str(uuid.uuid5(USER_NAMESPACE, email))
-        db.add_user({
-            'id': user_id,
-            'email': email,
-            'fullname': fullname,
-            'password': password,
-            'role': 'USER',
-            'gender': gender,
-            'bday': bday,
-            'bio': bio,
-            'phone': phone,
-            'region': region,
-            'status': status,
+        response = RedirectResponse(status_code=200, url='/',)#TODO: доделать response
 
-        })
-
-        user = db.find_user_by_id(user_id)
-        login_user(user, remember=True)
+        response.set_cookie(
+            key="access_jwt",
+            value=await tokenz.create_jwt(
+                ins={
+                    'sub': user_data.id
+                },
+            ),
+            max_age=600
+        )
+        response.set_cookie(
+            key="access_jwt",
+            value=await tokenz.create_jwt(
+                ins={
+                    'sub': user_data.id
+                },
+            ),
+            max_age=1209600
+        )
 
         return jsonify({
             'status': 'Created',
-            'redirect': url_for('main')
+            'redirect': url_for('main')#TODO: переделать
         }), 201
-
     except Exception as e:
-        return jsonify({
-            "status": "internal_error",
-            "hint": f"Ошибка сервера {e}"
-        }), 500
+        raise HTTPException(status_code=500, detail=f'Приложение сломалось c ошибкой\n{e}\n ¯\_(ツ)_/¯')
+
 
 
 @auth_page.post('/login')
-def login():
+async def login():
     try:
         try:
             data = request.get_json()
@@ -128,14 +138,17 @@ def login():
             "hint": f"Ошибка сервера {e}"
         }), 500
 
+@tokenz.jwt_check
 @auth_page.get('/logout')
-def logout():
-    try:
-        logout_user()
-        return redirect(url_for('auth'))
-    except Exception as e:
-        return jsonify({
-            "status": "internal_error",
-            "hint": f"Ошибка сервера {e}"
-        }), 500
-
+async def logout(
+        user: schemas.users.UserBase,
+        jwt_response: bool = True,
+):
+    if jwt_response:
+        #logout_user() TODO: сделать эту штуку
+        return RedirectResponse('/auth')
+    else:
+        return {
+            'response': 403,
+            'hint': 'Вы не авторизованы',
+        }

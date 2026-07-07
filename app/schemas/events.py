@@ -1,9 +1,10 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import Optional
-
+from app.schemas.token import TokenResponse
 
 class EventBase(BaseModel):
+    jwt: TokenResponse
     id: str
     name: str
     disc: Optional[str] = None
