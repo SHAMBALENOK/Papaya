@@ -16,8 +16,6 @@ def add_user(ins: dict, session: session_Spec, model: Callable) -> user_Return:
         surname=ins.get('surname'),
         email=ins.get('email'),
         password=bcrypt.hashpw(ins.get('password').encode('utf-8'), salt),
-        createdAt=datetime.now(timezone.utc),
-        updatedAt=datetime.now(timezone.utc),
     )
     session.add(user)
     session.commit()
