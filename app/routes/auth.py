@@ -1,17 +1,12 @@
 import uuid
-from http.client import responses
-
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import RedirectResponse
-from json import JSONDecodeError
+from fastapi.responses import JSONResponse
 import app.middlewares.tools as tools
 from app.database.database import get_db
 import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
 from app import models, schemas, database
-
-#TODO: добавить itsdangerous from starlette.middleware.sessions import SessionMiddleware (чек google ai)
 
 USER_NAMESPACE = uuid.NAMESPACE_DNS
 
@@ -22,9 +17,10 @@ auth_page = APIRouter(
 
 @tokenz.jwt_check
 @auth_page.get('/',
-               response_model=RedirectResponse,
+               response_model=JSONResponse,
                responses={
-                   403: {'model': RedirectResponse, 'hint': 'вы уже зарегестрированы'}
+                   200: {'model': JSONResponse, 'hint': 'OK'},
+                   403: {'model': HTTPException, 'hint': 'Вы уже зарегестрированы'}
                }
                )
 async def auth(
@@ -32,13 +28,18 @@ async def auth(
         jwt_response: bool = True,
 ):
     if jwt_response:
-        return RedirectResponse(status_code=403, url='/')#TODO: сделать отображение html я тупой
-    return RedirectResponse(status_code=200, url='/auth')
+        raise HTTPException(
+            status_code=403,
+            detail="Вы уже зарегистрированы",
+            headers={"location": "/"}
+        )
+    return JSONResponse(status_code=200, content=None)
 
 @auth_page.post('/register',
-                response_model=RedirectResponse,
+                response_model=JSONResponse,
                 responses={
-                    400: {'model': HTTPException, 'hint': 'Неверный формат email или пароля'},
+                    200: {'model': JSONResponse, 'hint': 'OK'},
+                    400: {'model': HTTPException, 'hint': 'Неверный формат пароля'},
                     409: {'model': HTTPException, 'hint': 'email уже зарегистрирован'},
                     500: {'model': HTTPException, 'hint': 'Приложение сломалось ¯\_(ツ)_/¯'}
                 }
@@ -49,8 +50,6 @@ async def register(
 ):
     try:
         check_password = re_check.is_valid_password(user.password)
-        if not re_check.is_valid_email(str(user.email)):
-            raise HTTPException(status_code=400, detail='Неверный формат email')
         if not check_password[0]:
             raise HTTPException(status_code=400, detail=check_password[1])
         if await database.users.find_user_by_email(user.email, db, models.users):
@@ -67,8 +66,7 @@ async def register(
             model=models.users,
         )
 
-        response = RedirectResponse(status_code=200, url='/',)#TODO: доделать response
-
+        response = JSONResponse(status_code=200, content=user_data)
         response.set_cookie(
             key="access_jwt",
             value=await tokenz.create_jwt(
@@ -88,67 +86,51 @@ async def register(
             max_age=1209600
         )
 
-        return jsonify({
-            'status': 'Created',
-            'redirect': url_for('main')#TODO: переделать
-        }), 201
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Приложение сломалось c ошибкой\n{e}\n ¯\_(ツ)_/¯')
 
 
 
-@auth_page.post('/login')
-async def login():
+@auth_page.post('/login',
+                response_model=JSONResponse,
+                responses={
+                    200: {'model': JSONResponse, 'hint': 'OK'},
+                    404: {'model': HTTPException, 'hint': 'email не зарегистрирован, зарегистрируйтесь'},
+                    401: {'model': HTTPException, 'hint': 'неверный email или пароль'},
+                    500: {'model': HTTPException, 'hint': 'Приложение сломалось ¯\_(ツ)_/¯'}
+                }
+                )
+async def login(
+        user: schemas.users.UserCreate,
+        db: AsyncSession = Depends(get_db)
+):
     try:
-        try:
-            data = request.get_json()
-        except JSONDecodeError as e:
-            return jsonify({'status': 'badRequest',
-                            'hint': 'Некорректный JSON. Должно быть вы ставите специальные символы либо пытаетесь отправить некоррекный JSON на сервер.'}), 400
-        email = data.get('email', 'null').strip()
-        password = data.get('password', 'null')
-        # check_fullname = re_check.is_valid_fullname(fullname)
-        check_password = re_check.is_valid_password(password)
-        if not re_check.is_valid_email(email):
-            return jsonify({'status': 'badRequest',
-                            'hint': 'Неверный email'}), 400
-        if not check_password[0]:
-            return jsonify({'status': 'badRequest',
-                            'hint': check_password[1]}), 400
-
-        db_user = db.find_user_by_email(email)
-
+        db_user = await database.users.find_user_by_email(user.email, db, models.users)
         if not db_user:
-            return jsonify({'status': 'unauthorized',
-                            'hint': f'email {email} не занят, используйте register'}), 401
+            raise HTTPException(status_code=404, detail='email не зарегистрирован, зарегистрируйтесь')
         else:
-            if not check_password_hash(db_user.password, password):
-                return jsonify({'status': 'unauthorized',
-                                'hint': f'Либо email {email} введен неправильно, либо - пароль'}), 401
+            if not tools.check_password(user.password, db_user.password):
+                raise HTTPException(status_code=401, detail='неверный email или пароль')
             else:
-                login_user(db_user, remember=True)
-                return jsonify({
-                    'status': 'success',
-                    'redirect': url_for('main')
-                }), 200
+                return JSONResponse(status_code=200, content={"location": "/"})
+
 
     except Exception as e:
-        return jsonify({
-            "status": "internal_error",
-            "hint": f"Ошибка сервера {e}"
-        }), 500
+        raise HTTPException(status_code=500, detail=f'Приложение сломалось c ошибкой\n{e}\n ¯\_(ツ)_/¯')
 
 @tokenz.jwt_check
-@auth_page.get('/logout')
+@auth_page.get('/logout',
+               response_model=JSONResponse,
+               responses={
+                   200: {'model': JSONResponse, 'hint': 'OK'},
+                   403: {'model': JSONResponse, 'hint': 'Unauthorized'},
+               })
 async def logout(
         user: schemas.users.UserBase,
         jwt_response: bool = True,
 ):
     if jwt_response:
-        #logout_user() TODO: сделать эту штуку
-        return RedirectResponse('/auth')
+        return JSONResponse(status_code=200, content={"location": "/auth"})
     else:
-        return {
-            'response': 403,
-            'hint': 'Вы не авторизованы',
-        }
+        return JSONResponse(status_code=403, content={"location": "/auth"})
