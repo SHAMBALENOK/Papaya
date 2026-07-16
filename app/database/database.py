@@ -1,10 +1,13 @@
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from datetime import datetime, timezone
-from werkzeug.security import generate_password_hash
+import asyncio
 import os
+import app.models.users
+import app.models.events
 
-DATABASE_URL = os.getenv('DATABASE_URL') #сделать автоматическую замену способа на +aio..
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
+    DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://', 1)
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -27,3 +30,10 @@ class Base(DeclarativeBase):
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
+
+async def init_models():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+if __name__ == "__main__":
+    asyncio.run(init_models())

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Профиль - Papaya</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/static/html/main.html" class="logo">🍈 На главную</a>
+    </nav>
+
+    <main class="container">
+        <div id="profile-loading" class="loading">Загрузка профиля...</div>
+
+        <div id="profile-view" style="display: none;">
+            <div class="profile-header">
+                <div class="avatar" id="user-avatar"></div>
+                <div class="profile-info">
+                    <h1 id="user-fullname"></h1>
+                    <span class="role-badge" id="user-role"></span>
+                    <button class="btn" id="edit-profile-btn" onclick="toggleEditMode()">
+                        Редактировать профиль
+                    </button>
+                </div>
+            </div>
+
+            <div class="profile-details">
+                <div class="detail-item">
+                    <strong>Email:</strong> <span id="user-email"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Телефон:</strong> <span id="user-phone"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Дата рождения:</strong> <span id="user-bday"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Пол:</strong> <span id="user-gender"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Регион:</strong> <span id="user-region"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Статус:</strong> <span id="user-status"></span>
+                </div>
+                <div class="detail-item">
+                    <strong>Аккаунт:</strong> <span id="user-is-active"></span>
+                </div>
+            </div>
+
+            <div class="bio-section">
+                <h3>О себе</h3>
+                <p id="user-bio"></p>
+            </div>
+
+            <div class="meta-info">
+                <p>ID: <span id="user-id"></span></p>
+                <p>Зарегистрирован: <span id="user-created-at"></span></p>
+            </div>
+        </div>
+
+        <div id="profile-edit" style="display: none;">
+            <h2>Изменение данных профиля</h2>
+            <form onsubmit="saveProfile(event)">
+                <div class="form-group">
+                    <label>Имя</label>
+                    <input type="text" id="edit-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Фамилия</label>
+                    <input type="text" id="edit-surname" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="edit-email" required>
+                </div>
+                <div class="form-group">
+                    <label>Пароль (оставьте пустым, чтобы не менять)</label>
+                    <input type="password" id="edit-password">
+                </div>
+                <div class="form-group">
+                    <label>Телефон</label>
+                    <input type="text" id="edit-phone">
+                </div>
+                <div class="form-group">
+                    <label>Дата рождения (YYYY-MM-DD)</label>
+                    <input type="text" id="edit-bday">
+                </div>
+                <div class="form-group">
+                    <label>Пол</label>
+                    <select id="edit-gender">
+                        <option value="">Не указан</option>
+                        <option value="male">Мужской</option>
+                        <option value="female">Женский</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Регион</label>
+                    <input type="text" id="edit-region">
+                </div>
+                <div class="form-group">
+                    <label>Статус (текст)</label>
+                    <input type="text" id="edit-status">
+                </div>
+                <div class="form-group">
+                    <label>О себе</label>
+                    <textarea id="edit-bio" rows="4"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn" onclick="toggleEditMode()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+            <div id="edit-error" class="error-message"></div>
+        </div>
+    </main>
+
+    <script src="/static/js/user.js"></script>
+</body>
+</html>

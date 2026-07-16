@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ошибка сервера | Papaya</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="error-page">
+        <h1>500</h1>
+        <h2>Внутренняя ошибка сервера</h2>
+        <p>Что-то пошло не так на нашей стороне. Мы уже работаем над исправлением этой проблемы.</p>
+        <a href="/static/html/main.html" class="btn btn-primary">На главную</a>
+
+        <div class="debug-info">
+            <h3>Информация для отладки:</h3>
+            <p>Время ошибки: <span id="error-time"></span></p>
+            <p>URL: <span id="error-url"></span></p>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('error-time').textContent = new Date().toISOString();
+        document.getElementById('error-url').textContent = window.location.href;
+    </script>
+</body>
+</html>
