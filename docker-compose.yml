@@ -54,8 +54,8 @@ services:
     build: .
     container_name: web
     environment:
-      FLASK_SECRET_KEY: 'change_key'
-      DATABASE_URL: 'postgresql://postgres:postgres@postgres:5432/postgres'
+      JWT_KEY: 'change_this_secret_key'
+      DATABASE_URL: 'postgresql+asyncpg://postgres:postgres@postgres:5432/postgres'
       HF_TOKEN: 'your_token'
     ports:
       - "5000:5000"

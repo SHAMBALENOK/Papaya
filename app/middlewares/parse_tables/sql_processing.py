@@ -1,7 +1,8 @@
 import os
 import pandas as pd
 from huggingface_hub import InferenceClient
-from app import models as db
+from app.database import events
+from app.models import events as model
 from googletrans import Translator
 import asyncio
 import uuid
@@ -56,7 +57,7 @@ def _classify(sentences: list) -> dict:
 
     return output
 
-def tabulate(xlsx_path: str):
+def tabulate(xlsx_path: str, session):
     """
     Функция для преобразорвания информации из excel таблицы в sql
     """
@@ -74,4 +75,8 @@ def tabulate(xlsx_path: str):
 
         idd = str(uuid.uuid4())
         payload['id'] = idd
-        if payload.get('name', 'null') != 'null': db.add_event(payload)
+        if payload.get('name', 'null') != 'null': events.add_event(
+            ins=payload,
+            session=session,
+            model=model.Events
+        )
