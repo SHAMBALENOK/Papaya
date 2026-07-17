@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Cookie
+from fastapi import APIRouter, Depends, HTTPException, Cookie, Response
 from fastapi.responses import JSONResponse
 import app.middlewares.tools as tools
 from app.database.database import get_db
@@ -16,9 +16,9 @@ user_page = APIRouter(
 
 @user_page.get(
     '/{user_id}',
-    response_model=JSONResponse,
+    response_model=schemas.users.UserResponse,
     responses={
-        200: {'model': JSONResponse, 'hint': 'OK'},
+        200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
         401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
         403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
         500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
@@ -38,7 +38,7 @@ async def user_details(
             model=models.users,
         )
         if jwt_data.get('sub') == user.id:
-            return JSONResponse(status_code=200, content=user)
+            return user
         else:
             raise HTTPException(status_code=403, detail='It looks like you are trying to look on not your profile')
     except Exception as e:
@@ -46,9 +46,9 @@ async def user_details(
 
 @user_page.post(
     '/{user_id}/edit_info',
-    response_model=JSONResponse,
+    response_model=schemas.users.UserResponse,
     responses={
-        200: {'model': JSONResponse, 'hint': 'OK'},
+        200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
         401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
         403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
         404: {'model': HTTPException, 'hint': 'Cannot find this user in database try something else)'},
@@ -85,7 +85,7 @@ async def user_edit_details(
 
         clean_user = {k: v for k, v in get_user.items() if v is not None}
 
-        return JSONResponse(status_code=200, content=database.users.edit_user(user_id, clean_user, db, models.users))
+        return database.users.edit_user(user_id, clean_user, db, models.users)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')

@@ -1,7 +1,5 @@
 import uuid
-from http.client import responses
-
-from fastapi import APIRouter, Depends, HTTPException, Cookie
+from fastapi import APIRouter, Depends, HTTPException, Cookie, Response
 from fastapi.responses import JSONResponse
 import app.middlewares.tools as tools
 from app.database.database import get_db
@@ -20,7 +18,6 @@ auth_page = APIRouter(
 )
 
 auth_page.get('/',
-                response_model=JSONResponse,
                 responses={
                     403: {'model': HTTPException, 'hint': 'Invalid refresh or access token or you are already signed in'},
                     401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
@@ -40,7 +37,7 @@ async def auth(
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @auth_page.post('/register',
-                response_model=JSONResponse,
+                response_model=schemas.users.UserResponse,
                 responses={
                     200: {'model': JSONResponse, 'hint': 'OK'},
                     400: {'model': HTTPException, 'hint': 'incorrect password format'},
@@ -49,8 +46,9 @@ async def auth(
                 }
                 )
 async def register(
+        response: Response,
         user: schemas.users.UserCreate,
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
 ):
     try:
         check_password = re_check.is_valid_password(user.password)
@@ -70,7 +68,6 @@ async def register(
             model=models.users,
         )
 
-        response = JSONResponse(status_code=200, content=user_data)
         response.set_cookie(
             key="access_jwt",
             value=await tokenz.create_jwt(
@@ -91,22 +88,24 @@ async def register(
             max_age=1209600
         )
 
-        return response
+        return user_data
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 
 
 @auth_page.post('/login',
-                response_model=JSONResponse,
+                response_model=schemas.users.UserResponse,
                 responses={
-                    200: {'model': JSONResponse, 'hint': 'OK'},
+                    200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
                     404: {'model': HTTPException, 'hint': 'your email is not in database, try to register'},
                     401: {'model': HTTPException, 'hint': 'incorrect email or password'},
                     500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
                 }
                 )
 async def login(
+        response: Response,
         user: schemas.users.UserCreate,
         db: AsyncSession = Depends(get_db)
 ):
@@ -118,7 +117,6 @@ async def login(
             if not tools.check_password(user.password, db_user.password):
                 raise HTTPException(status_code=401, detail='incorrect email or password')
             else:
-                response = JSONResponse(status_code=200, content=db_user)
                 response.set_cookie(
                     key="access_jwt",
                     value=await tokenz.create_jwt(
@@ -138,13 +136,12 @@ async def login(
                     ),
                     max_age=1209600
                 )
-                return response
+                return db_user
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @auth_page.get('/logout',
-               response_model=JSONResponse,
                responses={
                    200: {'model': JSONResponse, 'hint': 'OK'},
                    403: {'model': HTTPException, 'hint': 'Invalid refresh or access token or you are already signed in'},

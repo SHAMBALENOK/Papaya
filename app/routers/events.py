@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Cookie, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Cookie, File, UploadFile, Response
 from fastapi.responses import JSONResponse
 from werkzeug.utils import secure_filename
 import app.middlewares.tools as tools
@@ -19,9 +19,9 @@ UPLOAD_FOLDER = '../tables'
 
 @events_page.get(
     '/{event_id}',
-    response_model=JSONResponse,
+    response_model=schemas.events.EventResponse,
     responses={
-        200: {'model': JSONResponse, 'hint': 'OK'},
+        200: {'model': schemas.events.EventResponse, 'hint': 'OK'},
         401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
         403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
         404: {'model': HTTPException, 'hint': 'Page is missing'},
@@ -43,15 +43,15 @@ async def event_details(
         )
         if not event: raise HTTPException(status_code=404, detail='Page is missing')
 
-        return JSONResponse(status_code=200, content=event)
+        return event
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @events_page.post(
     '/add_event',
-    response_model=JSONResponse,
+    response_model=schemas.events.EventResponse,
     responses={
-        200: {'model': JSONResponse, 'hint': 'OK'},
+        200: {'model': schemas.events.EventResponse, 'hint': 'OK'},
         401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
         403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
         500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
@@ -80,16 +80,16 @@ async def add_event(
             session=db,
             model=models.events,
         )
-        return JSONResponse(status_code=200, content=db_event)
+        return db_event
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @events_page.post(
     '/edit_event',
-    response_model=JSONResponse,
+    response_model=schemas.events.EventResponse,
     responses={
-        200: {'model': JSONResponse, 'hint': 'OK'},
+        200: {'model': schemas.events.EventResponse, 'hint': 'OK'},
         401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
         403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
         404: {'model': HTTPException, 'hint': 'Event not found'},
@@ -132,7 +132,7 @@ async def event_edit_details(
             session=db,
             model=models.events
         )
-        return JSONResponse(status_code=200, content=up_event)
+        return up_event
 
 
     except Exception as e:
@@ -140,16 +140,16 @@ async def event_edit_details(
 
 @events_page.post(
     '/add_events_via_pdf_tables',
-    response_model=JSONResponse,
+    response_model=schemas.users.UserResponse,
     responses={
-        200: {'model': JSONResponse, 'hint': 'OK'},
+        200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
         401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
         403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
         500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def add_events_via_pdf_tables(
-    user: schemas.users.UserResponse,
+    user: schemas.users.UserBase,
     event: schemas.events.EventCreate,
     db: AsyncSession = Depends(get_db),
     file: UploadFile = File(...),
@@ -167,9 +167,9 @@ async def add_events_via_pdf_tables(
         with open(file_location, "wb+") as file_object:
             shutil.copyfileobj(file.file, file_object)
 
-        table_handling.main.pdf_to_db(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}")
+        table_handling.main.pdf_to_db(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}", db)
 
-        return JSONResponse(status_code=200, content=user)
+        return user
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')

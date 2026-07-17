@@ -2,8 +2,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 import asyncio
 import os
-import app.models.users
-import app.models.events
+from app.database.base import Base
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
@@ -23,9 +22,6 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False
 )
-
-class Base(DeclarativeBase):
-    pass
 
 async def get_db():
     async with AsyncSessionLocal() as db:

@@ -1,20 +1,20 @@
-flask
-flask-login
+fastapi
+uvicorn
 werkzeug
 sqlalchemy
+asyncpg
 python-dotenv
-psycopg2-binary
 gunicorn==21.2.0
 img2table
 openpyxl
 pyjwt
+pydantic[email]
+bcrypt
 pandas
 numpy==1.26.4
 huggingface_hub
 opencv-python-headless
 googletrans
-asyncio
-PyJWT
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.2.2+cpu
