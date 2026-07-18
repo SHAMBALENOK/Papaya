@@ -15,12 +15,11 @@ app.include_router(auth.auth_page)
 
 @app.get(
     '/',
-    response_model=JSONResponse,
     responses={
-        200: {'model': JSONResponse, 'hint': 'OK'},
-        401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-        403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
-        500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def main(
@@ -30,8 +29,8 @@ async def main(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user = database.users.find_user_by_id(jwt_data.get('sub'), db, models.users)
-        random_events = database.events.show_random_events(
+        user = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users)
+        random_events = await database.events.show_random_events(
             quantity=database.events.get_amount_of_events(
                 session=db,
                 model=models.events,

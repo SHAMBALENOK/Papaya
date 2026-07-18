@@ -17,6 +17,11 @@ async function loadUserProfile(userId) {
     try {
         const response = await fetch(`/api/v1/user/${userId}`, { credentials: 'include' });
 
+        if (response.status === 401 || response.status === 403) {
+            window.location.href = '/static/html/auth.html';
+            return;
+        }
+
         if (!response.ok) {
             throw new Error('Failed to load profile');
         }
@@ -47,11 +52,9 @@ async function loadUserProfile(userId) {
 }
 
 function displayUserProfile(user) {
-    // Avatar
     const initial = user.name ? user.name.charAt(0).toUpperCase() : '?';
     document.getElementById('user-avatar').textContent = initial;
 
-    // Basic info
     document.getElementById('user-fullname').textContent = `${user.name} ${user.surname}`;
     document.getElementById('user-role').textContent = user.role;
     document.getElementById('user-email').textContent = user.email;
@@ -65,14 +68,11 @@ function displayUserProfile(user) {
     document.getElementById('user-status').textContent = user.status || 'Не задан';
     document.getElementById('user-is-active').textContent = user.isActive ? 'Активен' : 'Заблокирован';
 
-    // Bio
     document.getElementById('user-bio').textContent = user.bio || 'Нет информации.';
 
-    // Meta
     document.getElementById('user-id').textContent = user.id;
     document.getElementById('user-created-at').textContent = user.createdAt || 'Н/Д';
 
-    // Show edit button only for own profile
     if (!isOwnProfile) {
         document.getElementById('edit-profile-btn').style.display = 'none';
     }
@@ -128,9 +128,7 @@ async function saveProfile(event) {
     try {
         const response = await fetch(`/api/v1/user/${userId}/edit_info`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify(userData)
         });
@@ -140,7 +138,6 @@ async function saveProfile(event) {
             throw new Error(error.detail || 'Ошибка сохранения');
         }
 
-        // Reload profile
         await loadUserProfile(userId);
 
     } catch (error) {

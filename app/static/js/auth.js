@@ -10,7 +10,6 @@ function toggleAuthMode() {
         registerForm.style.display = 'block';
     }
 
-    // Clear error messages
     document.getElementById('login-error').textContent = '';
     document.getElementById('register-error').textContent = '';
 }
@@ -25,9 +24,7 @@ async function handleLogin(event) {
     try {
         const response = await fetch('/api/v1/auth/login', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({ email, password })
         });
@@ -58,9 +55,7 @@ async function handleRegister(event) {
     try {
         const response = await fetch('/api/v1/auth/register', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify(userData)
         });

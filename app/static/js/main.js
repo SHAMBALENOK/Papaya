@@ -6,9 +6,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadUserData() {
     try {
         const response = await fetch('/api/v1/', { credentials: 'include' });
-        if (!response.ok) {
-            throw new Error('Not authorized');
+
+        if (response.status === 401 || response.status === 403) {
+            window.location.href = '/static/html/auth.html';
+            return;
         }
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch user data');
+        }
+
         const data = await response.json();
 
         const navLinks = document.getElementById('nav-links');
@@ -17,8 +24,8 @@ async function loadUserData() {
             <a href="#" onclick="logout(); return false;">Выйти</a>
         `;
     } catch (error) {
-        const navLinks = document.getElementById('nav-links');
-        navLinks.innerHTML = `<a href="/static/html/auth.html">Войти / Регистрация</a>`;
+        console.error('Error loading user data:', error);
+        document.getElementById('nav-links').innerHTML = `<a href="/static/html/auth.html">Войти / Регистрация</a>`;
     }
 }
 
@@ -33,7 +40,7 @@ async function loadEvents() {
         if (!data.events || data.events.length === 0) {
             container.innerHTML = `
                 <div class="no-events">
-                    <p>Событий пока нет 😔</p>
+                    <p>Событий пока нет</p>
                     <p>Загляните позже, мы обязательно добавим что-нибудь интересное!</p>
                 </div>
             `;
