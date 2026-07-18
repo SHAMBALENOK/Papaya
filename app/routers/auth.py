@@ -17,11 +17,12 @@ auth_page = APIRouter(
     tags=['authentication']
 )
 
-auth_page.get('/',
+@auth_page.get('/',
                 responses={
-                    403: {'model': HTTPException, 'hint': 'Invalid refresh or access token or you are already signed in'},
-                    401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-                    500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+                    200: {'description': 'OK'},
+                    403: {'description': 'Invalid refresh or access token or you are already signed in'},
+                    401: {'description': 'Access or refresh token missing'},
+                    500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
                 }
                 )
 async def auth(
@@ -33,16 +34,20 @@ async def auth(
         token = await tokenz.jwt_check(access_jwt, refresh_jwt)
         if token:
             raise HTTPException(status_code=403, detail="Already signed in")
+    except HTTPException as e:
+        if e.status_code == 401 or e.status_code == 403:
+            return JSONResponse(status_code=200, content=None)
+        raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @auth_page.post('/register',
                 response_model=schemas.users.UserResponse,
                 responses={
-                    200: {'model': JSONResponse, 'hint': 'OK'},
-                    400: {'model': HTTPException, 'hint': 'incorrect password format'},
-                    409: {'model': HTTPException, 'hint': 'You already have account'},
-                    500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+                    200: {'description': 'OK'},
+                    400: {'description': 'incorrect password format'},
+                    409: {'description': 'You already have account'},
+                    500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
                 }
                 )
 async def register(
@@ -98,10 +103,10 @@ async def register(
 @auth_page.post('/login',
                 response_model=schemas.users.UserResponse,
                 responses={
-                    200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
-                    404: {'model': HTTPException, 'hint': 'your email is not in database, try to register'},
-                    401: {'model': HTTPException, 'hint': 'incorrect email or password'},
-                    500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+                    200: {'description': 'OK'},
+                    404: {'description': 'your email is not in database, try to register'},
+                    401: {'description': 'incorrect email or password'},
+                    500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
                 }
                 )
 async def login(
@@ -143,10 +148,10 @@ async def login(
 
 @auth_page.get('/logout',
                responses={
-                   200: {'model': JSONResponse, 'hint': 'OK'},
-                   403: {'model': HTTPException, 'hint': 'Invalid refresh or access token or you are already signed in'},
-                   401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-                   500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+                   200: {'description': 'OK'},
+                   403: {'description': 'Invalid refresh or access token or you are already signed in'},
+                   401: {'description': 'Access or refresh token missing'},
+                   500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
                })
 async def logout(
         access_jwt: Annotated[str | None, Cookie()] = None,

@@ -21,11 +21,11 @@ UPLOAD_FOLDER = '../tables'
     '/{event_id}',
     response_model=schemas.events.EventResponse,
     responses={
-        200: {'model': schemas.events.EventResponse, 'hint': 'OK'},
-        401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-        403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
-        404: {'model': HTTPException, 'hint': 'Page is missing'},
-        500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        404: {'description': 'Page is missing'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def event_details(
@@ -36,7 +36,7 @@ async def event_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        event = database.events.find_event_by_id(
+        event = await database.events.find_event_by_id(
             event_id=event_id,
             session=db,
             model=models.events,
@@ -51,10 +51,10 @@ async def event_details(
     '/add_event',
     response_model=schemas.events.EventResponse,
     responses={
-        200: {'model': schemas.events.EventResponse, 'hint': 'OK'},
-        401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-        403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
-        500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def add_event(
@@ -69,7 +69,7 @@ async def add_event(
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         if jwt_data.get('sub') != user.id:
             raise HTTPException(status_code=403)  # TODO: обнуление токена
-        db_event = database.events.add_event(
+        db_event = await database.events.add_event(
             ins={
                     'owner': event.owner,
                     'name': event.name,
@@ -89,11 +89,11 @@ async def add_event(
     '/edit_event',
     response_model=schemas.events.EventResponse,
     responses={
-        200: {'model': schemas.events.EventResponse, 'hint': 'OK'},
-        401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-        403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
-        404: {'model': HTTPException, 'hint': 'Event not found'},
-        500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        404: {'description': 'Event not found'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def event_edit_details(
@@ -108,7 +108,7 @@ async def event_edit_details(
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         if jwt_data.get('sub') != user.id:
             raise HTTPException(status_code=403)  # TODO: обнуление токена
-        db_event = database.events.find_event_by_id(
+        db_event = await database.events.find_event_by_id(
             event_id=event.id,
             session=db,
             model=models.events
@@ -126,7 +126,7 @@ async def event_edit_details(
 
         clean_data = {k: v for k, v in data.items() if v != 'null'}
 
-        up_event = database.events.edit_event(
+        up_event = await database.events.edit_event(
             event_id=event.id,
             ins=clean_data,
             session=db,
@@ -142,10 +142,10 @@ async def event_edit_details(
     '/add_events_via_pdf_tables',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
-        401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-        403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
-        500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def add_events_via_pdf_tables(

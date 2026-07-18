@@ -14,6 +14,11 @@ async function loadEventDetails(eventId) {
     try {
         const response = await fetch(`/api/v1/event/${eventId}`, { credentials: 'include' });
 
+        if (response.status === 401 || response.status === 403) {
+            window.location.href = '/static/html/auth.html';
+            return;
+        }
+
         if (!response.ok) {
             throw new Error('Event not found');
         }
@@ -31,15 +36,12 @@ async function loadEventDetails(eventId) {
 }
 
 function displayEvent(event) {
-    // Image
     const imgUrl = event.picture || event.preview_picture ||
                    'https://placehold.co/600x400/e9ecef/95a5a6?text=No+Preview';
     document.getElementById('event-image').src = imgUrl;
 
-    // Name
     document.getElementById('event-name').textContent = event.name;
 
-    // Params
     const paramsContainer = document.getElementById('event-params');
     let paramsHTML = '';
 
@@ -59,7 +61,6 @@ function displayEvent(event) {
 
     paramsContainer.innerHTML = paramsHTML;
 
-    // Details
     const detailsContainer = document.getElementById('event-details');
     let detailsHTML = '';
     let hasDetails = false;
@@ -89,7 +90,6 @@ function displayEvent(event) {
         detailsContainer.innerHTML = detailsHTML;
     }
 
-    // Status
     const statusBadge = document.getElementById('event-status');
     const statusText = statusBadge.querySelector('.status-text');
     const statusDot = statusBadge.querySelector('.status-dot');
@@ -102,7 +102,6 @@ function displayEvent(event) {
         statusText.textContent = 'Неактивно';
     }
 
-    // Meta
     document.getElementById('event-id').textContent = event.id;
     document.getElementById('event-updated').textContent =
         event.updatedAt ? event.updatedAt.slice(0, 10) : 'Н/Д';

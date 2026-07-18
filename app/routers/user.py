@@ -18,10 +18,10 @@ user_page = APIRouter(
     '/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
-        401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-        403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
-        500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def user_details(
@@ -48,11 +48,11 @@ async def user_details(
     '/{user_id}/edit_info',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'model': schemas.users.UserResponse, 'hint': 'OK'},
-        401: {'model': HTTPException, 'hint': 'Access or refresh token missing'},
-        403: {'model': HTTPException, 'hint': 'Invalid refresh or access token'},
-        404: {'model': HTTPException, 'hint': 'Cannot find this user in database try something else)'},
-        500: {'model': HTTPException, 'hint': 'Something has broken ¯\_(ツ)_/¯'},
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        404: {'description': 'Cannot find this user in database try something else)'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def user_edit_details(
