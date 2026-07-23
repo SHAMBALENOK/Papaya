@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Papaya — Олимпиады</title>
+    <link rel="stylesheet" href="/frontend/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <header id="header" class="header hidden">
+            <div class="header-inner">
+                <a href="#/" class="logo">Papaya</a>
+                <nav class="nav">
+                    <a href="#/" class="nav-link">Олимпиады</a>
+                    <a href="#/profile" class="nav-link">Профиль</a>
+                    <button id="btn-logout" class="btn btn-outline">Выйти</button>
+                </nav>
+            </div>
+        </header>
+        <main id="page" class="page"></main>
+    </div>
+    <script src="/frontend/js/api.js"></script>
+    <script src="/frontend/js/store.js"></script>
+    <script src="/frontend/js/pages/auth.js"></script>
+    <script src="/frontend/js/pages/dashboard.js"></script>
+    <script src="/frontend/js/pages/event.js"></script>
+    <script src="/frontend/js/pages/profile.js"></script>
+    <script src="/frontend/js/router.js"></script>
+    <script src="/frontend/js/app.js"></script>
+</body>
+</html>
