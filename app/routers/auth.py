@@ -59,7 +59,7 @@ async def register(
         check_password = re_check.is_valid_password(user.password)
         if not check_password[0]:
             raise HTTPException(status_code=400, detail=check_password[1])
-        if await database.users.find_user_by_email(user.email, db, models.users):
+        if await database.users.find_user_by_email(user.email, db, models.users.Users):
             raise HTTPException(status_code=409, detail='You already have account')
 
         user_data = await database.users.add_user(
@@ -70,14 +70,14 @@ async def register(
                 'password': user.password
             },
             session=db,
-            model=models.users,
+            model=models.users.Users,
         )
 
         response.set_cookie(
             key="access_jwt",
             value=await tokenz.create_jwt(
                 ins={
-                    'sub': user_data.id
+                    'sub': str(user_data.id)
                 },
             ),
             max_age=600
@@ -86,7 +86,7 @@ async def register(
             key="refresh_jwt",
             value=await tokenz.create_jwt(
                 ins={
-                    'sub': user_data.id
+                    'sub': str(user_data.id)
                 },
                 is_refresh=True
             ),
@@ -115,7 +115,7 @@ async def login(
         db: AsyncSession = Depends(get_db)
 ):
     try:
-        db_user = await database.users.find_user_by_email(user.email, db, models.users)
+        db_user = await database.users.find_user_by_email(user.email, db, models.users.Users)
         if not db_user:
             raise HTTPException(status_code=404, detail='your email is not in database, try to register')
         else:
@@ -126,7 +126,7 @@ async def login(
                     key="access_jwt",
                     value=await tokenz.create_jwt(
                         ins={
-                            'sub': db_user.id
+                            'sub': str(db_user.id)
                         },
                     ),
                     max_age=600
@@ -135,7 +135,7 @@ async def login(
                     key="refresh_jwt",
                     value=await tokenz.create_jwt(
                         ins={
-                            'sub': db_user.id
+                            'sub': str(db_user.id)
                         },
                         is_refresh=True
                     ),

@@ -32,12 +32,12 @@ async def user_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user = database.users.find_user_by_id(
+        user = await database.users.find_user_by_id(
             user_id=user_id,
             session=db,
-            model=models.users,
+            model=models.users.Users,
         )
-        if jwt_data.get('sub') == user.id:
+        if jwt_data.get('sub') == str(user.id):
             return user
         else:
             raise HTTPException(status_code=403, detail='It looks like you are trying to look on not your profile')
@@ -64,10 +64,10 @@ async def user_edit_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        db_user = await database.users.find_user_by_email(user.email, db, models.users)
+        db_user = await database.users.find_user_by_email(user.email, db, models.users.Users)
         if not db_user:
             raise HTTPException(status_code=404, detail='Cannot find this user in database, try something else)')
-        if db_user.id != jwt_data.get('sub'):
+        if str(db_user.id) != jwt_data.get('sub'):
             raise HTTPException(status_code=403, detail='It looks like you are trying to change not your profile')#TODO: обнуление токена
 
         get_user = {
@@ -85,7 +85,7 @@ async def user_edit_details(
 
         clean_user = {k: v for k, v in get_user.items() if v is not None}
 
-        return database.users.edit_user(user_id, clean_user, db, models.users)
+        return await database.users.edit_user(user_id, clean_user, db, models.users.Users)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
