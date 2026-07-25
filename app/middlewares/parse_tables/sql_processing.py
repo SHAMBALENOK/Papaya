@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from huggingface_hub import InferenceClient
 from app.database import events
-from app.models import events as model
+from app.models import events
 from googletrans import Translator
 import asyncio
 import uuid
@@ -78,5 +78,5 @@ def tabulate(xlsx_path: str, session):
         if payload.get('name', 'null') != 'null': events.add_event(
             ins=payload,
             session=session,
-            model=model.Events
+            model=events.Events
         )

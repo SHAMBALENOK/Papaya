@@ -9,43 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import models, schemas, database
 from typing import Annotated
 import shutil
+import uuid as uuid_mod
 
 events_page = APIRouter(
-    prefix='/event',
+    prefix='/events',
     tags=['events']
 )
 
 UPLOAD_FOLDER = '../tables'
-
-@events_page.get(
-    '/{event_id}',
-    response_model=schemas.events.EventResponse,
-    responses={
-        200: {'description': 'OK'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
-        404: {'description': 'Page is missing'},
-        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
-    }
-)
-async def event_details(
-        event_id: str,
-        db: AsyncSession = Depends(get_db),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
-    try:
-        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        event = await database.events.find_event_by_id(
-            event_id=event_id,
-            session=db,
-            model=models.events,
-        )
-        if not event: raise HTTPException(status_code=404, detail='Page is missing')
-
-        return event
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @events_page.post(
     '/add_event',
@@ -67,7 +38,7 @@ async def add_event(
     try:
         #TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if jwt_data.get('sub') != user.id:
+        if jwt_data.get('sub') != str(user.id):
             raise HTTPException(status_code=403)  # TODO: обнуление токена
         db_event = await database.events.add_event(
             ins={
@@ -78,7 +49,7 @@ async def add_event(
                     'picture': event.picture,
                 },
             session=db,
-            model=models.events,
+            model=models.events.Events,
         )
         return db_event
 
@@ -106,12 +77,12 @@ async def event_edit_details(
     try:
         #TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if jwt_data.get('sub') != user.id:
+        if jwt_data.get('sub') != str(user.id):
             raise HTTPException(status_code=403)  # TODO: обнуление токена
         db_event = await database.events.find_event_by_id(
             event_id=event.id,
             session=db,
-            model=models.events
+            model=models.events.Events
         )
         if not db_event:
             raise HTTPException(status_code=404, detail='Event not found')
@@ -130,7 +101,7 @@ async def event_edit_details(
             event_id=event.id,
             ins=clean_data,
             session=db,
-            model=models.events
+            model=models.events.Events
         )
         return up_event
 
@@ -171,5 +142,35 @@ async def add_events_via_pdf_tables(
 
         return user
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
+
+@events_page.get(
+    '/{event_id}',
+    response_model=schemas.events.EventResponse,
+    responses={
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        404: {'description': 'Page is missing'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
+    }
+)
+async def event_details(
+        event_id: uuid_mod.UUID,
+        db: AsyncSession = Depends(get_db),
+        access_jwt: Annotated[str | None, Cookie()] = None,
+        refresh_jwt: Annotated[str | None, Cookie()] = None,
+):
+    try:
+        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
+        event = await database.events.find_event_by_id(
+            event_id=event_id,
+            session=db,
+            model=models.events.Events,
+        )
+        if not event: raise HTTPException(status_code=404, detail='Page is missing')
+
+        return event
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')

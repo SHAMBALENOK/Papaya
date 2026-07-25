@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
-from typing import Any, Callable, ParamSpec, TypeVar, Coroutine
+from typing import Callable
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+import uuid as uuid_mod
 
-session_Spec = ParamSpec('session_Spec')
-event_Return = TypeVar('event_Return')
 
-def add_event(ins: dict, session: session_Spec, model: Callable) -> event_Return:
+async def add_event(ins: dict, session: AsyncSession, model: Callable):
     """
     Функция для создания события в базе данных
     """
@@ -18,72 +19,56 @@ def add_event(ins: dict, session: session_Spec, model: Callable) -> event_Return
         updatedAt=datetime.now(timezone.utc),
     )
     session.add(event)
-    session.commit()
-    session.refresh(event)
+    await session.commit()
+    await session.refresh(event)
     return event
 
 
-def find_event_by_id(event_id: str, session: session_Spec, model: Callable) -> event_Return:
+async def find_event_by_id(event_id: str, session: AsyncSession, model: Callable):
     """
-    Функция для поиска пользователя по id
+    Функция для поиска события по id
     """
-    return session.query(model).filter(model.id == event_id).first()
+    result = await session.execute(
+        select(model).where(model.id == event_id)
+    )
+    return result.scalars().first()
 
-def show_random_events(quantity: int, session: session_Spec, model: Callable) -> event_Return:
+
+async def show_random_events(quantity: int, session: AsyncSession, model: Callable):
     """
     Функция для показа событий
     """
-    return session.query(model).filter(model.isActive == True).limit(quantity).all()
-
-# def show_and_create_random_events(quantity: int) -> event_Return:
-#     id = os.getenv('INIT_EVENT_ID', '111')
-#     name = os.getenv('INIT_EVENT_NAME', 'my_events')
-#     place = os.getenv('INIT_EVENT_PLACE', 'my_place')
-#     min_grade = int(os.getenv('INIT_EVENT_MIN_GRADE', '1'))
-#     max_grade = int(os.getenv('INIT_EVENT_MAX_GRADE', '11'))
-#     min_age = int(os.getenv('INIT_EVENT_MIN_AGE', '6'))
-#     max_age = int(os.getenv('INIT_EVENT_MAX_AGE', '17'))
-#     preview_picture = os.getenv('INIT_EVENT_PREVIEW_PICTURE', None)
-#     picture = os.getenv('INIT_EVENT_PICTURE', None)
-#     with Session() as session:
-#         for i in range(quantity):
-#             if not find_event_by_id(id):
-#                 add_event(
-#                     {
-#                         'id': id,
-#                         'name': name,
-#                         'place': place,
-#                         'min_grade': min_grade,
-#                         'max_grade': max_grade,
-#                         'min_age': min_age,
-#                         'max_age': max_age,
-#                         'preview_picture': preview_picture,
-#                         'picture': picture,
-#                     }
-#                 )
-#                 id+='1'
-#         else:
-#             id += '1'
-#         return session.query(Events).filter(Events.isActive == True).limit(quantity).all()
-# не нужно?
+    result = await session.execute(
+        select(model).where(model.isActive == True).limit(quantity)
+    )
+    return result.scalars().all()
 
 
-def edit_event(event_id:str, ins:dict, session: session_Spec, model: Callable) -> event_Return:
+async def edit_event(event_id: str, ins: dict, session: AsyncSession, model: Callable):
     """
     Функция для редактирования
     """
-    now = datetime.now(timezone.utc)
-    event = session.query(model).filter(model.id == event_id).first()
+    if isinstance(event_id, str):
+        event_id = uuid_mod.UUID(event_id)
+    result = await session.execute(
+        select(model).where(model.id == event_id)
+    )
+    event = result.scalar_one_or_none()
+    if not event:
+        return None
     for key, value in ins.items():
         setattr(event, key, value)
-    event.updatedAt = now
-    session.commit()
-    session.refresh(event)
+    event.updatedAt = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(event)
     return event
 
 
-def get_amount_of_events(session: session_Spec, model: Callable) -> int:
+async def get_amount_of_events(session: AsyncSession, model: Callable) -> int:
     """
     Функция показывающая количество событий
     """
-    return len(session.query(model).all())
+    result = await session.execute(
+        select(func.count()).select_from(model)
+    )
+    return result.scalar()

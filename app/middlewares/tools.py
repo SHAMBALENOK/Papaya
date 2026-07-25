@@ -22,5 +22,4 @@ def check_password(entered_password: str, stored_hash: bytes) -> bool:
     Функция для проверки пароля
     """
     import bcrypt
-    entered_bytes = entered_password.encode('utf-8')
-    return bcrypt.checkpw(entered_bytes, stored_hash)
+    return bcrypt.checkpw(entered_password.encode('utf-8'), stored_hash.encode('utf-8'))
