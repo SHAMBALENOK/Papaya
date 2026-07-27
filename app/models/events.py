@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database.base import Base
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import DateTime, Column, String, Boolean
@@ -15,5 +15,5 @@ class Events(Base):
     preview_picture = Column(String, nullable=True)
     picture = Column(String, nullable=True)
     isActive = Column(Boolean, default=True)
-    createdAt = Column(DateTime, default=datetime.now)
-    updatedAt = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    createdAt = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updatedAt = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
