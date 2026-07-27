@@ -37,12 +37,12 @@ const api = {
     getUser(id) { return this.get(`/user/${id}`); },
     editUser(id, data) { return this.post(`/user/${id}/edit_info`, data); },
 
-    // Events
-    getEvent(id) { return this.get(`/event/${id}`); },
+    // Стало:
+    getEvent(id) { return this.get(`/events/${id}`); },
     addEvent(userData, eventData) {
-        return this.post('/event/add_event', { ...userData, ...eventData });
+    return this.post('/events/add_event', { ...userData, ...eventData });
     },
     editEvent(userData, eventData) {
-        return this.post('/event/edit_event', { ...userData, ...eventData });
+    return this.post('/events/edit_event', { ...userData, ...eventData });
     },
 };

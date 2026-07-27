@@ -29,25 +29,24 @@ UPLOAD_FOLDER = '../tables'
     }
 )
 async def add_event(
-        user: schemas.users.UserBase,
-        event: schemas.events.EventCreate,
+        event: schemas.events.EventCreate,  # ← только один body параметр
         db: AsyncSession = Depends(get_db),
         access_jwt: Annotated[str | None, Cookie()] = None,
         refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
-        #TODO: проверка прав
+        # TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if jwt_data.get('sub') != str(user.id):
-            raise HTTPException(status_code=403)  # TODO: обнуление токена
+        user_id = jwt_data.get('sub')
+
         db_event = await database.events.add_event(
             ins={
-                    'owner': event.owner,
-                    'name': event.name,
-                    'disc': event.disc,
-                    'preview_picture': event.preview_picture,
-                    'picture': event.picture,
-                },
+                'owner': user_id,
+                'name': event.name,
+                'disc': event.disc,
+                'preview_picture': event.preview_picture,
+                'picture': event.picture,
+            },
             session=db,
             model=models.events.Events,
         )
@@ -68,7 +67,6 @@ async def add_event(
     }
 )
 async def event_edit_details(
-        user: schemas.users.UserBase,
         event: schemas.events.EventCreate,
         db: AsyncSession = Depends(get_db),
         access_jwt: Annotated[str | None, Cookie()] = None,
@@ -77,10 +75,8 @@ async def event_edit_details(
     try:
         #TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if jwt_data.get('sub') != str(user.id):
-            raise HTTPException(status_code=403)  # TODO: обнуление токена
         db_event = await database.events.find_event_by_id(
-            event_id=event.id,
+            event_id=str(event.id),
             session=db,
             model=models.events.Events
         )
@@ -98,7 +94,7 @@ async def event_edit_details(
         clean_data = {k: v for k, v in data.items() if v != 'null'}
 
         up_event = await database.events.edit_event(
-            event_id=event.id,
+            event_id=str(event.id),
             ins=clean_data,
             session=db,
             model=models.events.Events
@@ -165,7 +161,7 @@ async def event_details(
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         event = await database.events.find_event_by_id(
-            event_id=event_id,
+            event_id=str(event_id),
             session=db,
             model=models.events.Events,
         )
