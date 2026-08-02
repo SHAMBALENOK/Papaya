@@ -5,7 +5,7 @@ from app.database import events
 from app.models import events
 from googletrans import Translator
 import asyncio
-import uuid
+import uuid as uuid_mod
 
 translator = Translator()
 
@@ -22,9 +22,9 @@ def translate_text(text):
 
     return result.text
 
-def _classify(sentences: list) -> dict:
+def _classify(sentences: list) -> tuple:
     """
-    Функция, которая определяет принадлежность заголовка из таблицы к стандартизированным из sql DB
+    Searches for a name in table headers
     """
     output = {}
     for sentence in sentences:
@@ -33,33 +33,15 @@ def _classify(sentences: list) -> dict:
             candidate_labels=LABELS,
             )
 
-        output[sentences.index(sentence)] = (sentence, data[0].score, data[0].label)
+        output[sentences.index(sentence)] = data[0].score
 
-    check=[]
-    deletion = []
-    for key, value in output.items():
-        for i in check:
-            if i[0][2] == value[2]:
-                if i[0][1] > value[1]:
-                    deletion.append(key)
-                elif i[0][1] == value[1]:
-                    pass
-                else:
-                    deletion.append(i[1])
-        check.append([value, key])
+    name = sentences.pop(max(output, key=output.get))
 
-    for i in deletion:
-        del output[i]
+    return name, sentences
 
-    for key, value in output.items():
-        output[key] = value[2]
-
-
-    return output
-
-def tabulate(xlsx_path: str, session):
+def tabulate(xlsx_path: str, session, owner: str):
     """
-    Функция для преобразорвания информации из excel таблицы в sql
+    Converting information from an Excel table to SQL
     """
     file = pd.ExcelFile(xlsx_path).parse().ffill()
 
@@ -67,14 +49,16 @@ def tabulate(xlsx_path: str, session):
 
     for row in file.itertuples():
         payload = dict()
-        for i in range(1, len(row)):
-            try:
-                payload[labels[i-1]] = row[i].replace('\n', ' ')
-            except KeyError:
-                pass
+        payload['disc'] = str()
+        payload['owner'] = uuid_mod.UUID(owner)
+        payload['name'] = getattr(row, labels[0])
+        for i in labels[1]:
+            payload['disc'] += f'\n{i}: {(getattr(row, i))}'
+            # try:
+            #     payload[labels[i-1]] = row[i].replace('\n', ' ')
+            # except KeyError:
+            #     pass
 
-        idd = str(uuid.uuid4())
-        payload['id'] = idd
         if payload.get('name', 'null') != 'null': events.add_event(
             ins=payload,
             session=session,
