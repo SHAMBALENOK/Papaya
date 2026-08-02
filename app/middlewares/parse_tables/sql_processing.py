@@ -17,9 +17,11 @@ client = InferenceClient(
 LABELS = ['profile', 'course', 'name', 'level', 'diploma']
 
 def translate_text(text):
+    """
+    Translates text from russian to english
+    """
     translator = Translator()
-    result = asyncio.run(translator.translate(text, dest='en'))
-
+    result = translator.translate(text, dest='en')
     return result.text
 
 def _classify(sentences: list) -> tuple:
@@ -27,13 +29,14 @@ def _classify(sentences: list) -> tuple:
     Searches for a name in table headers
     """
     output = {}
-    for sentence in sentences:
+
+    for i, sentence in enumerate(sentences):
         data = client.zero_shot_classification(
             translate_text(sentence),
             candidate_labels=LABELS,
-            )
+        )
 
-        output[sentences.index(sentence)] = data[0].score
+        output[i] = data[0].score
 
     name = sentences.pop(max(output, key=output.get))
 
