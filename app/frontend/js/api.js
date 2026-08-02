@@ -2,11 +2,7 @@ const API_BASE = '/api/v1';
 
 const api = {
     async request(method, path, body = null, isFormData = false) {
-        const opts = {
-            method,
-            credentials: 'include',
-            headers: {},
-        };
+        const opts = { method, credentials: 'include', headers: {} };
         if (body && !isFormData) {
             opts.headers['Content-Type'] = 'application/json';
             opts.body = JSON.stringify(body);
@@ -23,26 +19,20 @@ const api = {
 
     get(path) { return this.request('GET', path); },
     post(path, body) { return this.request('POST', path, body); },
+    postForm(path, formData) { return this.request('POST', path, formData, true); },
 
-    // Auth
-    checkAuth() { return this.get('/auth/'); },
-    register(data) { return this.post('/auth/register', data); },
-    login(data) { return this.post('/auth/login', data); },
-    logout() { return this.get('/auth/logout'); },
+    checkAuth()  { return this.get('/auth/'); },
+    register(d)  { return this.post('/auth/register', d); },
+    login(d)     { return this.post('/auth/login', d); },
+    logout()     { return this.get('/auth/logout'); },
 
-    // Main
-    getMain() { return this.get('/'); },
+    getMain()    { return this.get('/'); },
 
-    // User
-    getUser(id) { return this.get(`/user/${id}`); },
-    editUser(id, data) { return this.post(`/user/${id}/edit_info`, data); },
+    getUser(id)      { return this.get(`/user/${id}`); },
+    editUser(id, d)  { return this.post(`/user/${id}/edit_info`, d); },
 
-    // Стало:
-    getEvent(id) { return this.get(`/events/${id}`); },
-    addEvent(userData, eventData) {
-    return this.post('/events/add_event', { ...userData, ...eventData });
-    },
-    editEvent(userData, eventData) {
-    return this.post('/events/edit_event', { ...userData, ...eventData });
-    },
+    getEvent(id)     { return this.get(`/events/${id}`); },
+    addEvent(d)      { return this.post('/events/add_event', d); },
+    editEvent(d)     { return this.post('/events/edit_event', d); },
+    addEventsPdf(fd) { return this.postForm('/events/add_events_via_pdf_tables', fd); },
 };

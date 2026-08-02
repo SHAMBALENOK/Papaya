@@ -112,12 +112,10 @@ async def event_edit_details(
         200: {'description': 'OK'},
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
+        500: {'description': 'Something has broken ¯\_(ツ)\_/¯'},
     }
 )
 async def add_events_via_pdf_tables(
-    user: schemas.users.UserBase,
-    event: schemas.events.EventCreate,
     db: AsyncSession = Depends(get_db),
     file: UploadFile = File(...),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -125,8 +123,7 @@ async def add_events_via_pdf_tables(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if jwt_data.get('sub') != user.id:
-            raise HTTPException(status_code=403, detail='It looks like you are trying to use not your profile')  # TODO: обнуление токена
+        user_id = jwt_data.get('sub')
 
         filename = secure_filename(file.filename)
         tools.mkdir(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}")
@@ -134,39 +131,19 @@ async def add_events_via_pdf_tables(
         with open(file_location, "wb+") as file_object:
             shutil.copyfileobj(file.file, file_object)
 
-        table_handling.main.pdf_to_db(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}", db)
+        table_handling.main.pdf_to_db(
+            f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}", db, user_id
+        )
 
+        user = await database.users.find_user_by_id(
+            user_id=user_id,
+            session=db,
+            model=models.users.Users,
+        )
         return user
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
-
-@events_page.get(
-    '/{event_id}',
-    response_model=schemas.events.EventResponse,
-    responses={
-        200: {'description': 'OK'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
-        404: {'description': 'Page is missing'},
-        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
-    }
-)
-async def event_details(
-        event_id: uuid_mod.UUID,
-        db: AsyncSession = Depends(get_db),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
-    try:
-        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        event = await database.events.find_event_by_id(
-            event_id=str(event_id),
-            session=db,
-            model=models.events.Events,
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)\_/¯'
         )
-        if not event: raise HTTPException(status_code=404, detail='Page is missing')
-
-        return event
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
