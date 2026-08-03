@@ -42,11 +42,12 @@ def _classify(sentences: list) -> tuple:
 
     return name, sentences
 
-def tabulate(xlsx_path: str, session, owner: str):
+async def tabulate(xlsx_path: str, session, owner: str):
     """
     Converting information from an Excel table to SQL
     """
     file = pd.ExcelFile(xlsx_path).parse().ffill()
+    created_events = []
 
     labels = _classify([i.replace('\n', ' ') for i in file.columns])
 
@@ -62,8 +63,9 @@ def tabulate(xlsx_path: str, session, owner: str):
             # except KeyError:
             #     pass
 
-        if payload.get('name', 'null') != 'null': events.add_event(
+        if payload.get('name', 'null') != 'null': await events.add_event(
             ins=payload,
             session=session,
             model=events.Events
         )
+    return created_events

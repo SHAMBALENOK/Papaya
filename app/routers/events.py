@@ -107,12 +107,12 @@ async def event_edit_details(
 
 @events_page.post(
     '/add_events_via_pdf_tables',
-    response_model=schemas.users.UserResponse,
+    response_model=list[schemas.events.EventResponse],  # ← список событий
     responses={
         200: {'description': 'OK'},
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯\_(ツ)\_/¯'},
+        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
     }
 )
 async def add_events_via_pdf_tables(
@@ -124,26 +124,18 @@ async def add_events_via_pdf_tables(
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         user_id = jwt_data.get('sub')
-
         filename = secure_filename(file.filename)
         tools.mkdir(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}")
         file_location = f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}"
         with open(file_location, "wb+") as file_object:
             shutil.copyfileobj(file.file, file_object)
 
-        table_handling.main.pdf_to_db(
-            f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}", db, user_id
+        created = await table_handling.main.pdf_to_db(
+            file_location, db, user_id
         )
-
-        user = await database.users.find_user_by_id(
-            user_id=user_id,
-            session=db,
-            model=models.users.Users,
-        )
-        return user
-
+        return created
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)\_/¯'
+            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯'
         )
