@@ -139,3 +139,33 @@ async def add_events_via_pdf_tables(
             status_code=500,
             detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯'
         )
+
+@events_page.get(
+    '/{event_id}',
+    response_model=schemas.events.EventResponse,
+    responses={
+        200: {'description': 'OK'},
+        401: {'description': 'Access or refresh token missing'},
+        403: {'description': 'Invalid refresh or access token'},
+        404: {'description': 'Page is missing'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
+    }
+)
+async def event_details(
+        event_id: uuid_mod.UUID,
+        db: AsyncSession = Depends(get_db),
+        access_jwt: Annotated[str | None, Cookie()] = None,
+        refresh_jwt: Annotated[str | None, Cookie()] = None,
+):
+    try:
+        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
+        event = await database.events.find_event_by_id(
+            event_id=str(event_id),
+            session=db,
+            model=models.events.Events,
+        )
+        if not event: raise HTTPException(status_code=404, detail='Page is missing')
+
+        return event
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
