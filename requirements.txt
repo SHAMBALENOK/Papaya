@@ -12,10 +12,11 @@ pydantic[email]
 bcrypt
 pandas
 numpy==1.26.4
-huggingface_hub>=1.1.5
+huggingface_hub
 opencv-python-headless
 googletrans==3.1.0a0
 python-multipart
+debugpy
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.2.2+cpu
