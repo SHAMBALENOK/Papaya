@@ -10,11 +10,6 @@ from app.routers import user, events, auth
 import os
 from contextlib import asynccontextmanager
 from app.database.database import init_models
-import debugpy
-
-debugpy.listen(("0.0.0.0", 5678))
-# Опционально, если нужно остановить код до нажатия F5:
-# debugpy.wait_for_client()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

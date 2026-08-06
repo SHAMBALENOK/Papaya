@@ -56,7 +56,7 @@ services:
     environment:
       JWT_KEY: 'change_this_secret_key'
       DATABASE_URL: 'postgresql+asyncpg://postgres:postgres@postgres:5432/postgres'
-      HF_TOKEN: 'your_secret_token'
+      HF_TOKEN: 'your_hf_token'
     ports:
       - "5000:5000"
     volumes:
