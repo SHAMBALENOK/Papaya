@@ -39,7 +39,7 @@ class UserResponse(UserBase):
     phone: Optional[str] = None
     country: Optional[str] = None
     region: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[str] = None # i.e. школьник студент учитель и проч
 
     class Config:
         from_attributes = True
