@@ -1,7 +1,7 @@
 import bcrypt
 from datetime import datetime, timezone
 from typing import Callable
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid as uuid_mod
 
@@ -62,3 +62,21 @@ async def edit_user(user_id: str, ins: dict, session: AsyncSession, model: Calla
     await session.commit()
     await session.refresh(user)
     return user
+
+async def get_amount_of_users(session: AsyncSession, model: Callable) -> int:
+    """
+    Функция показывающая количество событий
+    """
+    result = await session.execute(
+        select(func.count()).select_from(model)
+    )
+    return result.scalar()
+
+async def show_random_users(quantity: int, session: AsyncSession, model: Callable):
+    """
+    Функция для показа событий
+    """
+    result = await session.execute(
+        select(model).where(model.isActive == True).limit(quantity)
+    )
+    return result.scalars().all()

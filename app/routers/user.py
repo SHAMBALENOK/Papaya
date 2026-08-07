@@ -14,6 +14,52 @@ user_page = APIRouter(
     tags=['users']
 )
 
+@user_page.get('/users')
+async def users(
+    db: AsyncSession = Depends(get_db),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
+):
+    try:
+        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
+        user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+        random_users = await database.users.show_random_users(
+            quantity=await database.users.get_amount_of_users(session=db, model=models.users.Users),
+            session=db,
+            model=models.users.Users,
+        )
+
+        # Сериализуем users в словари
+        users_list = [
+            {
+                'id': str(ev.id),
+                'name': ev.name,
+                'surname': ev.surname,
+                'email': ev.email,
+                'gender': ev.disc,
+                'bday': ev.bday,
+                'bio': ev.bio,
+                'phone': ev.phone,
+                'country': ev.country,
+                'region': ev.region,
+                'status': ev.status,
+                'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
+                'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
+            }
+            for ev in random_users
+        ]
+
+        return JSONResponse(status_code=200, content={
+            'user_id': str(user_obj.id),       # UUID → str
+            'user_name': user_obj.name,
+            'user_surname': user_obj.surname,
+            'user_email': user_obj.email,
+            'user_role': user_obj.role,
+            'users': users_list,
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+
 @user_page.get(
     '/{user_id}',
     response_model=schemas.users.UserResponse,
@@ -37,10 +83,7 @@ async def user_details(
             session=db,
             model=models.users.Users,
         )
-        if jwt_data.get('sub') == str(user.id):
-            return user
-        else:
-            raise HTTPException(status_code=403, detail='It looks like you are trying to look on not your profile')
+        return user
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 

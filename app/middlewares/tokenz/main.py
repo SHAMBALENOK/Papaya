@@ -23,7 +23,7 @@ async def create_jwt(
 async def jwt_check(
     access_jwt: str | None = None,
     refresh_jwt: str | None = None,
-) -> dict:
+) -> dict: #TODO: добавление access token в response
     """
     Validating incoming JWT token
     """
