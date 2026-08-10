@@ -1,66 +1,78 @@
-function renderEvent(eventId) {
+/* ==========================================================================
+ * pages/event.js — страница события.
+ * Узкая колонка max-w-narrow, крупные заголовки, dl-сетка без линий.
+ * ========================================================================== */
+async function renderEvent(eventId) {
     const page = document.getElementById('page');
-    page.innerHTML = '<div class="loading">Загрузка...</div>';
+    page.innerHTML = loadingHtml();
 
-    api.getEvent(eventId).then(res => {
-        if (!res.ok) {
-            page.innerHTML = `
-            <div class="event-detail">
-                <div class="alert alert-error">Событие не найдено</div>
-                <a href="#/" class="back-link">&larr; Вернуться к списку</a>
-            </div>`;
-            return;
-        }
+    const errorState = (msg) => `
+    <div class="max-w-narrow mx-auto py-24 text-center">
+        <h1 class="text-3xl font-extrabold tracking-tight">${escHtml(msg)}</h1>
+        <p class="mt-5 text-lg text-ink/60 leading-relaxed">Возможно, событие было удалено или ссылка неверна.</p>
+        <a href="#/" class="${UI.btn} ${UI.btnSecondary} mt-10">К списку олимпиад</a>
+    </div>`;
 
-        const ev = res.data;
-        const imgSrc = ev.picture || ev.preview_picture || null;
-        const created = ev.createdAt ? ev.createdAt.slice(0, 10) : 'Н/Д';
-        const updated = ev.updatedAt ? ev.updatedAt.slice(0, 10) : 'Н/Д';
+    let res;
+    try { res = await api.getEvent(eventId); }
+    catch { page.innerHTML = errorState('Ошибка загрузки'); return; }
 
-        const statusHtml = ev.isActive
-            ? '<span class="status-dot on"></span> Активно'
-            : '<span class="status-dot off"></span> Неактивно';
+    if (!res.ok || !res.data) { page.innerHTML = errorState('Событие не найдено'); return; }
 
-        page.innerHTML = `
-        <div class="event-detail">
-            <a href="#/" class="back-link">&larr; Вернуться к списку</a>
+    const ev = res.data;
+    const imgSrc = ev.picture || ev.preview_picture || null;
+    const active = ev.isActive !== false;
 
-            ${imgSrc ? `<img src="${escAttr(imgSrc)}" alt="${escAttr(ev.name)}" class="event-detail-img"
-                 onerror="this.style.display='none'">` : ''}
+    const statusBadge = active
+        ? `<span class="${UI.badge} ${UI.badgeSuccess}"><span class="w-2 h-2 rounded-full bg-moss" aria-hidden="true"></span>Активно</span>`
+        : `<span class="${UI.badge} ${UI.badgeNeutral}">Архив</span>`;
 
-            <h1>${escHtml(ev.name)}</h1>
+    page.innerHTML = `
+    <article class="max-w-narrow mx-auto py-4">
+        <a href="#/" class="inline-flex items-center gap-2 text-navy font-semibold hover:text-primary transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-navy">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
+            К списку олимпиад
+        </a>
 
-            ${ev.disc ? `
-            <div class="detail-section">
-                <h3>Описание</h3>
-                <p class="event-disc">${escHtml(ev.disc)}</p>
-            </div>` : ''}
+        ${imgSrc ? `
+        <div class="mt-12 rounded overflow-hidden shadow-elev-1 bg-tint">
+            <img src="${escAttr(imgSrc)}" alt="${escAttr(ev.name)}" class="w-full max-h-[26rem] object-cover"
+                 onerror="this.onerror=null;this.parentElement.style.display='none'">
+        </div>` : ''}
 
-            <div class="detail-section">
-                <h3>Информация</h3>
-                <div class="detail-row">
-                    <span class="detail-label">Статус</span>
-                    <span class="detail-value">${statusHtml}</span>
+        <!-- Заголовок: увеличенные вертикальные разрывы вокруг -->
+        <header class="mt-14">
+            ${statusBadge}
+            <h1 class="mt-7 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(ev.name)}</h1>
+        </header>
+
+        ${ev.disc ? `
+        <section class="mt-16" aria-labelledby="event-disc-title">
+            <h2 id="event-disc-title" class="${UI.eyebrow}">Описание</h2>
+            <p class="mt-7 text-lg text-ink/75 leading-[1.8] whitespace-pre-wrap">${escHtml(ev.disc)}</p>
+        </section>` : ''}
+
+        <!-- Информация: dl-сетка, строки разделены только отступами gap-y-9 -->
+        <section class="mt-16 mb-8" aria-labelledby="event-info-title">
+            <h2 id="event-info-title" class="${UI.eyebrow}">Информация</h2>
+            <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">
+                <div>
+                    <dt class="text-sm font-medium text-ink/45">Статус</dt>
+                    <dd class="mt-2">${statusBadge}</dd>
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">ID События</span>
-                    <span class="detail-value mono">${escHtml(ev.id)}</span>
+                <div>
+                    <dt class="text-sm font-medium text-ink/45">Создано</dt>
+                    <dd class="mt-2 text-base">${formatDate(ev.createdAt)}</dd>
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">Создано</span>
-                    <span class="detail-value">${created}</span>
+                <div>
+                    <dt class="text-sm font-medium text-ink/45">Обновлено</dt>
+                    <dd class="mt-2 text-base">${formatDate(ev.updatedAt)}</dd>
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">Обновлено</span>
-                    <span class="detail-value">${updated}</span>
+                <div>
+                    <dt class="text-sm font-medium text-ink/45">ID события</dt>
+                    <dd class="mt-2 text-sm text-ink/60 break-all">${escHtml(ev.id)}</dd>
                 </div>
-            </div>
-        </div>`;
-    }).catch(() => {
-        page.innerHTML = `
-        <div class="event-detail">
-            <div class="alert alert-error">Ошибка загрузки</div>
-            <a href="#/" class="back-link">&larr; Вернуться к списку</a>
-        </div>`;
-    });
+            </dl>
+        </section>
+    </article>`;
 }

@@ -1,3 +1,6 @@
+/* ==========================================================================
+ * api.js — клиент API. Все запросы уходят с cookie (JWT: access/refresh).
+ * ========================================================================== */
 const API_BASE = '/api/v1';
 
 const api = {
@@ -14,6 +17,10 @@ const api = {
             return { ok: res.ok, status: res.status, data: null };
         }
         const data = await res.json().catch(() => null);
+        /* Диагностика: любой неуспешный ответ виден в консоли DevTools */
+        if (!res.ok) {
+            console.error(`[API] ${method} ${path} → ${res.status}`, data);
+        }
         return { ok: res.ok, status: res.status, data };
     },
 
@@ -21,18 +28,33 @@ const api = {
     post(path, body) { return this.request('POST', path, body); },
     postForm(path, formData) { return this.request('POST', path, formData, true); },
 
+    /* Аутентификация */
     checkAuth()  { return this.get('/auth/'); },
     register(d)  { return this.post('/auth/register', d); },
     login(d)     { return this.post('/auth/login', d); },
     logout()     { return this.get('/auth/logout'); },
 
-    getMain()    { return this.get('/'); },
+    /* Главный экран: пользователь (с ролью) + все события */
+    getDashboard() { return this.get('/events/dashboard'); },
+    /* События текущего пользователя */
+    getMyEvents()  { return this.get('/events/dashboard/my_events'); },
 
+    /* Пользователь */
     getUser(id)      { return this.get(`/user/${id}`); },
     editUser(id, d)  { return this.post(`/user/${id}/edit_info`, d); },
 
+    /* События */
     getEvent(id)     { return this.get(`/events/${id}`); },
     addEvent(d)      { return this.post('/events/add_event', d); },
     editEvent(d)     { return this.post('/events/edit_event', d); },
     addEventsPdf(fd) { return this.postForm('/events/add_events_via_pdf_tables', fd); },
+
+    /* Администрирование (только роль ADMIN на бэкенде) */
+    adminUsers()     { return this.get('/admin/users'); },
+    adminEvents()    { return this.get('/admin/events'); },
+    banUser(id)      { return this.get(`/admin/ban/${id}`); },
+    unbanUser(id)    { return this.get(`/admin/unban/${id}`); },
+    grantAdmin(id)   { return this.get(`/admin/grant_admin/${id}`); },
+    demoteAdmin(id)  { return this.get(`/admin/demote_admin/${id}`); },
+    archiveEvent(id) { return this.get(`/admin/archive_event/${id}`); },
 };

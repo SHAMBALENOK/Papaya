@@ -1,325 +1,148 @@
-function renderProfile() {
+/* ==========================================================================
+ * pages/profile.js — профиль пользователя.
+ * Личные данные; управление событиями перенесено на #/my-events.
+ * ========================================================================== */
+async function renderProfile() {
     const page = document.getElementById('page');
     if (!store.user) { navigate('#/auth'); return; }
-    page.innerHTML = '<div class="loading">Загрузка...</div>';
+    page.innerHTML = loadingHtml();
 
-    api.getUser(store.user.id).then(res => {
-        if (!res.ok) {
-            page.innerHTML = '<div class="alert alert-error">Не удалось загрузить профиль</div>';
-            return;
-        }
-        const u = res.data;
-        const initials = ((u.name||'?')[0] + (u.surname||'')[0] || '?').toUpperCase();
-        const genderText = u.gender === 'male' ? 'Мужской' : u.gender === 'female' ? 'Женский' : 'Не указан';
-        const accHtml = u.isActive
-            ? '<span class="status-badge status-active">Активен</span>'
-            : '<span class="status-badge status-inactive">Заблокирован</span>';
-        const regDate = u.createdAt ? String(u.createdAt).slice(0,10) : 'Н/Д';
+    let res;
+    try { res = await api.getUser(store.user.id); } catch { res = { ok: false }; }
 
+    if (!res.ok || !res.data) {
         page.innerHTML = `
-        <div class="profile-layout">
-            <a href="#/" class="back-link">&#127816; На главную</a>
-
-            <div class="profile-card">
-                <div class="profile-header">
-                    <div class="avatar">${escHtml(initials)}</div>
-                    <div>
-                        <h2>${escHtml(u.name)} ${escHtml(u.surname)}</h2>
-                        <span class="role-badge">${escHtml(u.role || 'USER')}</span>
-                    </div>
-                    <button id="btn-edit-profile" class="btn btn-outline btn-sm">Редактировать профиль</button>
-                </div>
-
-                <div class="profile-fields">
-                    <div class="profile-field">
-                        <span class="label">Email</span>
-                        <span class="value">${escHtml(u.email)}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">Телефон</span>
-                        <span class="value">${escHtml(u.phone || 'Не указан')}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">Дата рождения</span>
-                        <span class="value">${escHtml(u.bday || 'Не указана')}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">Пол</span>
-                        <span class="value">${genderText}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">Страна</span>
-                        <span class="value">${escHtml(u.country || 'Не указана')}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">Регион</span>
-                        <span class="value">${escHtml(u.region || 'Не указан')}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">Статус</span>
-                        <span class="value">${escHtml(u.status || 'Не задан')}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">Аккаунт</span>
-                        <span class="value">${accHtml}</span>
-                    </div>
-                    <div class="profile-field">
-                        <span class="label">ID</span>
-                        <span class="value mono">${escHtml(u.id)}</span>
-                    </div>
-                </div>
-
-                <div class="profile-bio">
-                    <h3>О себе</h3>
-                    <p>${escHtml(u.bio || 'Нет информации.')}</p>
-                </div>
-                <div class="profile-reg">Зарегистрирован: ${regDate}</div>
-
-                <!-- Управление событиями -->
-                <div class="events-mgmt">
-                    <h3>Управление событиями</h3>
-
-                    <div class="mgmt-grid">
-                        <!-- Создать событие -->
-                        <div class="mgmt-card">
-                            <h4>Создать событие</h4>
-                            <div id="mgmt-create-alert"></div>
-                            <form id="mgmt-create-form">
-                                <div class="form-group">
-                                    <label>Название *</label>
-                                    <input name="name" required>
-                                </div>
-                                <div class="form-group">
-                                    <label>Описание</label>
-                                    <textarea name="disc" rows="3"></textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label>URL превью</label>
-                                    <input name="preview_picture" type="url" placeholder="https://...">
-                                </div>
-                                <div class="form-group">
-                                    <label>URL полное фото</label>
-                                    <input name="picture" type="url" placeholder="https://...">
-                                </div>
-                                <button type="submit" class="btn btn-primary btn-sm btn-block">Создать событие</button>
-                            </form>
-                        </div>
-
-                        <!-- Загрузить из PDF -->
-                        <div class="mgmt-card">
-                            <h4>Добавить события из PDF-таблицы</h4>
-                            <div id="mgmt-pdf-alert"></div>
-                            <form id="mgmt-pdf-form">
-                                <div class="form-group">
-                                    <label>PDF-файл с таблицей мероприятий</label>
-                                    <input name="file" type="file" accept=".pdf" required>
-                                </div>
-                                <p class="mgmt-hint">Загрузите PDF таблицу со списком мероприятий для автоматического импорта.</p>
-                                <button type="submit" class="btn btn-primary btn-sm btn-block" id="pdf-submit-btn">Загрузить и добавить</button>
-                            </form>
-                        </div>
-
-                        <!-- Редактировать событие -->
-                        <div class="mgmt-card mgmt-card-wide">
-                            <h4>Редактировать существующее</h4>
-                            <div id="mgmt-edit-alert"></div>
-                            <form id="mgmt-edit-form">
-                                <div class="form-group">
-                                    <label>ID события *</label>
-                                    <input name="event_id" required placeholder="UUID события">
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>Название *</label>
-                                        <input name="name" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Описание</label>
-                                        <textarea name="disc" rows="2"></textarea>
-                                    </div>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>URL превью</label>
-                                        <input name="preview_picture" type="url">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>URL полное фото</label>
-                                        <input name="picture" type="url">
-                                    </div>
-                                </div>
-                                <button type="submit" class="btn btn-outline btn-sm btn-block">Обновить событие</button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="max-w-narrow mx-auto py-24">
+            ${alertHtml('Не удалось загрузить профиль', 'error')}
+            <a href="#/" class="${UI.btn} ${UI.btnSecondary}">На главную</a>
         </div>`;
+        return;
+    }
 
-        // Edit profile
-        document.getElementById('btn-edit-profile').addEventListener('click', () => openEditProfileModal(u));
+    const u = res.data;
+    const initials = (((u.name || '?')[0] || '?') + ((u.surname || '')[0] || '')).toUpperCase();
+    const genderText = u.gender === 'male' ? 'Мужской' : u.gender === 'female' ? 'Женский' : 'Не указан';
+    const accBadge = u.isActive
+        ? `<span class="${UI.badge} ${UI.badgeSuccess}"><span class="w-2 h-2 rounded-full bg-moss" aria-hidden="true"></span>Активен</span>`
+        : `<span class="${UI.badge} ${UI.badgeDanger}">Заблокирован</span>`;
 
-        // Create event
-        document.getElementById('mgmt-create-form').addEventListener('submit', async e => {
-            e.preventDefault();
-            const fd = new FormData(e.target);
-            const now = new Date().toISOString();
-            const res = await api.addEvent({
-                id: '', owner: u.id,
-                name: fd.get('name'),
-                disc: fd.get('disc') || null,
-                preview_picture: fd.get('preview_picture') || null,
-                picture: fd.get('picture') || null,
-                isActive: true, createdAt: now, updatedAt: now,
-            });
-            const el = document.getElementById('mgmt-create-alert');
-            if (res.ok) {
-                el.innerHTML = '<div class="alert alert-success">Событие создано</div>';
-                e.target.reset();
-            } else {
-                el.innerHTML = `<div class="alert alert-error">${escHtml(res.data?.detail || 'Ошибка')}</div>`;
-            }
-        });
+    const fields = [
+        ['Email', escHtml(u.email)],
+        ['Телефон', escHtml(u.phone || 'Не указан')],
+        ['Дата рождения', escHtml(u.bday || 'Не указана')],
+        ['Пол', escHtml(genderText)],
+        ['Страна', escHtml(u.country || 'Не указана')],
+        ['Регион', escHtml(u.region || 'Не указан')],
+        ['Статус', escHtml(u.status || 'Не задан')],
+        ['Роль', `<span class="${UI.badge} ${u.role === 'ADMIN' ? UI.badgeAdmin : UI.badgeNeutral}">${escHtml(u.role || 'USER')}</span>`],
+        ['Аккаунт', accBadge],
+        ['ID', `<span class="text-sm text-ink/60 break-all">${escHtml(u.id)}</span>`],
+    ];
 
-        // PDF upload
-        document.getElementById('mgmt-pdf-form').addEventListener('submit', async e => {
-            e.preventDefault();
-            const btn = document.getElementById('pdf-submit-btn');
-            const el = document.getElementById('mgmt-pdf-alert');
-            const fileInput = e.target.querySelector('input[type=file]');
-            if (!fileInput.files.length) {
-                el.innerHTML = '<div class="alert alert-error">Выберите файл</div>';
-                return;
-            }
-            btn.disabled = true;
-            btn.textContent = 'Обработка файла...';
-            el.innerHTML = '<div class="alert alert-success">Пожалуйста, подождите. Это может занять некоторое время.</div>';
+    page.innerHTML = `
+    <div class="max-w-narrow mx-auto py-4">
+        <a href="#/" class="inline-flex items-center gap-2 text-navy font-semibold hover:text-primary transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-navy">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
+            На главную
+        </a>
 
-            const fd = new FormData();
-            fd.append('file', fileInput.files[0]);
-            const res = await api.addEventsPdf(fd);
+        <!-- Шапка профиля -->
+        <header class="mt-12 flex flex-col sm:flex-row sm:items-center gap-8">
+            <div class="w-24 h-24 rounded bg-primary text-white text-3xl font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
+            <div class="min-w-0 flex-1">
+                <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight leading-tight">${escHtml(u.name)} ${escHtml(u.surname)}</h1>
+                <p class="mt-3 text-lg text-ink/55">${escHtml(u.email)}</p>
+            </div>
+            <div class="flex flex-wrap gap-3 shrink-0">
+                <a href="#/my-events" class="${UI.btn} ${UI.btnSecondary}">Мои события</a>
+                <button id="btn-edit-profile" class="${UI.btn} ${UI.btnPrimary}">Редактировать</button>
+            </div>
+        </header>
 
-            btn.disabled = false;
-            btn.textContent = 'Загрузить и добавить';
-            if (res.ok) {
-                el.innerHTML = '<div class="alert alert-success">События успешно импортированы</div>';
-                e.target.reset();
-            } else {
-                el.innerHTML = `<div class="alert alert-error">${escHtml(res.data?.detail || 'Ошибка импорта')}</div>`;
-            }
-        });
+        <!-- Поля: сетка с крупными зазорами, разделение только «воздухом» -->
+        <section class="mt-16" aria-label="Данные профиля">
+            <h2 class="${UI.eyebrow}">Данные профиля</h2>
+            <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">
+                ${fields.map(([label, value]) => `
+                <div>
+                    <dt class="text-sm font-medium text-ink/45">${label}</dt>
+                    <dd class="mt-2 text-base leading-relaxed">${value}</dd>
+                </div>`).join('')}
+            </dl>
+        </section>
 
-        // Edit event
-        document.getElementById('mgmt-edit-form').addEventListener('submit', async e => {
-            e.preventDefault();
-            const fd = new FormData(e.target);
-            const now = new Date().toISOString();
-            const res = await api.editEvent({
-                id: fd.get('event_id'),
-                owner: u.id,
-                name: fd.get('name'),
-                disc: fd.get('disc') || null,
-                preview_picture: fd.get('preview_picture') || null,
-                picture: fd.get('picture') || null,
-                isActive: true, createdAt: now, updatedAt: now,
-            });
-            const el = document.getElementById('mgmt-edit-alert');
-            if (res.ok) {
-                el.innerHTML = '<div class="alert alert-success">Событие обновлено</div>';
-            } else {
-                el.innerHTML = `<div class="alert alert-error">${escHtml(res.data?.detail || 'Ошибка')}</div>`;
-            }
-        });
-    });
+        <section class="mt-16" aria-labelledby="profile-bio-title">
+            <h2 id="profile-bio-title" class="${UI.eyebrow}">О себе</h2>
+            <p class="mt-7 text-lg text-ink/70 leading-[1.8]">${escHtml(u.bio || 'Нет информации.')}</p>
+        </section>
+
+        <p class="mt-14 mb-4 text-sm text-ink/45">Зарегистрирован: ${formatDate(u.createdAt)}</p>
+    </div>`;
+
+    document.getElementById('btn-edit-profile').addEventListener('click', () => openEditProfileModal(u));
 }
 
 function openEditProfileModal(u) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-    <div class="modal">
-        <h2>Изменение данных профиля</h2>
+    const body = `
         <div id="modal-alert"></div>
         <form id="edit-profile-form">
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Имя</label>
-                    <input name="name" value="${escAttr(u.name || '')}">
-                </div>
-                <div class="form-group">
-                    <label>Фамилия</label>
-                    <input name="surname" value="${escAttr(u.surname || '')}">
-                </div>
+            <div class="grid sm:grid-cols-2 gap-x-4">
+                ${inputField({ id: 'pf-name', name: 'name', label: 'Имя', value: u.name || '', autocomplete: 'given-name' })}
+                ${inputField({ id: 'pf-surname', name: 'surname', label: 'Фамилия', value: u.surname || '', autocomplete: 'family-name' })}
             </div>
-            <div class="form-group">
-                <label>Email</label>
-                <input name="email" type="email" value="${escAttr(u.email || '')}">
+            ${inputField({ id: 'pf-email', name: 'email', label: 'Email', type: 'email', value: u.email || '', autocomplete: 'email' })}
+            ${inputField({ id: 'pf-phone', name: 'phone', label: 'Телефон', value: u.phone || '', autocomplete: 'tel' })}
+            ${inputField({ id: 'pf-bday', name: 'bday', label: 'Дата рождения (ГГГГ-ММ-ДД)', value: u.bday || '', autocomplete: 'bday' })}
+            ${selectField({ id: 'pf-gender', name: 'gender', label: 'Пол', value: u.gender || '', options: [
+                { value: '', label: 'Не указан' },
+                { value: 'male', label: 'Мужской' },
+                { value: 'female', label: 'Женский' },
+            ]})}
+            <div class="grid sm:grid-cols-2 gap-x-4">
+                ${inputField({ id: 'pf-country', name: 'country', label: 'Страна', value: u.country || '', autocomplete: 'country-name' })}
+                ${inputField({ id: 'pf-region', name: 'region', label: 'Регион', value: u.region || '' })}
             </div>
-            <div class="form-group">
-                <label>Телефон</label>
-                <input name="phone" value="${escAttr(u.phone || '')}">
+            ${inputField({ id: 'pf-status', name: 'status', label: 'Статус (школьник, студент, учитель…)', value: u.status || '' })}
+            ${textareaField({ id: 'pf-bio', name: 'bio', label: 'О себе', value: u.bio || '', rows: 3 })}
+            <div class="flex flex-wrap justify-end gap-3 mt-10">
+                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
+                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Сохранить</button>
             </div>
-            <div class="form-group">
-                <label>Дата рождения (YYYY-MM-DD)</label>
-                <input name="bday" value="${escAttr(u.bday || '')}">
-            </div>
-            <div class="form-group">
-                <label>Пол</label>
-                <select name="gender">
-                    <option value="">Не указан</option>
-                    <option value="male"   ${u.gender==='male'?'selected':''}>Мужской</option>
-                    <option value="female" ${u.gender==='female'?'selected':''}>Женский</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Страна</label>
-                <input name="country" value="${escAttr(u.country || '')}">
-            </div>
-            <div class="form-group">
-                <label>Регион</label>
-                <input name="region" value="${escAttr(u.region || '')}">
-            </div>
-            <div class="form-group">
-                <label>Статус (текст)</label>
-                <input name="status" value="${escAttr(u.status || '')}">
-            </div>
-            <div class="form-group">
-                <label>О себе</label>
-                <textarea name="bio" rows="3">${escHtml(u.bio || '')}</textarea>
-            </div>
-            <div class="modal-actions">
-                <button type="button" id="modal-cancel" class="btn btn-outline">Отмена</button>
-                <button type="submit" class="btn btn-primary">Сохранить</button>
-            </div>
-        </form>
-    </div>`;
-    document.body.appendChild(overlay);
-
-    overlay.querySelector('#modal-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+        </form>`;
+    const { overlay, close } = openModal('Изменение данных профиля', body, { wide: true });
+    overlay.querySelector('[data-cancel]').addEventListener('click', close);
 
     overlay.querySelector('#edit-profile-form').addEventListener('submit', async e => {
         e.preventDefault();
         const fd = new FormData(e.target);
-        const res = await api.editUser(u.id, {
-            id: u.id,
-            name: fd.get('name'),
-            surname: fd.get('surname'),
-            email: fd.get('email'),
-            isActive: true,
-            gender: fd.get('gender') || null,
-            bday: fd.get('bday') || null,
-            bio: fd.get('bio') || null,
-            phone: fd.get('phone') || null,
-            country: fd.get('country') || null,
-            region: fd.get('region') || null,
-            status: fd.get('status') || null,
-            role: u.role || 'USER',
-        });
-        if (res.ok) { overlay.remove(); renderProfile(); }
-        else {
-            overlay.querySelector('#modal-alert').innerHTML =
-                `<div class="alert alert-error">${escHtml(res.data?.detail || 'Ошибка')}</div>`;
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        try {
+            const res = await api.editUser(u.id, {
+                id: u.id,
+                name: fd.get('name'),
+                surname: fd.get('surname'),
+                email: fd.get('email'),
+                isActive: u.isActive !== false,
+                gender: fd.get('gender') || null,
+                bday: fd.get('bday') || null,
+                bio: fd.get('bio') || null,
+                phone: fd.get('phone') || null,
+                country: fd.get('country') || null,
+                region: fd.get('region') || null,
+                status: fd.get('status') || null,
+                role: u.role || 'USER',
+            });
+            if (res.ok) {
+                close();
+                showToast('Профиль обновлён', 'success');
+                renderProfile();
+            } else {
+                showModalError(overlay, res);
+            }
+        } catch {
+            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
         }
+        btn.disabled = false;
     });
 }
