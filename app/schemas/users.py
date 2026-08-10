@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from uuid import UUID
-
+from datetime import datetime
 
 class UserBase(BaseModel):
     id: Optional[UUID] = None
@@ -16,10 +16,8 @@ class UserBase(BaseModel):
         # клиент шлёт id: '' — превращаем в None, чтобы не падать на валидации UUID
         return None if v == '' or v is None else v
 
-
 class UserCreate(UserBase):
     password: str
-
 
 class UserUpdate(UserBase):
     gender: Optional[str] = None
@@ -31,7 +29,6 @@ class UserUpdate(UserBase):
     status: Optional[str] = None
     role: str
 
-
 class UserResponse(UserBase):
     gender: Optional[str] = None
     bday: Optional[str] = None
@@ -40,6 +37,9 @@ class UserResponse(UserBase):
     country: Optional[str] = None
     region: Optional[str] = None
     status: Optional[str] = None # i.e. школьник студент учитель и проч
+    # Добавлено: роль и дата регистрации нужны профилю и админ-панели
+    role: str = 'USER'
+    createdAt: Optional[datetime] = None
 
     class Config:
         from_attributes = True

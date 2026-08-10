@@ -101,7 +101,6 @@ async def event_edit_details(
         )
         return up_event
 
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
@@ -112,7 +111,7 @@ async def event_edit_details(
         200: {'description': 'OK'},
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        500: {'description': 'Something has broken ¯_(ツ)_/¯'},
     }
 )
 async def add_events_via_pdf_tables(
@@ -143,7 +142,7 @@ async def add_events_via_pdf_tables(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯'
+            detail=f'App has broken caused by error\n{e}\n ¯_(ツ)_/¯'
         )
 
 @events_page.get('/dashboard')
@@ -170,7 +169,7 @@ async def event_dashboard(
                 'disc': ev.disc,
                 'preview_picture': ev.preview_picture,
                 'picture': ev.picture,
-                #'isActive': ev.isActive, TODO: Архив
+                'isActive': ev.isActive,  # ← добавлено: статус нужен каталогу и архиву
                 'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
                 'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
             }
@@ -213,7 +212,7 @@ async def event_dashboard(
                 'disc': ev.disc,
                 'preview_picture': ev.preview_picture,
                 'picture': ev.picture,
-                #'isActive': ev.isActive, TODO: Архив
+                'isActive': ev.isActive,  # ← добавлено
                 'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
                 'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
             }

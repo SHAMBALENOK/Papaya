@@ -1,158 +1,101 @@
-function renderDashboard() {
-    const page = document.getElementById('page');
-    page.innerHTML = '<div class="loading">Загрузка...</div>';
+/* ==========================================================================
+ * pages/dashboard.js — каталог олимпиад (главный экран).
+ * Действия (PDF, добавить, обновить) вынесены в FAB «+» (см. app.js).
+ * ========================================================================== */
 
-    api.getMain().then(res => {
-        if (!res.ok) { navigate('#/auth'); return; }
-        store.setUser({
-            id: res.data.user_id,
-            name: res.data.user_name,
-            surname: res.data.user_surname,
-            email: res.data.user_email,
-        });
-        store.setEvents(res.data.events || []);
-        drawDashboard();
-    }).catch(() => navigate('#/auth'));
+const FALLBACK_IMG = 'https://placehold.co/640x360/EBF2FA/427AA1?text=Papaya';
+
+async function loadDashboardData() {
+    const res = await api.getDashboard();
+    if (res.ok && res.data && res.data.user_id) {
+        store.setUser(userFromDashboard(res.data));
+        store.setEvents(res.data.events);
+        renderHeader();
+        return true;
+    }
+    return false;
+}
+
+async function renderDashboard() {
+    const page = document.getElementById('page');
+    page.innerHTML = loadingHtml();
+
+    let ok = false;
+    try { ok = await loadDashboardData(); }
+    catch (err) { console.error('[dashboard] ошибка загрузки:', err); }
+
+    if (ok) { drawDashboard(); return; }
+
+    page.innerHTML = `
+    <div class="max-w-narrow mx-auto py-24 text-center">
+        <h1 class="text-3xl font-extrabold tracking-tight">Не удалось загрузить данные</h1>
+        <p class="mt-5 text-lg text-ink/60 leading-relaxed">Каталог временно недоступен. Проверьте подключение к серверу и попробуйте ещё раз.</p>
+        <div class="flex flex-wrap justify-center gap-3 mt-10">
+            <button id="dash-retry" class="${UI.btn} ${UI.btnPrimary}">Повторить</button>
+            <button id="dash-logout" class="${UI.btn} ${UI.btnGhost}">Выйти</button>
+        </div>
+    </div>`;
+    document.getElementById('dash-retry').addEventListener('click', renderDashboard);
+    document.getElementById('dash-logout').addEventListener('click', logout);
 }
 
 function drawDashboard() {
     const page = document.getElementById('page');
     const events = store.events;
 
-    let cards = '';
+    let listHtml;
     if (!events.length) {
-        cards = `
-        <div class="empty-state">
-            <div class="emoji">&#128532;</div>
-            <p>Событий пока нет</p>
-            <span>Загляните позже, мы обязательно добавим что-нибудь интересное!</span>
+        listHtml = `
+        <div class="py-24 md:py-32 text-center max-w-md mx-auto">
+            <div class="mx-auto w-16 h-16 rounded bg-tint flex items-center justify-center mb-10" aria-hidden="true">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#679436" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="17" rx="1"></rect>
+                    <path d="M3 9h18M8 2v4M16 2v4"></path>
+                </svg>
+            </div>
+            <h2 class="text-2xl font-bold tracking-tight">Событий пока нет</h2>
+            <p class="mt-4 text-ink/60 leading-relaxed">Загляните позже — мы обязательно добавим что-нибудь интересное. Или добавьте первое событие через кнопку «+».</p>
+            <button id="btn-add-first" class="${UI.btn} ${UI.btnPrimary} mt-10">Добавить первое событие</button>
         </div>`;
     } else {
-        cards = '<div class="events-grid">' + events.map(ev => {
-            const img = ev.preview_picture || 'https://placehold.co/600x400/e9ecef/95a5a6?text=No+Preview';
+        listHtml = `<div class="grid gap-8 md:grid-cols-2 xl:grid-cols-3">` + events.map(ev => {
+            const img = ev.preview_picture || FALLBACK_IMG;
+            const archived = ev.isActive === false;
             return `
-            <a href="#/event/${ev.id}" class="event-card">
-                <img class="card-img" src="${escAttr(img)}" alt="${escAttr(ev.name)}"
-                     onerror="this.src='https://placehold.co/600x400/e9ecef/95a5a6?text=No+Preview'">
-                <div class="card-body">
-                    <h3>${escHtml(ev.name)}</h3>
-                    <p>${escHtml(ev.disc || 'Без описания')}</p>
+            <a href="#/event/${ev.id}"
+               class="group block bg-white rounded overflow-hidden shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <div class="h-48 bg-tint overflow-hidden">
+                    <img class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                         src="${escAttr(img)}" alt="${escAttr(ev.name)}" loading="lazy"
+                         onerror="this.onerror=null;this.src='${FALLBACK_IMG}'">
+                </div>
+                <div class="p-8">
+                    ${archived ? `<span class="${UI.badge} ${UI.badgeNeutral} mb-4">Архив</span>` : ''}
+                    <h2 class="text-xl font-bold tracking-tight leading-snug text-ink">${escHtml(ev.name)}</h2>
+                    <p class="mt-3 text-ink/60 leading-relaxed line-clamp-3">${escHtml(ev.disc || 'Описание отсутствует.')}</p>
+                    <p class="mt-7 text-sm font-semibold text-navy group-hover:text-primary transition-colors">Подробнее</p>
                 </div>
             </a>`;
         }).join('') + '</div>';
     }
 
     page.innerHTML = `
-    <div class="dashboard-header">
-      <h1 class="section-title">Актуальные олимпиады</h1>
-      <div style="display:flex;gap:8px;">
-        <button id="btn-add-pdf" class="btn btn-outline">PDF</button>
-        <button id="btn-add-event" class="btn btn-primary">+ Добавить</button>
-      </div>
-    </div>
-    ${cards}`;
+    <section class="pt-4 pb-14 md:pb-16">
+        <div class="max-w-2xl">
+            <p class="${UI.eyebrow}">Каталог</p>
+            <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Актуальные олимпиады</h1>
+            <p class="mt-6 text-lg text-ink/60 leading-relaxed">
+                Всероссийские и региональные мероприятия для школьников.
+                Откройте карточку, чтобы узнать подробности.
+            </p>
+        </div>
+    </section>
 
-    document.getElementById('btn-add-event').addEventListener('click', openAddEventModal);
-    document.getElementById('btn-add-pdf').addEventListener('click', openPdfModal);
-}
+    <section aria-label="Список олимпиад">${listHtml}</section>`;
 
-function openAddEventModal() {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-    <div class="modal">
-        <h2>Новое событие</h2>
-        <div id="modal-alert"></div>
-        <form id="add-event-form">
-            <div class="form-group">
-                <label>Название *</label>
-                <input name="name" required>
-            </div>
-            <div class="form-group">
-                <label>Описание</label>
-                <textarea name="disc" rows="4" placeholder="Описание олимпиады..."></textarea>
-            </div>
-            <div class="form-group">
-                <label>URL превью</label>
-                <input name="preview_picture" type="url" placeholder="https://...">
-            </div>
-            <div class="form-group">
-                <label>URL полное фото</label>
-                <input name="picture" type="url" placeholder="https://...">
-            </div>
-            <div class="modal-actions">
-                <button type="button" id="modal-cancel" class="btn btn-outline">Отмена</button>
-                <button type="submit" class="btn btn-primary">Создать событие</button>
-            </div>
-        </form>
-    </div>`;
-    document.body.appendChild(overlay);
-
-    overlay.querySelector('#modal-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-
-    overlay.querySelector('#add-event-form').addEventListener('submit', async e => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        const now = new Date().toISOString();
-        const res = await api.addEvent({
-            id: '',
-            owner: store.user.id,
-            name: fd.get('name'),
-            disc: fd.get('disc') || null,
-            preview_picture: fd.get('preview_picture') || null,
-            picture: fd.get('picture') || null,
-            isActive: true,
-            createdAt: now,
-            updatedAt: now,
-        });
-        if (res.ok) {
-          overlay.remove();
-          renderDashboard();
-          showToast('Событие создано', 'success');
-        }
-        else {
-            overlay.querySelector('#modal-alert').innerHTML =
-                `<div class="alert alert-error">${escHtml(res.data?.detail || 'Ошибка')}</div>`;
-        }
-    });
-
-}
-function openPdfModal() {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `
-  <div class="modal">
-    <h2>Импорт из PDF</h2>
-    <div id="pdf-alert"></div>
-    <form id="pdf-form">
-      <div class="form-group">
-        <label>PDF-файл с таблицей *</label>
-        <input name="file" type="file" accept=".pdf" required>
-      </div>
-      <div class="modal-actions">
-        <button type="button" id="pdf-cancel" class="btn btn-outline">Отмена</button>
-        <button type="submit" class="btn btn-primary">Загрузить</button>
-      </div>
-    </form>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.querySelector('#pdf-cancel').addEventListener('click', () => overlay.remove());
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-
-  overlay.querySelector('#pdf-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const res = await api.addEventsPdf(fd);
-    if (res.ok && Array.isArray(res.data)) {
-      overlay.remove();
-      // Обновляем store и перерисовываем — события сразу на dashboard
-      store.setEvents([...store.events, ...res.data]);
-      drawDashboard();
-      showToast(`Добавлено событий: ${res.data.length}`, 'success');
-    } else {
-      overlay.querySelector('#pdf-alert').innerHTML =
-        `<div class="alert alert-error">${escHtml(res.data?.detail || 'Ошибка')}</div>`;
-    }
-  });
+    const first = document.getElementById('btn-add-first');
+    if (first) first.addEventListener('click', () => openAddEventModal(async () => {
+        try { await loadDashboardData(); } catch { /* остаются текущие данные */ }
+        drawDashboard();
+    }));
 }

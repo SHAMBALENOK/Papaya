@@ -17,8 +17,6 @@ class EventBase(BaseModel):
         # клиент шлёт id: '' — превращаем в None, чтобы не падать на валидации UUID
         return None if v == '' or v is None else v
 
-
-
 class EventCreate(EventBase):
     owner: str
     createdAt: datetime
@@ -29,7 +27,9 @@ class EventUpdate(EventBase):
     updatedAt: datetime
 
 class EventResponse(EventBase):
-    ...
+    # Добавлено: даты отдаются на страницу события
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
 
     class Config:
         from_attributes = True
