@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 import asyncio
 import os
 from app.database.base import Base
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
@@ -30,3 +32,12 @@ async def get_db():
 async def init_models():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all, checkfirst=True)
+
+@asynccontextmanager
+async def db_lifespan(app: FastAPI):
+    if os.environ.get("GUNICORN_WORKER_ID", "0") == "0":
+        try:
+            await init_models()
+        except Exception:
+            pass
+    yield

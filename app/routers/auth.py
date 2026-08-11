@@ -8,7 +8,8 @@ import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
 from app import models, schemas, database
 from typing import Annotated
-
+from app.caching.main import get_redis
+import redis.asyncio as aioredis
 
 USER_NAMESPACE = uuid.NAMESPACE_DNS
 
@@ -54,6 +55,7 @@ async def register(
         response: Response,
         user: schemas.users.UserCreate,
         db: AsyncSession = Depends(get_db),
+        r: aioredis.Redis = Depends(get_redis),
 ):
     try:
         check_password = re_check.is_valid_password(user.password)
@@ -72,6 +74,7 @@ async def register(
             session=db,
             model=models.users.Users,
         )
+        await r.set(f"user:{user_data.id}:object", user_data, ex=600)
 
         response.set_cookie(
             key="access_jwt",
@@ -112,7 +115,8 @@ async def register(
 async def login(
         response: Response,
         user: schemas.users.UserCreate,
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
+        r: aioredis.Redis = Depends(get_redis),
 ):
     try:
         db_user = await database.users.find_user_by_email(user.email, db, models.users.Users)
@@ -141,6 +145,7 @@ async def login(
                     ),
                     max_age=1209600
                 )
+                await r.set(f"user:{db_user.id}:object", db_user, ex=600)
                 return db_user
 
     except Exception as e:

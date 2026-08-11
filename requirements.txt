@@ -16,6 +16,7 @@ huggingface_hub
 opencv-python-headless
 googletrans
 python-multipart
+redis
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.2.2+cpu
