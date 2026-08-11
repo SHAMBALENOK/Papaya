@@ -8,20 +8,18 @@ from app import models, schemas, database
 from typing import Annotated
 from app.routers import user, events, auth, admin
 import os
+from app.database.database import db_lifespan
+from app.caching.main import redis_lifespan, get_redis
 from contextlib import asynccontextmanager
-from app.database.database import init_models
+import redis.asyncio as aioredis
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Только один воркер создаёт таблицы
-    if os.environ.get("GUNICORN_WORKER_ID", "0") == "0":
-        try:
-            await init_models()
-        except Exception:
-            pass  # таблицы уже существуют
-    yield
+async def main_lifespan(app: FastAPI):
+    async with db_lifespan(app):
+        async with redis_lifespan(app):
+            yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=main_lifespan)
 
 app.include_router(user.user_page, prefix="/api/v1")
 app.include_router(events.events_page, prefix="/api/v1")
@@ -32,12 +30,17 @@ app.include_router(admin.admin_page, prefix="/api/v1")
 @app.get('/api/v1/')
 async def main(
     db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
     refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+        if await r.get(f"user:{jwt_data.get('sub')}:object"):
+            user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+        else:
+            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+            await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
 
         return JSONResponse(status_code=200, content={
             'user_id': str(user_obj.id),       # UUID → str
@@ -53,13 +56,19 @@ async def main(
 @app.get('/api/v1/welcome')
 async def welcome(
     db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
     refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
         try:
             jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+            if await r.get(f"user:{jwt_data.get('sub')}:object"):
+                user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+            else:
+                user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+                await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
+
             return JSONResponse(status_code=200, content={
                 'user_id': str(user_obj.id),  # UUID → str
                 'user_name': user_obj.name,

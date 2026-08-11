@@ -10,6 +10,9 @@ from app import models, schemas, database
 from typing import Annotated
 import shutil
 import uuid as uuid_mod
+import redis.asyncio as aioredis
+from app.caching.main import get_redis
+import json
 
 events_page = APIRouter(
     prefix='/events',
@@ -31,17 +34,22 @@ UPLOAD_FOLDER = '../tables'
 async def add_event(
         event: schemas.events.EventCreate,  # ← только один body параметр
         db: AsyncSession = Depends(get_db),
+        r: aioredis.Redis = Depends(get_redis),
         access_jwt: Annotated[str | None, Cookie()] = None,
         refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
-        # TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_id = jwt_data.get('sub')
+        user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+        if user_obj.role != "EDITOR":
+            raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
+        else:
+            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+            if user_obj.role != "EDITOR": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
 
         db_event = await database.events.add_event(
             ins={
-                'owner': user_id,
+                'owner': jwt_data.get('sub'),
                 'name': event.name,
                 'disc': event.disc,
                 'preview_picture': event.preview_picture,
@@ -50,13 +58,14 @@ async def add_event(
             session=db,
             model=models.events.Events,
         )
+        await r.set(f"event:{db_event.id}", db_event, ex=600)
         return db_event
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @events_page.post(
-    '/edit_event',
+    '/edit_event/{event_id}',
     response_model=schemas.events.EventResponse,
     responses={
         200: {'description': 'OK'},
@@ -67,21 +76,33 @@ async def add_event(
     }
 )
 async def event_edit_details(
+        event_id: str,
         event: schemas.events.EventCreate,
         db: AsyncSession = Depends(get_db),
+        r: aioredis.Redis = Depends(get_redis),
         access_jwt: Annotated[str | None, Cookie()] = None,
         refresh_jwt: Annotated[str | None, Cookie()] = None
 ):
     try:
         #TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        db_event = await database.events.find_event_by_id(
-            event_id=str(event.id),
-            session=db,
-            model=models.events.Events
-        )
-        if not db_event:
-            raise HTTPException(status_code=404, detail='Event not found')
+        user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+        if user_obj.role != "EDITOR":
+            raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
+        else:
+            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+            if user_obj.role != "EDITOR": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
+
+        if await r.get(f"event:{event_id}"):
+            db_event = r.get(f"event:{event_id}")
+        else:
+            db_event = await database.events.find_event_by_id(
+                event_id=str(event.id),
+                session=db,
+                model=models.events.Events
+            )
+            if not db_event:
+                raise HTTPException(status_code=404, detail='Event not found')
 
         data = {
             'owner': event.owner,
@@ -99,6 +120,7 @@ async def event_edit_details(
             session=db,
             model=models.events.Events
         )
+        await r.set(f"event:{event_id}", up_event, ex=600)
         return up_event
 
     except Exception as e:
@@ -148,34 +170,43 @@ async def add_events_via_pdf_tables(
 @events_page.get('/dashboard')
 async def event_dashboard(
         db: AsyncSession = Depends(get_db),
+        r: aioredis.Redis = Depends(get_redis),
         access_jwt: Annotated[str | None, Cookie()] = None,
         refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-        random_events = await database.events.show_random_events(
-            quantity=await database.events.get_amount_of_events(session=db, model=models.events.Events),
-            session=db,
-            model=models.events.Events,
-        )
+        if await r.get(f"user:{jwt_data.get('sub')}:object"):
+            user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+        else:
+            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+            await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
 
-        # Сериализуем events в словари
-        events_list = [
-            {
-                'id': str(ev.id),
-                'owner': str(ev.owner) if ev.owner else None,
-                'name': ev.name,
-                'disc': ev.disc,
-                'preview_picture': ev.preview_picture,
-                'picture': ev.picture,
-                'isActive': ev.isActive,  # ← добавлено: статус нужен каталогу и архиву
-                'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
-                'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
-            }
-            for ev in random_events
-        ]
+        if await r.get(f"user:{jwt_data.get('sub')}:events"):
+            events_list = r.get(f"user:{jwt_data.get('sub')}:events")
+        else:
+            random_events = await database.events.show_random_events(
+                quantity=await database.events.get_amount_of_events(session=db, model=models.events.Events),
+                session=db,
+                model=models.events.Events,
+            )
 
+            # Сериализуем events в словари
+            events_list = [
+                {
+                    'id': str(ev.id),
+                    'owner': str(ev.owner) if ev.owner else None,
+                    'name': ev.name,
+                    'disc': ev.disc,
+                    'preview_picture': ev.preview_picture,
+                    'picture': ev.picture,
+                    'isActive': ev.isActive,  # ← добавлено: статус нужен каталогу и архиву
+                    'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
+                    'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
+                }
+                for ev in random_events
+            ]
+            await r.set(f"user:{jwt_data.get('sub')}:events", random_events, ex=600)
         return JSONResponse(status_code=200, content={
             'user_id': str(user_obj.id),       # UUID → str
             'user_name': user_obj.name,
@@ -190,37 +221,48 @@ async def event_dashboard(
 @events_page.get('/dashboard/my_events')
 async def event_dashboard(
         db: AsyncSession = Depends(get_db),
+        r: aioredis.Redis = Depends(get_redis),
         access_jwt: Annotated[str | None, Cookie()] = None,
         refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-        random_events = await database.events.show_random_events(
-            quantity=await database.events.get_amount_of_events(session=db, model=models.events.Events),
-            session=db,
-            model=models.events.Events,
-        )
+        if await r.get(f"user:{jwt_data.get('sub')}:object"):
+            user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+        else:
+            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+            await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
 
-        my_events = []
-        # Сериализуем events в словари
-        events_list = [
-            {
-                'id': str(ev.id),
-                'owner': str(ev.owner) if ev.owner else None,
-                'name': ev.name,
-                'disc': ev.disc,
-                'preview_picture': ev.preview_picture,
-                'picture': ev.picture,
-                'isActive': ev.isActive,  # ← добавлено
-                'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
-                'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
-            }
-            for ev in random_events
-        ]
-        for event in events_list:
-            if event['owner'] == jwt_data.get('sub'):
-                my_events.append(event)
+        if await r.get(f"user:{jwt_data.get('sub')}:my_events"):
+            my_events = json.loads(r.get(f"user:{jwt_data.get('sub')}:my_events"))
+        else:
+            random_events = await database.events.show_random_events(
+                quantity=await database.events.get_amount_of_events(session=db, model=models.events.Events),
+                session=db,
+                model=models.events.Events,
+            )
+
+            my_events = []
+            # Сериализуем events в словари
+            events_list = [
+                {
+                    'id': str(ev.id),
+                    'owner': str(ev.owner) if ev.owner else None,
+                    'name': ev.name,
+                    'disc': ev.disc,
+                    'preview_picture': ev.preview_picture,
+                    'picture': ev.picture,
+                    'isActive': ev.isActive,  # ← добавлено
+                    'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
+                    'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
+                }
+                for ev in random_events
+            ]
+            for event in events_list:
+                if event['owner'] == jwt_data.get('sub'):
+                    my_events.append(event)
+
+            await r.set(f"user:{jwt_data.get('sub')}:my_events", json.dumps(my_events), ex=600)
 
         return JSONResponse(status_code=200, content={
             'user_id': str(user_obj.id),       # UUID → str
@@ -247,17 +289,21 @@ async def event_dashboard(
 async def event_details(
         event_id: uuid_mod.UUID,
         db: AsyncSession = Depends(get_db),
+        r: aioredis.Redis = Depends(get_redis),
         access_jwt: Annotated[str | None, Cookie()] = None,
         refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        event = await database.events.find_event_by_id(
-            event_id=str(event_id),
-            session=db,
-            model=models.events.Events,
-        )
-        if not event: raise HTTPException(status_code=404, detail='Page is missing')
+        if await r.get(f"event:{event_id}"):
+            event = await r.get(f"event:{event_id}")
+        else:
+            event = await database.events.find_event_by_id(
+                event_id=str(event_id),
+                session=db,
+                model=models.events.Events,
+            )
+            if not event: raise HTTPException(status_code=404, detail='Page is missing')
 
         return event
     except Exception as e:
