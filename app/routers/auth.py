@@ -161,12 +161,14 @@ async def login(
 async def logout(
         access_jwt: Annotated[str | None, Cookie()] = None,
         refresh_jwt: Annotated[str | None, Cookie()] = None,
+        r: aioredis.Redis = Depends(get_redis),
 ):
     try:
-        await tokenz.jwt_check(access_jwt, refresh_jwt)
+        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         response = JSONResponse(status_code=200, content=None)
         response.delete_cookie('access_jwt')
         response.delete_cookie('refresh_jwt')
+        await r.delete(f"user:{jwt_data.get('sub')}:object")
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
