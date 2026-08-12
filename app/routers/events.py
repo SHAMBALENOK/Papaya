@@ -41,11 +41,11 @@ async def add_event(
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        if user_obj.role != "EDITOR":
+        if user_obj.role != "EDITOR" or user_obj.role != "ADMIN":
             raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
         else:
             user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            if user_obj.role != "EDITOR": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
+            if user_obj.role != "EDITOR" or user_obj.role != "ADMIN": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
 
         db_event = await database.events.add_event(
             ins={
@@ -87,11 +87,11 @@ async def event_edit_details(
         #TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        if user_obj.role != "EDITOR":
+        if user_obj.role != "EDITOR" or user_obj.role != "ADMIN":
             raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
         else:
             user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            if user_obj.role != "EDITOR": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
+            if user_obj.role != "EDITOR" or user_obj.role != "ADMIN": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
 
         if await r.get(f"event:{event_id}"):
             db_event = r.get(f"event:{event_id}")
@@ -127,7 +127,7 @@ async def event_edit_details(
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
 @events_page.post(
-    '/add_events_via_pdf_tables',
+    '/add_events_via_tables',
     response_model=list[schemas.events.EventResponse],  # ← список событий
     responses={
         200: {'description': 'OK'},
@@ -136,8 +136,9 @@ async def event_edit_details(
         500: {'description': 'Something has broken ¯_(ツ)_/¯'},
     }
 )
-async def add_events_via_pdf_tables(
+async def add_events_via_tables(
     db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
     file: UploadFile = File(...),
     access_jwt: Annotated[str | None, Cookie()] = None,
     refresh_jwt: Annotated[str | None, Cookie()] = None
@@ -145,22 +146,33 @@ async def add_events_via_pdf_tables(
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         user_id = jwt_data.get('sub')
-        filename = secure_filename(file.filename)
-        tools.mkdir(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}")
-        file_location = f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}"
-        with open(file_location, "wb+") as file_object:
-            shutil.copyfileobj(file.file, file_object)
+        user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+        if user_obj.role != "EDITOR" or user_obj.role != "ADMIN":
+            raise HTTPException(status_code=403, detail=f'Permission denied')  # Проверка прав
+        else:
+            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
+            if user_obj.role != "EDITOR" or user_obj.role != "ADMIN": raise HTTPException(status_code=403,
+                                                                                          detail=f'Permission denied')  # Проверка прав
 
-        if filename.split('.')[-1] == 'pdf':
-            created = await table_handling.main.pdf_to_db(
-                file_location, db, user_id
-            )
-            return created
-        elif filename.split('.')[-1] == 'xslx':
-            created = await table_handling.sql_processing.tabulate(
-                file_location, db, user_id
-            )
-            return created
+        if r.get(f"user:{user_id}:tables"):
+            created = await r.get(f"user:{user_id}:tables")
+        else:
+            filename = secure_filename(file.filename)
+            tools.mkdir(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}")
+            file_location = f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}"
+            with open(file_location, "wb+") as file_object:
+                shutil.copyfileobj(file.file, file_object)
+
+            if filename.split('.')[-1] == 'pdf':
+                created = await table_handling.main.pdf_to_db(
+                    file_location, db, user_id
+                )
+            elif filename.split('.')[-1] == 'xslx':
+                created = await table_handling.sql_processing.tabulate(
+                    file_location, db, user_id
+                )
+            await r.set(f"user:{user_id}:tables", created, ex=120)
+        return created
     except Exception as e:
         raise HTTPException(
             status_code=500,
