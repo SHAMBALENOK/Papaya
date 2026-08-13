@@ -3,6 +3,7 @@ from img2table.document import PDF
 import os
 import openpyxl
 from openpyxl.utils import get_column_letter
+from app.middlewares.task_queue import task_queue
 
 _ocr = None
 
@@ -14,6 +15,7 @@ def get_ocr():
     return _ocr
 
 
+@task_queue.task(time_limit=60 ,default_retry_delay=30, retry_backoff=True, retry_backoff_max=120, queue="heavy")
 def extract_data(pdfname):
     base_name = os.path.basename(pdfname).split('.')[0]
     dir_path = f'../../tables/{base_name}'

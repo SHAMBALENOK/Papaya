@@ -6,10 +6,13 @@
     <title>Papaya — олимпиады для школьников</title>
     <meta name="description" content="Papaya — всероссийские и региональные олимпиады для школьников в одном месте.">
 
-    <!-- Inter — современный гротеск интерфейса -->
+    <!--
+      Шрифтовая пара: Inter (основной гротеск) + Public Sans (резерв/заголовки).
+      Geist добавлен в стек на случай локальной установки.
+    -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Public+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 
     <!--
       Tailwind CSS (Play CDN): zero-build решение, сохраняющее SPA-архитектуру
@@ -19,75 +22,107 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
     /* ======================================================================
-       ДИЗАЙН-ТОКЕНЫ
-       Палитра (по ТЗ):
-         ink     #1A1A1A  основной текст (17.4:1 на белом)
-         paper   #FFFFFF  фон
-         primary #064789  ключевые действия (9.25:1)
-         navy    #427AA1  навигация (4.64:1 — AA)
-         tint    #EBF2FA  светлые подложки (формы, вкладки)
-         moss    #679436  успех — точки, акценты, hover (не для мелкого текста)
-         lime    #A5BE00  декоративный позитивный акцент (только графика)
-       Производные тона введены исключительно ради контраста WCAG AA:
-         moss-deep  #43611F  доступный зелёный текст (7.07:1)
-         moss-light #EFF4E4  фон зелёных бейджей
-         moss-btn   #4C6C24  зелёные кнопки, белый текст (6.04:1)
-         lime-light #F6F9DC  фон лаймовых бейджей
-         lime-btn   #33608F  вторичные синие кнопки (6.54:1)
-         danger     #B42318  ошибки (6.57:1) — единственное исключение палитры
-       ЛОГИКА ОТСТУПОВ: базовый шаг 4px; секции разделяются вертикальными
-         разрывами py-16…py-24, гриды — gap-8, контент карточек — p-8…p-12.
-         «Воздух» — единственное средство разделения блоков.
-       ЛОГИКА ТЕНЕЙ (soft elevation): border: none по всему проекту; глубина
-         строится многослойными мягкими тенями в три уровня:
-         elev-1 — покой (карточки, шапка), elev-2 — hover/фокус,
-         elev-3 — модалки и оверлеи.
+       ДИЗАЙН-ТОКЕНЫ (строгий монохромный минимализм)
+
+       БАЗОВАЯ ПАЛИТРА (чёрно-белая, максимальная читаемость):
+         paper      #FFFFFF  поверхности (карточки, модалки)
+         cream      #FFFFFC  фон страницы (тёплый почти-белый)
+         ink        #1A1A1A  основной текст (17.4:1 на белом)
+         ink.deep   #000000  hover-состояния ключевых действий
+         ink.soft   #6B6B6B  вторичный текст (5.4:1 — WCAG AA)
+         ink.faint  #9C9C9C  только плейсхолдеры/декор (не для обычного текста)
+         mist       #F5F5F5  светлые подложки полей, вкладок
+         mist.deep  #ECECEC  hover подложек
+
+       ДОПОЛНИТЕЛЬНАЯ ПАЛИТРА (акценты, по ТЗ):
+         sage       #CBE896  успех/позитив (бейджи, точки, алерты)
+         sand       #C6BFA9  тёплые нейтральные подложки (бейджи «архив»)
+         ember      #FF7F11  ключевой акцент (FAB, логотип, маркеры, аватары)
+         crimson    #FF1B1C  ошибки/опасность (кнопки, алерты, бейджи)
+
+       ПРАВИЛО КОНТРАСТА для акцентов: текст на них — ink (#1A1A1A):
+         ink на sage 14.2:1 · на sand 9.5:1 · на ember 6.9:1 · на crimson 4.5:1 (AA).
+         Белый текст на ember/crimson НЕ используется (контраст < 4.5:1).
+       Производные тона — через opacity от базовых цветов.
+
+       ЛОГИКА ОТСТУПОВ («воздух» — единственный разделитель, border: none):
+         Базовый шаг сетки — 4px (масштаб Tailwind по умолчанию).
+         Секции страницы разделяются вертикальными разрывами py-14…py-24;
+         гриды каталога — gap-8; списки-строки — space-y-6;
+         внутренние поля карточек — p-8…p-12;
+         между заголовком и контентом — mt-6…mt-8, между заголовком и подзаголовком — mt-4.
+         Никакие блоки не получают рамки: граница заменена расстоянием.
+
+       ЛОГИКА ТЕНЕЙ (soft elevation, глубина вместо границ):
+         Тень всегда многослойная: жёсткий ближний слой (резкость края)
+         + мягкий дальний слой (парящий объём). Три уровня:
+           elev-1 — покой: карточки, шапка, поля в покое;
+           elev-2 — интерактив: hover/фокус карточек и кнопок;
+           elev-3 — над всем: модальные окна, тосты, FAB-меню.
+         Значения: 0.04–0.14 alpha от #1A1A1A — тени остаются нейтральными.
+
+       ГЕОМЕТРИЯ:
+         Поверхности (карточки, панели, модалки) — углы 0px (rounded-none);
+         интерактивные элементы (кнопки, поля, вкладки, бейджи) — 4px максимум.
+
+       ТИПОГРАФИКА:
+         Заголовки — Inter 700–900, tracking-tight, leading-[1.05…1.15];
+         тело — 16–18px, leading-relaxed (1.625) / leading-[1.8] для длинных текстов;
+         надзаголовки (.eyebrow) — 12px uppercase, tracking-[0.18em], цвет ink.soft.
        ====================================================================== */
     tailwind.config = {
         theme: {
             extend: {
                 colors: {
-                    ink:        '#1A1A1A',
-                    paper:      '#FFFFFF',
-                    primary:    { DEFAULT: '#064789', deep: '#05396E' },
-                    navy:       '#427AA1',
-                    tint:       { DEFAULT: '#EBF2FA', deep: '#DBE9F9' },
-                    moss:       { DEFAULT: '#679436', deep: '#43611F', light: '#EFF4E4', btn: '#4C6C24' },
-                    lime:       { DEFAULT: '#A5BE00', light: '#F6F9DC', btn: '#33608F' },
-                    danger:     { DEFAULT: '#B42318', light: '#FBEAE8' },
+                    paper: '#FFFFFF',
+                    cream: '#FFFFFC',
+                    ink: {
+                        DEFAULT: '#1A1A1A',
+                        deep: '#000000',
+                        soft: '#6B6B6B',
+                        faint: '#9C9C9C',
+                    },
+                    mist: {
+                        DEFAULT: '#F5F5F5',
+                        deep: '#ECECEC',
+                    },
+                    sage:    '#CBE896',
+                    sand:    '#C6BFA9',
+                    ember:   '#FF7F11',
+                    crimson: '#FF1B1C',
                 },
                 fontFamily: {
-                    sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+                    sans: ['Inter', 'Public Sans', 'Geist', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
                 },
-                /* Строгая геометрия: поверхности 0px, интерактивные элементы до 4px */
-                borderRadius: { none: '0px', sm: '2px', DEFAULT: '4px', md: '4px', lg: '4px', xl: '4px' },
+                /* Строгая геометрия: поверхности 0px, интерактив до 4px */
+                borderRadius: { none: '0px', DEFAULT: '4px', sm: '4px', md: '4px', lg: '4px', xl: '4px', full: '9999px' },
                 boxShadow: {
-                    /* Многослойные мягкие тени вместо границ блоков */
-                    'elev-1': '0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.05)',
-                    'elev-2': '0 2px 6px rgba(15,23,42,0.06), 0 12px 28px rgba(15,23,42,0.10)',
-                    'elev-3': '0 4px 10px rgba(15,23,42,0.06), 0 24px 56px rgba(15,23,42,0.14)',
+                    /* Многослойные мягкие тени вместо границ (см. логику выше) */
+                    'elev-1': '0 1px 2px rgba(26,26,26,0.04), 0 4px 12px rgba(26,26,26,0.05)',
+                    'elev-2': '0 2px 4px rgba(26,26,26,0.05), 0 8px 24px rgba(26,26,26,0.09)',
+                    'elev-3': '0 4px 8px rgba(26,26,26,0.06), 0 16px 48px rgba(26,26,26,0.14)',
                 },
-                maxWidth: { content: '72rem', narrow: '48rem' },
+                maxWidth: { content: '72rem', narrow: '44rem' },
             },
         },
     };
     </script>
 
-    <link rel="stylesheet" href="/frontend/css/style.css?v=0.5.2">
+    <link rel="stylesheet" href="/frontend/css/style.css?v=1.0.0">
 </head>
-<body class="bg-paper text-ink font-sans antialiased min-h-screen">
+<body class="bg-cream text-ink font-sans antialiased min-h-screen">
 
     <!-- Доступность: быстрый переход к контенту с клавиатуры -->
     <a href="#page"
-       class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[60] focus:bg-primary focus:text-white focus:px-5 focus:py-3 focus:rounded focus:text-sm focus:font-semibold">
+       class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[60] focus:bg-ink focus:text-white focus:px-5 focus:py-3 focus:rounded focus:text-sm focus:font-semibold">
         Перейти к содержимому
     </a>
 
     <!-- Шапка: белый фон + тень elev-1 вместо нижней границы -->
     <header id="header" class="hidden sticky top-0 z-40 bg-white/95 backdrop-blur shadow-elev-1">
         <div class="mx-auto max-w-content px-6 md:px-10 h-20 flex items-center justify-between gap-6">
-            <a href="#/" class="text-2xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                Papaya<span class="text-lime" aria-hidden="true">.</span>
+            <a href="#/" class="text-2xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+                Papaya<span class="text-ember" aria-hidden="true">.</span>
             </a>
             <nav id="nav" aria-label="Основная навигация"
                  class="flex items-center gap-1 md:gap-2 flex-wrap justify-end"></nav>
@@ -100,15 +135,17 @@
     <div id="toast-container" aria-live="polite"
          class="fixed top-6 right-6 z-50 flex flex-col gap-3 pointer-events-none"></div>
 
-    <script src="/frontend/js/store.js?v=0.5.2"></script>
-    <script src="/frontend/js/api.js?v=0.5.2"></script>
-    <script src="/frontend/js/pages/auth.js?v=0.5.2"></script>
-    <script src="/frontend/js/pages/dashboard.js?v=0.5.2"></script>
-    <script src="/frontend/js/pages/event.js?v=0.5.2"></script>
-    <script src="/frontend/js/pages/profile.js?v=0.5.2"></script>
-    <script src="/frontend/js/pages/myevents.js?v=0.5.2"></script>
-    <script src="/frontend/js/pages/admin.js?v=0.5.2"></script>
-    <script src="/frontend/js/router.js?v=0.5.2"></script>
-    <script src="/frontend/js/app.js?v=0.5.2"></script>
+    <script src="/frontend/js/store.js?v=1.0.0"></script>
+    <script src="/frontend/js/api.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/auth.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/welcome.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/dashboard.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/event.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/profile.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/users.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/myevents.js?v=1.0.0"></script>
+    <script src="/frontend/js/pages/admin.js?v=1.0.0"></script>
+    <script src="/frontend/js/router.js?v=1.0.0"></script>
+    <script src="/frontend/js/app.js?v=1.0.0"></script>
 </body>
 </html>

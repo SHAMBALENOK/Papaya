@@ -2,14 +2,12 @@
  * app.js — утилиты, дизайн-система UI, общие модалки, FAB, инициализация.
  *
  * Принципы разделения блоков (по ТЗ):
- *   - border: none — у блоков нет границ;
- *   - «воздух»: секции py-16…py-24, гриды gap-8, карточки p-8…p-12;
- *   - глубина: elev-1 (покой) / elev-2 (hover) / elev-3 (модалки, шапка).
- *
- * Палитра акцентов:
- *   #064789 — ключевые действия; #427AA1 — навигация;
- *   #EBF2FA — подложки; #679436 — FAB и позитивные статусы;
- *   #A5BE00 — декоративные акценты (логотип, маркеры надзаголовков).
+ *   - border: none — у блоков нет рамок;
+ *   - «воздух»: секции py-14…py-24, гриды gap-8, карточки p-8…p-12;
+ *   - глубина: elev-1 (покой) / elev-2 (hover) / elev-3 (модалки, тосты, FAB).
+ *   - база: #FFFFFF/#FFFFFC фон, #1A1A1A текст; акценты (доп. палитра):
+ *     sage #CBE896 (успех), sand #C6BFA9 (нейтраль), ember #FF7F11 (акцент),
+ *     crimson #FF1B1C (ошибки). Текст на акцентах — ink (контраст ≥4.5:1).
  * ========================================================================== */
 
 /* ---------- Защита от XSS ---------- */
@@ -29,44 +27,52 @@ function escAttr(str) {
         .replace(/>/g, '&gt;');
 }
 
-/* ---------- ДИЗАЙН-СИСТЕМА ---------- */
+/* ---------- ДИЗАЙН-СИСТЕМА (монохром) ---------- */
 const UI = {
-    /* Надзаголовок секции: класс .eyebrow определён в style.css
-       (текст #427AA1 + декоративный маркер #A5BE00) */
+    /* Надзаголовок секции: класс .eyebrow определён в style.css */
     eyebrow: 'eyebrow',
 
-    /* Кнопки: радиус 4px, фокус-кольцо box-shadow (без границ) */
-    btn: 'inline-flex items-center justify-center gap-2 font-semibold rounded transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none',
-    btnPrimary: 'bg-primary text-white px-6 py-3 shadow-elev-1 hover:bg-primary-deep hover:shadow-elev-2 focus-visible:ring-primary',
-    btnSecondary: 'bg-lime-btn text-white px-6 py-3 shadow-elev-1 hover:shadow-elev-2 focus-visible:ring-navy',
-    btnSuccess: 'bg-moss-btn text-white px-6 py-3 shadow-elev-1 hover:shadow-elev-2 focus-visible:ring-moss-deep',
-    btnDanger: 'bg-danger text-white px-4 py-2 text-sm shadow-elev-1 hover:shadow-elev-2 focus-visible:ring-danger',
-    btnGhost: 'text-navy px-4 py-2 hover:text-primary hover:bg-tint focus-visible:ring-navy',
+    /* Кнопки: радиус 4px (интерактив), фокус-кольцо box-shadow, без границ.
+       Отступы: крупные — px-6 py-3, малые — px-4 py-2 (базовый шаг 4px). */
+    btn: 'inline-flex items-center justify-center gap-2 font-semibold rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/70 focus-visible:ring-offset-2 transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none',
+    btnPrimary: 'bg-ink text-white px-6 py-3 shadow-elev-1 hover:bg-ink-deep hover:shadow-elev-2',
+    btnSecondary: 'bg-sand text-ink px-6 py-3 shadow-elev-1 hover:shadow-elev-2',
+    btnDanger: 'bg-crimson text-ink px-4 py-2 text-sm shadow-elev-1 hover:shadow-elev-2',
+    btnGhost: 'text-ink-soft px-4 py-2 hover:text-ink hover:bg-mist focus-visible:ring-ink/60',
     btnSmall: 'px-4 py-2 text-sm',
 
-    /* Формы: поля без границ — от белого фона их отделяет подложка tint */
+    /* Формы: поля без границ — от белого фона их отделяет подложка mist;
+       фокус подчёркивается кольцом 2px (не рамкой). */
     label: 'block text-sm font-semibold text-ink mb-2',
-    input: 'w-full bg-tint rounded px-4 py-3 text-base text-ink placeholder:text-ink/35 focus:outline-none focus:ring-2 focus:ring-primary/60 transition-shadow',
+    input: 'w-full bg-mist rounded px-4 py-3 text-base text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-ink/40 transition-shadow',
     field: 'mb-6',
 
-    /* Поверхности и бейджи */
-    card: 'bg-white rounded shadow-elev-1',
+    /* Поверхности: белые, углы 0px, глубина — тень elev-1 */
+    card: 'bg-white shadow-elev-1',
     badge: 'inline-flex items-center gap-2 rounded px-3 py-1.5 text-xs font-semibold whitespace-nowrap',
-    badgeSuccess: 'bg-moss-light text-moss-deep',
-    badgeNeutral: 'bg-tint text-ink/60',
-    badgeDanger: 'bg-danger-light text-danger',
-    badgeAdmin: 'bg-primary text-white',
+    badgeNeutral: 'bg-sand text-ink',
+    badgeSuccess: 'bg-sage text-ink',
+    badgeDanger: 'bg-crimson text-ink',
+    badgeAdmin: 'bg-ink text-white',
 };
 
 /* ---------- Общие helpers ---------- */
 
 function loadingHtml(text = 'Загрузка…') {
-    return `<div class="py-32 text-center" role="status"><p class="text-lg text-ink/50 animate-pulse">${escHtml(text)}</p></div>`;
+    return `<div class="py-32 text-center" role="status"><p class="text-lg text-ink-soft animate-pulse">${escHtml(text)}</p></div>`;
 }
 
 function alertHtml(msg, kind = 'error') {
-    const cls = kind === 'success' ? 'bg-moss-light text-moss-deep' : 'bg-danger-light text-danger';
-    return `<div class="rounded ${cls} px-6 py-4 mb-8 text-sm font-medium leading-relaxed" role="alert">${escHtml(msg)}</div>`;
+    if (kind === 'success') {
+        return `<div class="rounded bg-sage px-6 py-4 mb-8 text-sm font-medium leading-relaxed flex items-start gap-3" role="status">
+            <span class="w-2.5 h-2.5 rounded-full bg-ink shrink-0 mt-1" aria-hidden="true"></span>
+            <span>${escHtml(msg)}</span>
+        </div>`;
+    }
+    return `<div class="rounded bg-crimson/10 px-6 py-4 mb-8 text-sm font-medium leading-relaxed flex items-start gap-3" role="alert">
+        <span class="w-2.5 h-2.5 rounded-full bg-crimson shrink-0 mt-1" aria-hidden="true"></span>
+        <span>${escHtml(msg)}</span>
+    </div>`;
 }
 
 function errorText(res) {
@@ -96,7 +102,7 @@ function userFromDashboard(d) {
 
 function inputField({ id, label, name, type = 'text', value = '', placeholder = '', required = false, autocomplete = '' }) {
     return `<div class="${UI.field}">
-        <label for="${id}" class="${UI.label}">${label}${required ? ' <span class="text-danger" aria-hidden="true">*</span>' : ''}</label>
+        <label for="${id}" class="${UI.label}">${label}${required ? ' <span class="text-crimson" aria-hidden="true">*</span>' : ''}</label>
         <input id="${id}" name="${name}" type="${type}" class="${UI.input}"
                value="${escAttr(value)}" placeholder="${escAttr(placeholder)}"
                ${required ? 'required' : ''} ${autocomplete ? `autocomplete="${autocomplete}"` : ''}>
@@ -105,7 +111,7 @@ function inputField({ id, label, name, type = 'text', value = '', placeholder = 
 
 function textareaField({ id, label, name, value = '', rows = 4, placeholder = '', required = false }) {
     return `<div class="${UI.field}">
-        <label for="${id}" class="${UI.label}">${label}${required ? ' <span class="text-danger" aria-hidden="true">*</span>' : ''}</label>
+        <label for="${id}" class="${UI.label}">${label}${required ? ' <span class="text-crimson" aria-hidden="true">*</span>' : ''}</label>
         <textarea id="${id}" name="${name}" rows="${rows}" class="${UI.input} resize-y"
                   placeholder="${escAttr(placeholder)}" ${required ? 'required' : ''}>${escHtml(value)}</textarea>
     </div>`;
@@ -128,12 +134,12 @@ function openModal(title, bodyHtml, { wide = false } = {}) {
     overlay.className = 'fixed inset-0 z-50 bg-ink/40 flex items-center justify-center p-4 md:p-8';
     overlay.innerHTML = `
     <div role="dialog" aria-modal="true" aria-label="${escAttr(title)}"
-         class="bg-white rounded shadow-elev-3 w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-y-auto modal-scroll">
+         class="bg-white shadow-elev-3 w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-y-auto modal-scroll">
         <div class="p-8 md:p-12">
             <div class="flex items-start justify-between gap-6 mb-10">
                 <h2 class="text-2xl font-bold tracking-tight text-ink">${title}</h2>
                 <button type="button" data-modal-close aria-label="Закрыть окно"
-                        class="shrink-0 w-10 h-10 rounded bg-tint hover:bg-tint-deep text-ink/60 hover:text-ink flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-navy">&times;</button>
+                        class="shrink-0 w-10 h-10 rounded bg-mist hover:bg-mist-deep text-ink-soft hover:text-ink flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">&times;</button>
             </div>
             <div class="modal-body">${bodyHtml}</div>
         </div>
@@ -162,9 +168,9 @@ function showModalError(overlay, res) {
 /* ---------- Тосты ---------- */
 function showToast(message, type = 'info', duration = 3500) {
     const container = document.getElementById('toast-container');
-    const accent = { success: 'bg-moss', error: 'bg-danger', info: 'bg-navy' }[type] || 'bg-navy';
+    const accent = { success: 'bg-sage', error: 'bg-crimson', info: 'bg-ember' }[type] || 'bg-ember';
     const toast = document.createElement('div');
-    toast.className = 'toast pointer-events-auto flex items-stretch gap-4 bg-white rounded shadow-elev-3 pr-6 py-4 min-w-[260px] max-w-sm';
+    toast.className = 'toast pointer-events-auto flex items-stretch gap-4 bg-white shadow-elev-3 pr-6 py-4 min-w-[260px] max-w-sm';
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     toast.innerHTML = `
         <span class="w-1.5 ${accent} rounded-full shrink-0" aria-hidden="true"></span>
@@ -232,10 +238,10 @@ function openPdfModal(onDone) {
         <div id="modal-alert"></div>
         <form id="pdf-form">
             <div class="${UI.field}">
-                <label for="pdf-file" class="${UI.label}">PDF-файл с таблицей мероприятий <span class="text-danger" aria-hidden="true">*</span></label>
+                <label for="pdf-file" class="${UI.label}">PDF-файл с таблицей мероприятий <span class="text-crimson" aria-hidden="true">*</span></label>
                 <input id="pdf-file" name="file" type="file" accept=".pdf" required
-                       class="block w-full cursor-pointer text-sm text-ink/70 file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary-deep file:transition-colors file:cursor-pointer">
-                <p class="mt-2 text-sm text-ink/50 leading-relaxed">Таблица будет распознана автоматически, события добавятся в каталог.</p>
+                       class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-ink file:text-white hover:file:bg-ink-deep file:transition-colors file:cursor-pointer">
+                <p class="mt-2 text-sm text-ink-soft leading-relaxed">Таблица будет распознана автоматически, события добавятся в каталог.</p>
             </div>
             <div class="flex flex-wrap justify-end gap-3 mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
@@ -330,7 +336,7 @@ async function openUpdateEventModal(onDone) {
 
     if (!events.length) {
         const { overlay } = openModal('Обновить событие', `
-            <p class="text-ink/60 leading-relaxed">У вас пока нет собственных событий — обновлять нечего. Добавьте первое событие через меню «+».</p>
+            <p class="text-ink-soft leading-relaxed">У вас пока нет собственных событий — обновлять нечего. Добавьте первое событие через меню «+».</p>
             <div class="flex justify-end mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnPrimary}">Понятно</button>
             </div>`);
@@ -339,13 +345,13 @@ async function openUpdateEventModal(onDone) {
     }
 
     const listHtml = `
-        <p class="text-sm text-ink/50 leading-relaxed mb-6">Выберите событие, данные которого нужно обновить.</p>
+        <p class="text-sm text-ink-soft leading-relaxed mb-6">Выберите событие, данные которого нужно обновить.</p>
         <div class="space-y-3">
             ${events.map(ev => `
             <button type="button" data-pick="${escAttr(ev.id)}"
-                    class="w-full text-left bg-tint/60 hover:bg-tint rounded px-6 py-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                    class="w-full text-left bg-mist/60 hover:bg-mist rounded px-6 py-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
                 <span class="block font-semibold text-ink truncate">${escHtml(ev.name)}</span>
-                <span class="block mt-1 text-sm text-ink/50">Обновлено ${formatDate(ev.updatedAt)}</span>
+                <span class="block mt-1 text-sm text-ink-soft">Обновлено ${formatDate(ev.updatedAt)}</span>
             </button>`).join('')}
         </div>`;
 
@@ -358,7 +364,7 @@ async function openUpdateEventModal(onDone) {
 }
 
 /* ---------- FAB «+»: единая точка действий со событиями ----------
- * Зелёный квадрат #679436 (позитивное действие), тень elev-2/elev-3.
+ * Эмбер-квадрат #FF7F11 (позитивное действие), тень elev-2/elev-3.
  * Показывается на «Каталоге» и «Моих событиях». */
 
 function setFab(visible) {
@@ -380,23 +386,23 @@ function mountFab() {
         <div id="fab-menu" role="menu" aria-label="Действия со событиями"
              class="flex flex-col items-stretch gap-3 opacity-0 translate-y-2 pointer-events-none transition-all duration-200">
             <button type="button" role="menuitem" data-fab="pdf"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white rounded shadow-elev-2 hover:shadow-elev-3 hover:bg-tint/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#064789" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m0 0L7 8m5-5 5 5"></path><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>
+                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m0 0L7 8m5-5 5 5"></path><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>
                 Импорт из PDF
             </button>
             <button type="button" role="menuitem" data-fab="add"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white rounded shadow-elev-2 hover:shadow-elev-3 hover:bg-tint/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#679436" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                 Добавить событие
             </button>
             <button type="button" role="menuitem" data-fab="edit"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white rounded shadow-elev-2 hover:shadow-elev-3 hover:bg-tint/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#427AA1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
                 Обновить событие
             </button>
         </div>
         <button type="button" id="fab-toggle" aria-expanded="false" aria-controls="fab-menu" aria-label="Действия со событиями"
-                class="w-14 h-14 rounded bg-moss text-white shadow-elev-2 hover:bg-moss-btn hover:shadow-elev-3 hover:-translate-y-0.5 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-moss focus-visible:ring-offset-2">
+                class="w-14 h-14 rounded bg-ember text-ink shadow-elev-2 hover:brightness-95 hover:shadow-elev-3 hover:-translate-y-0.5 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60 focus-visible:ring-offset-2">
             <svg id="fab-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="transition-transform duration-200" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
         </button>`;
     document.body.appendChild(wrap);
@@ -460,10 +466,10 @@ function fabRefresh() {
 /* ---------- Шапка и навигация ---------- */
 
 function navLinkClass(active) {
-    const base = 'px-4 py-2 rounded text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-navy';
+    const base = 'px-4 py-2 rounded text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
     return active
-        ? `${base} bg-tint text-primary font-semibold`
-        : `${base} text-ink/60 hover:text-ink hover:bg-tint/60`;
+        ? `${base} bg-ink text-white`
+        : `${base} text-ink-soft hover:text-ink hover:bg-mist`;
 }
 
 function renderHeader() {
@@ -474,6 +480,7 @@ function renderHeader() {
     const links = [
         { href: '#/', route: '/', label: 'Олимпиады' },
         { href: '#/my-events', route: '/my-events', label: 'Мои события' },
+        { href: '#/users', route: '/users', label: 'Пользователи' },
         { href: '#/profile', route: '/profile', label: 'Профиль' },
     ];
     if (store.isAdmin()) links.push({ href: '#/admin', route: '/admin', label: 'Админ' });
@@ -487,7 +494,9 @@ function renderHeader() {
 }
 
 function highlightNav(path) {
-    const current = path.startsWith('/event/') ? '/' : path;
+    let current = path;
+    if (path.startsWith('/event/')) current = '/';
+    else if (path.startsWith('/users/')) current = '/users';
     document.querySelectorAll('#nav a[data-route]').forEach(a => {
         const active = a.dataset.route === current;
         a.setAttribute('aria-current', active ? 'page' : 'false');

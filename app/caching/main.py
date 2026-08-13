@@ -4,8 +4,8 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 import os
 
-REDIS_HOST = os.getenv('REDIS_HOST', 'redis')
-REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+REDIS_HOST = os.getenv('REDIS_HOST')
+REDIS_PORT = int(os.getenv('REDIS_PORT'))
 
 @asynccontextmanager
 async def redis_lifespan(app: FastAPI):

@@ -107,6 +107,32 @@ services:
           cpus: '2'
           memory: 12G
 
+  celery:
+    build: .
+    container_name: celery
+    command: ["celery", "-A", "app.middlewares.task_queue.task_queue", "worker", "-Q", "heavy", "-l", "info", "-c", "2"]
+    environment:
+      DATABASE_URL: 'postgresql+asyncpg://postgres:postgres@postgres:5432/postgres'
+      HF_TOKEN: 'your_secret_token'
+      REDIS_HOST: 'redis'
+      REDIS_PORT: '6379'
+    volumes:
+      - ./tables:/app/tables
+      - ml-models-cache:/app/.cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - project
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
 volumes:
   postgres-data:
   pgadmin-data:

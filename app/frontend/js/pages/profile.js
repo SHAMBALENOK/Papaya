@@ -1,14 +1,20 @@
 /* ==========================================================================
- * pages/profile.js — профиль пользователя.
- * Личные данные; управление событиями перенесено на #/my-events.
+ * pages/profile.js — «Мой профиль».
+ * Страница маршрута GET /api/v1/ (сводка текущего пользователя):
+ * id, email, name, surname, gender, bday, bio, phone, country, region,
+ * status, role, isActive, createdAt, updatedAt — всё, что отдаёт бэкенд.
+ *
+ * userProfileHtml(u, { editable }) — общий рендер карточки пользователя,
+ * используется также на публичной странице #/users/{id} (users.js).
  * ========================================================================== */
+
 async function renderProfile() {
     const page = document.getElementById('page');
     if (!store.user) { navigate('#/auth'); return; }
     page.innerHTML = loadingHtml();
 
     let res;
-    try { res = await api.getUser(store.user.id); } catch { res = { ok: false }; }
+    try { res = await api.getMe(); } catch { res = { ok: false }; }
 
     if (!res.ok || !res.data) {
         page.innerHTML = `
@@ -19,11 +25,16 @@ async function renderProfile() {
         return;
     }
 
-    const u = res.data;
+    page.innerHTML = userProfileHtml(res.data, { editable: true });
+    document.getElementById('btn-edit-profile').addEventListener('click', () => openEditProfileModal(res.data));
+}
+
+/* Общий рендер карточки пользователя (поля — только из ответа API) */
+function userProfileHtml(u, { editable = false } = {}) {
     const initials = (((u.name || '?')[0] || '?') + ((u.surname || '')[0] || '')).toUpperCase();
     const genderText = u.gender === 'male' ? 'Мужской' : u.gender === 'female' ? 'Женский' : 'Не указан';
     const accBadge = u.isActive
-        ? `<span class="${UI.badge} ${UI.badgeSuccess}"><span class="w-2 h-2 rounded-full bg-moss" aria-hidden="true"></span>Активен</span>`
+        ? `<span class="${UI.badge} ${UI.badgeSuccess}"><span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>Активен</span>`
         : `<span class="${UI.badge} ${UI.badgeDanger}">Заблокирован</span>`;
 
     const fields = [
@@ -36,27 +47,28 @@ async function renderProfile() {
         ['Статус', escHtml(u.status || 'Не задан')],
         ['Роль', `<span class="${UI.badge} ${u.role === 'ADMIN' ? UI.badgeAdmin : UI.badgeNeutral}">${escHtml(u.role || 'USER')}</span>`],
         ['Аккаунт', accBadge],
-        ['ID', `<span class="text-sm text-ink/60 break-all">${escHtml(u.id)}</span>`],
+        ['ID', `<span class="text-sm text-ink-soft break-all">${escHtml(u.id)}</span>`],
     ];
 
-    page.innerHTML = `
+    return `
     <div class="max-w-narrow mx-auto py-4">
-        <a href="#/" class="inline-flex items-center gap-2 text-navy font-semibold hover:text-primary transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-navy">
+        <a href="${editable ? '#/' : '#/users'}" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
-            На главную
+            ${editable ? 'На главную' : 'К списку пользователей'}
         </a>
 
         <!-- Шапка профиля -->
         <header class="mt-12 flex flex-col sm:flex-row sm:items-center gap-8">
-            <div class="w-24 h-24 rounded bg-primary text-white text-3xl font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
+            <div class="w-24 h-24 rounded bg-ember text-ink text-3xl font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
             <div class="min-w-0 flex-1">
                 <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight leading-tight">${escHtml(u.name)} ${escHtml(u.surname)}</h1>
-                <p class="mt-3 text-lg text-ink/55">${escHtml(u.email)}</p>
+                <p class="mt-3 text-lg text-ink-soft">${escHtml(u.email)}</p>
             </div>
+            ${editable ? `
             <div class="flex flex-wrap gap-3 shrink-0">
                 <a href="#/my-events" class="${UI.btn} ${UI.btnSecondary}">Мои события</a>
                 <button id="btn-edit-profile" class="${UI.btn} ${UI.btnPrimary}">Редактировать</button>
-            </div>
+            </div>` : ''}
         </header>
 
         <!-- Поля: сетка с крупными зазорами, разделение только «воздухом» -->
@@ -65,7 +77,7 @@ async function renderProfile() {
             <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">
                 ${fields.map(([label, value]) => `
                 <div>
-                    <dt class="text-sm font-medium text-ink/45">${label}</dt>
+                    <dt class="text-sm font-medium text-ink-faint">${label}</dt>
                     <dd class="mt-2 text-base leading-relaxed">${value}</dd>
                 </div>`).join('')}
             </dl>
@@ -73,13 +85,11 @@ async function renderProfile() {
 
         <section class="mt-16" aria-labelledby="profile-bio-title">
             <h2 id="profile-bio-title" class="${UI.eyebrow}">О себе</h2>
-            <p class="mt-7 text-lg text-ink/70 leading-[1.8]">${escHtml(u.bio || 'Нет информации.')}</p>
+            <p class="mt-7 text-lg text-ink leading-[1.8]">${escHtml(u.bio || 'Нет информации.')}</p>
         </section>
 
-        <p class="mt-14 mb-4 text-sm text-ink/45">Зарегистрирован: ${formatDate(u.createdAt)}</p>
+        <p class="mt-14 mb-4 text-sm text-ink-faint">Зарегистрирован: ${formatDate(u.createdAt)}</p>
     </div>`;
-
-    document.getElementById('btn-edit-profile').addEventListener('click', () => openEditProfileModal(u));
 }
 
 function openEditProfileModal(u) {
