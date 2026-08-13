@@ -1,9 +1,11 @@
 /* ==========================================================================
  * pages/auth.js — экраны входа и регистрации.
+ * Монохром: активная вкладка — чёрная (bg-ink), поля — подложка mist;
+ * акцент: точка логотипа — эмбер #FF7F11 (как в шапке).
  * ========================================================================== */
 
-const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-white text-ink shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
-const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink/55 hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-ink text-white shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
+const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
 
 function renderAuth() {
     const page = document.getElementById('page');
@@ -12,13 +14,13 @@ function renderAuth() {
 
         <div class="mb-16 md:mb-20">
             <p class="${UI.eyebrow}">Олимпиады для школьников</p>
-            <h1 class="mt-5 text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.05] text-ink">Papaya</h1>
-            <p class="mt-7 text-lg text-ink/60 leading-relaxed max-w-md">
+            <h1 class="mt-5 text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.05] text-ink">Papaya<span class="text-ember" aria-hidden="true">.</span></h1>
+            <p class="mt-7 text-lg text-ink-soft leading-relaxed max-w-md">
                 Всероссийские и региональные олимпиады — в одном удобном месте.
             </p>
         </div>
 
-        <div class="flex sm:inline-flex flex-wrap gap-2 bg-tint rounded p-2 mb-12" role="tablist" aria-label="Вход или регистрация">
+        <div class="flex sm:inline-flex flex-wrap gap-2 bg-mist rounded p-2 mb-12" role="tablist" aria-label="Вход или регистрация">
             <button class="${TAB_ACTIVE}" role="tab" aria-selected="true" data-tab="login">Вход</button>
             <button class="${TAB_IDLE}" role="tab" aria-selected="false" data-tab="register">Регистрация</button>
         </div>
@@ -29,8 +31,8 @@ function renderAuth() {
             ${inputField({ id: 'login-email', name: 'email', label: 'Email', type: 'email', required: true, placeholder: 'you@example.com', autocomplete: 'email' })}
             ${inputField({ id: 'login-password', name: 'password', label: 'Пароль', type: 'password', required: true, placeholder: 'Ваш пароль', autocomplete: 'current-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Войти</button>
-            <p class="mt-8 text-sm text-ink/55">Нет аккаунта?
-                <a data-goto="register" class="text-primary font-semibold hover:text-primary-deep transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">Зарегистрироваться</a>
+            <p class="mt-8 text-sm text-ink-soft">Нет аккаунта?
+                <a data-goto="register" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Зарегистрироваться</a>
             </p>
         </form>
 
@@ -43,8 +45,8 @@ function renderAuth() {
             ${inputField({ id: 'reg-password', name: 'password', label: 'Пароль', type: 'password', required: true, placeholder: 'Минимум 8 символов', autocomplete: 'new-password' })}
             ${inputField({ id: 'reg-password2', name: 'password2', label: 'Подтвердите пароль', type: 'password', required: true, placeholder: 'Повторите пароль', autocomplete: 'new-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Зарегистрироваться</button>
-            <p class="mt-8 text-sm text-ink/55">Уже есть аккаунт?
-                <a data-goto="login" class="text-primary font-semibold hover:text-primary-deep transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">Войти</a>
+            <p class="mt-8 text-sm text-ink-soft">Уже есть аккаунт?
+                <a data-goto="login" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Войти</a>
             </p>
         </form>
     </div>`;
@@ -71,8 +73,9 @@ function renderAuth() {
 
     function showErr(msg) { alertEl.innerHTML = alertHtml(msg, 'error'); }
 
-    /* Заполняем store из ответа и сразу переходим на главную:
-       cookie уже установлены сервером, каталог сам загрузит данные. */
+    /* Заполняем store из ответа и ведём пользователя на приветствие
+       (#/welcome — страница маршрута GET /api/v1/welcome):
+       cookie уже установлены сервером. */
     function enterApp(userData) {
         store.setUser({
             id: userData && userData.id,
@@ -82,7 +85,7 @@ function renderAuth() {
             role: (userData && userData.role) || 'USER',
         });
         renderHeader();
-        navigate('#/');
+        navigate('#/welcome');
     }
 
     loginForm.addEventListener('submit', async e => {

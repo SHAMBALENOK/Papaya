@@ -6,10 +6,12 @@ from app.database.database import get_db
 import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
-from app import models, schemas, database
+from app import schemas, database
+from app.middlewares.task_queue import run_task
 from typing import Annotated
 import redis.asyncio as aioredis
 from app.caching.main import get_redis
+import json
 
 user_page = APIRouter(
     prefix='/user',
@@ -25,50 +27,39 @@ async def users(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if await r.get(f"user:{jwt_data.get('sub')}:object"):
-            user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        else:
-            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
+        sub = jwt_data.get('sub')
 
-        if await r.get(f"user:{jwt_data.get('sub')}:users"):
-            random_users = await database.users.show_random_users(
-                quantity=await database.users.get_amount_of_users(session=db, model=models.users.Users),
-                session=db,
-                model=models.users.Users,
-            )
-            await r.set(f"user:{jwt_data.get('sub')}:users", random_users, ex=600)
-
-            # Сериализуем users в словари
-            users_list = [
-                {
-                    'id': str(ev.id),
-                    'name': ev.name,
-                    'surname': ev.surname,
-                    'email': ev.email,
-                    'gender': ev.disc,
-                    'bday': ev.bday,
-                    'bio': ev.bio,
-                    'phone': ev.phone,
-                    'country': ev.country,
-                    'region': ev.region,
-                    'status': ev.status,
-                    'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
-                    'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
-                }
-                for ev in random_users
-            ]
+        # --- текущий пользователь: кэш или БД ---
+        user_cache_key = f"user:{sub}:object"
+        cached_user = await r.get(user_cache_key)
+        if cached_user:
+            user_obj = json.loads(cached_user)
         else:
-            users_list = r.get(f"user:{jwt_data.get('sub')}:users")
+            user_obj = await run_task(database.users.find_user_by_id, sub)
+            if not user_obj:
+                raise HTTPException(status_code=404, detail='User not found')
+            await r.set(user_cache_key, json.dumps(user_obj), ex=600)
+
+        # --- список пользователей: кэш или БД ---
+        users_cache_key = f"user:{sub}:users"
+        cached_users = await r.get(users_cache_key)
+        if cached_users:
+            users_list = json.loads(cached_users)
+        else:
+            quantity = await run_task(database.users.get_amount_of_users)
+            users_list = await run_task(database.users.show_random_users, quantity)
+            await r.set(users_cache_key, json.dumps(users_list), ex=600)
 
         return JSONResponse(status_code=200, content={
-            'user_id': str(user_obj.id),       # UUID → str
-            'user_name': user_obj.name,
-            'user_surname': user_obj.surname,
-            'user_email': user_obj.email,
-            'user_role': user_obj.role,
+            'user_id': str(user_obj['id']),       # UUID → str
+            'user_name': user_obj['name'],
+            'user_surname': user_obj['surname'],
+            'user_email': user_obj['email'],
+            'user_role': user_obj['role'],
             'users': users_list,
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
 
@@ -91,17 +82,20 @@ async def user_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if await r.get(f"user:{jwt_data.get('sub')}:object"):
-            user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
+        # Кэш по ключу запрашиваемого пользователя, а не текущего (sub)
+        cache_key = f"user:{user_id}:object"
+        cached = await r.get(cache_key)
+        if cached:
+            user_obj = json.loads(cached)
         else:
-            user_obj = await database.users.find_user_by_id(
-                user_id=user_id,
-                session=db,
-                model=models.users.Users,
-            )
-            await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
+            user_obj = await run_task(database.users.find_user_by_id, user_id)
+            if not user_obj:
+                raise HTTPException(status_code=404, detail='User not found')
+            await r.set(cache_key, json.dumps(user_obj), ex=600)
 
         return user_obj
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
@@ -126,10 +120,10 @@ async def user_edit_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        db_user = await database.users.find_user_by_email(user.email, db, models.users.Users)
+        db_user = await run_task(database.users.find_user_by_email, user.email)
         if not db_user:
             raise HTTPException(status_code=404, detail='Cannot find this user in database, try something else)')
-        if str(db_user.id) != jwt_data.get('sub'):
+        if db_user['id'] != jwt_data.get('sub'):
             raise HTTPException(status_code=403, detail='It looks like you are trying to change not your profile')#TODO: обнуление токена
 
         get_user = {
@@ -146,11 +140,15 @@ async def user_edit_details(
         }
 
         clean_user = {k: v for k, v in get_user.items() if v is not None}
-        updated_user = await database.users.edit_user(user_id, clean_user, db, models.users.Users)
+        updated_user = await run_task(database.users.edit_user, user_id, clean_user)
+        if not updated_user:
+            raise HTTPException(status_code=404, detail='Cannot find this user in database, try something else)')
 
-        await r.set(f"user:{jwt_data.get('sub')}:object", updated_user, ex=600)
+        await r.set(f"user:{jwt_data.get('sub')}:object", json.dumps(updated_user), ex=600)
 
         return updated_user
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')

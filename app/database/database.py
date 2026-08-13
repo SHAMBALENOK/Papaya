@@ -1,5 +1,6 @@
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 import asyncio
 import os
 from app.database.base import Base
@@ -13,10 +14,7 @@ if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_pre_ping=True,  # Проверка соединения перед использованием
-    pool_recycle=300,  # Переподключение через 5 минут
-    pool_size=5,
-    max_overflow=10
+    poolclass=NullPool,  # Каждая задача/запрос получает своё соединение; пул не переживает разные event loop'ы (Celery asyncio.run)
 )
 
 AsyncSessionLocal = async_sessionmaker(

@@ -2,10 +2,9 @@ import os
 import pandas as pd
 from huggingface_hub import InferenceClient
 from app.database import events as db_events
-from app.models import events as model_events
 from googletrans import Translator
-import asyncio
 import uuid as uuid_mod
+from app.middlewares.task_queue import task_queue, AsyncCeleryTask, run_task
 
 translator = Translator()
 
@@ -46,7 +45,8 @@ async def _classify(sentences: list) -> list:
 
     return classified
 
-async def tabulate(xlsx_path: str, session, owner: str): #, session
+@task_queue.task(base=AsyncCeleryTask, time_limit=120, default_retry_delay=30, retry_backoff=True, retry_backoff_max=120, queue="heavy")
+async def tabulate(xlsx_path: str, owner: str):
     """
     Converting information from an Excel table to SQL
     """
@@ -65,12 +65,15 @@ async def tabulate(xlsx_path: str, session, owner: str): #, session
         payload['name'] = row_dict.get("_"+str(labels[0][0]))
         formated_labels = labels[1:len(labels)]
         for i in formated_labels:
-            value = row_dict.get("_"+str(i[0]+1)).replace(r"\n", " ")
+            value = row_dict.get("_"+str(i[0]+1))
+            # Пустые/NaN ячейки не должны валить .replace()
+            if isinstance(value, float) and pd.isna(value):
+                value = ''
+            else:
+                value = str(value).replace(r"\n", " ")
             payload['disc'] += f'\n{i[1]}: {value}'
 
-        if payload.get('name', 'null') != 'null': await db_events.add_event(
-            ins=payload,
-            session=session,
-            model=model_events.Events
-        )
+        if payload.get('name', 'null') != 'null':
+            created = await run_task(db_events.add_event, ins=payload)
+            created_events.append(created)
     return created_events

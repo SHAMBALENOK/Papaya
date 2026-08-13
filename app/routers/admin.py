@@ -6,8 +6,10 @@ from app.caching.main import get_redis
 
 import app.middlewares.tokenz.main as tokenz
 from app.database.database import get_db
-from app import models, schemas, database
+from app import schemas, database
+from app.middlewares.task_queue import run_task
 from typing import Annotated
+import json
 
 admin_page = APIRouter(
     prefix='/admin',
@@ -20,44 +22,47 @@ admin_page = APIRouter(
 # ---------------------------------------------------------------------------
 
 async def _require_admin(r: aioredis.Redis, db: AsyncSession, access_jwt, refresh_jwt):
-    """Проверяет JWT и роль ADMIN. Возвращает объект администратора
-    либо бросает 401/403."""
+    """Проверяет JWT и роль ADMIN. Возвращает dict администратора
+    (из кэша или БД) либо бросает 401/403."""
     jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-    if r.get(f"user:{jwt_data.get('sub')}:object"):
-        admin_obj = r.get(f"user:{jwt_data.get('sub')}:object")
+    cache_key = f"user:{jwt_data.get('sub')}:object"
+    cached = await r.get(cache_key)
+    if cached:
+        admin_obj = json.loads(cached)
     else:
-        admin_obj = await database.users.find_user_by_id(
-            jwt_data.get('sub'), db, models.users.Users
-        )
-    if not admin_obj or admin_obj.role != 'ADMIN':
+        admin_obj = await run_task(database.users.find_user_by_id, jwt_data.get('sub'))
+        if not admin_obj:
+            raise HTTPException(status_code=403, detail='permission denied')
+        await r.set(cache_key, json.dumps(admin_obj), ex=600)
+    if admin_obj.get('role') != 'ADMIN':
         raise HTTPException(status_code=403, detail='permission denied')
     return admin_obj
 
 
-def _serialize_user(u) -> dict:
+def _serialize_user(u: dict) -> dict:
     """Пользователь для админ-панели: роль и активность обязательны."""
     return {
-        'id': str(u.id),
-        'name': u.name,
-        'surname': u.surname,
-        'email': u.email,
-        'role': u.role,
-        'isActive': u.isActive,
-        'createdAt': u.createdAt.isoformat() if u.createdAt else None,
+        'id': u.get('id'),
+        'name': u.get('name'),
+        'surname': u.get('surname'),
+        'email': u.get('email'),
+        'role': u.get('role'),
+        'isActive': u.get('isActive'),
+        'createdAt': u.get('createdAt'),
     }
 
 
-def _serialize_event(e) -> dict:
+def _serialize_event(e: dict) -> dict:
     return {
-        'id': str(e.id),
-        'owner': str(e.owner) if e.owner else None,
-        'name': e.name,
-        'disc': e.disc,
-        'preview_picture': e.preview_picture,
-        'picture': e.picture,
-        'isActive': e.isActive,
-        'createdAt': e.createdAt.isoformat() if e.createdAt else None,
-        'updatedAt': e.updatedAt.isoformat() if e.updatedAt else None,
+        'id': e.get('id'),
+        'owner': e.get('owner'),
+        'name': e.get('name'),
+        'disc': e.get('disc'),
+        'preview_picture': e.get('preview_picture'),
+        'picture': e.get('picture'),
+        'isActive': e.get('isActive'),
+        'createdAt': e.get('createdAt'),
+        'updatedAt': e.get('updatedAt'),
     }
 
 
@@ -75,16 +80,14 @@ async def list_users(
     """Все пользователи с ролями и статусом активности."""
     try:
         admin_obj = await _require_admin(r, db, access_jwt, refresh_jwt)
-        if await r.get(f"user:{admin_obj.id}:users"):
-            users = await r.get(f"user:{admin_obj.id}:users")
+        users_cache_key = f"user:{admin_obj.get('id')}:users"
+        cached = await r.get(users_cache_key)
+        if cached:
+            users = json.loads(cached)
         else:
-            users = await database.users.show_random_users(
-                quantity=await database.users.get_amount_of_users(
-                    session=db, model=models.users.Users
-                ),
-                session=db,
-                model=models.users.Users,
-            )
+            quantity = await run_task(database.users.get_amount_of_users)
+            users = await run_task(database.users.show_random_users, quantity)
+            await r.set(users_cache_key, json.dumps(users), ex=600)
         return JSONResponse(status_code=200, content={
             'users': [_serialize_user(u) for u in users],
         })
@@ -104,16 +107,14 @@ async def list_events(
     """Все события со статусом активности (для архивирования)."""
     try:
         admin_obj = await _require_admin(r, db, access_jwt, refresh_jwt)
-        if await r.get(f"user:{admin_obj.id}:events"):
-            events = r.get(f"user:{admin_obj.id}:events")
+        events_cache_key = f"user:{admin_obj.get('id')}:events"
+        cached = await r.get(events_cache_key)
+        if cached:
+            events = json.loads(cached)
         else:
-            events = await database.events.show_random_events(
-                quantity=await database.events.get_amount_of_events(
-                    session=db, model=models.events.Events
-                ),
-                session=db,
-                model=models.events.Events,
-            )
+            quantity = await run_task(database.events.get_amount_of_events)
+            events = await run_task(database.events.show_random_events, quantity)
+            await r.set(events_cache_key, json.dumps(events), ex=600)
         return JSONResponse(status_code=200, content={
             'events': [_serialize_event(e) for e in events],
         })
@@ -140,11 +141,12 @@ async def ban(
 ):
     """Блокировка пользователя (isActive = False)."""
     try:
-        await _require_admin(db, access_jwt, refresh_jwt)
+        await _require_admin(r, db, access_jwt, refresh_jwt)
         await r.delete(f"user:{user_id}:object")
-        return await database.users.edit_user(
-            user_id, {'isActive': False}, db, models.users.Users
-        )
+        updated_user = await run_task(database.users.edit_user, user_id, {'isActive': False})
+        if not updated_user:
+            raise HTTPException(status_code=404, detail='User not found')
+        return updated_user
     except HTTPException:
         raise
     except Exception as e:
@@ -165,10 +167,10 @@ async def unban(
     """Разблокировка пользователя (isActive = True)."""
     try:
         await _require_admin(r, db, access_jwt, refresh_jwt)
-        updated_user = await database.users.edit_user(
-            user_id, {'isActive': True}, db, models.users.Users
-        )
-        await r.set(f"user:{user_id}:object", updated_user, ex=600)
+        updated_user = await run_task(database.users.edit_user, user_id, {'isActive': True})
+        if not updated_user:
+            raise HTTPException(status_code=404, detail='User not found')
+        await r.set(f"user:{user_id}:object", json.dumps(updated_user), ex=600)
         return updated_user
     except HTTPException:
         raise
@@ -191,9 +193,10 @@ async def archive_event(
     try:
         await _require_admin(r, db, access_jwt, refresh_jwt)
         await r.delete(f"event:{event_id}")
-        return await database.events.edit_event(
-            event_id, {'isActive': False}, db, models.events.Events
-        )
+        updated_event = await run_task(database.events.edit_event, event_id, {'isActive': False})
+        if not updated_event:
+            raise HTTPException(status_code=404, detail='Event not found')
+        return updated_event
     except HTTPException:
         raise
     except Exception as e:
@@ -214,18 +217,18 @@ async def grant_admin(
     """Назначение роли ADMIN."""
     try:
         await _require_admin(r, db, access_jwt, refresh_jwt)
-        if r.get(f"user:{user_id}:object"):
-            to_user = r.get(f"user:{user_id}:object")
+        user_cache_key = f"user:{user_id}:object"
+        cached = await r.get(user_cache_key)
+        if cached:
+            to_user = json.loads(cached)
         else:
-            to_user = await database.users.find_user_by_id(user_id, db, models.users.Users)
+            to_user = await run_task(database.users.find_user_by_id, user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
-        if to_user.role == 'ADMIN':
+        if to_user.get('role') == 'ADMIN':
             raise HTTPException(status_code=403, detail='permission denied: user is already ADMIN')
-        updated_user = await database.users.edit_user(
-            user_id, {'role': 'ADMIN'}, db, models.users.Users
-        )
-        await r.set(f"user:{user_id}:object", updated_user, ex=600)
+        updated_user = await run_task(database.users.edit_user, user_id, {'role': 'ADMIN'})
+        await r.set(user_cache_key, json.dumps(updated_user), ex=600)
         return updated_user
     except HTTPException:
         raise
@@ -247,18 +250,18 @@ async def demote_admin(
     """Снятие роли ADMIN (до USER)."""
     try:
         await _require_admin(r, db, access_jwt, refresh_jwt)
-        if r.get(f"user:{user_id}:object"):
-            to_user = r.get(f"user:{user_id}:object")
+        user_cache_key = f"user:{user_id}:object"
+        cached = await r.get(user_cache_key)
+        if cached:
+            to_user = json.loads(cached)
         else:
-            to_user = await database.users.find_user_by_id(user_id, db, models.users.Users)
+            to_user = await run_task(database.users.find_user_by_id, user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
-        if to_user.role == 'USER':
+        if to_user.get('role') == 'USER':
             raise HTTPException(status_code=403, detail='permission denied: user is already USER')
-        updated_user = await database.users.edit_user(
-            user_id, {'role': 'USER'}, db, models.users.Users
-        )
-        await r.set(f"user:{user_id}:object", updated_user, ex=600)
+        updated_user = await run_task(database.users.edit_user, user_id, {'role': 'USER'})
+        await r.set(user_cache_key, json.dumps(updated_user), ex=600)
         return updated_user
     except HTTPException:
         raise

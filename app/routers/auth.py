@@ -6,10 +6,12 @@ from app.database.database import get_db
 import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
-from app import models, schemas, database
+from app import schemas, database
+from app.middlewares.task_queue import run_task
 from typing import Annotated
 from app.caching.main import get_redis
 import redis.asyncio as aioredis
+import json
 
 USER_NAMESPACE = uuid.NAMESPACE_DNS
 
@@ -61,26 +63,25 @@ async def register(
         check_password = re_check.is_valid_password(user.password)
         if not check_password[0]:
             raise HTTPException(status_code=400, detail=check_password[1])
-        if await database.users.find_user_by_email(user.email, db, models.users.Users):
+        if await run_task(database.users.find_user_by_email, user.email):
             raise HTTPException(status_code=409, detail='You already have account')
 
-        user_data = await database.users.add_user(
+        user_data = await run_task(
+            database.users.add_user,
             ins={
                 'name': user.name,
                 'surname': user.surname,
                 'email': user.email,
                 'password': user.password
             },
-            session=db,
-            model=models.users.Users,
         )
-        await r.set(f"user:{user_data.id}:object", user_data, ex=600)
+        await r.set(f"user:{user_data['id']}:object", json.dumps(user_data), ex=600)
 
         response.set_cookie(
             key="access_jwt",
             value=await tokenz.create_jwt(
                 ins={
-                    'sub': str(user_data.id)
+                    'sub': user_data['id']
                 },
             ),
             max_age=600
@@ -89,7 +90,7 @@ async def register(
             key="refresh_jwt",
             value=await tokenz.create_jwt(
                 ins={
-                    'sub': str(user_data.id)
+                    'sub': user_data['id']
                 },
                 is_refresh=True
             ),
@@ -98,6 +99,8 @@ async def register(
 
         return user_data
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
@@ -119,18 +122,18 @@ async def login(
         r: aioredis.Redis = Depends(get_redis),
 ):
     try:
-        db_user = await database.users.find_user_by_email(user.email, db, models.users.Users)
+        db_user = await run_task(database.users.find_user_by_email, user.email)
         if not db_user:
             raise HTTPException(status_code=404, detail='your email is not in database, try to register')
         else:
-            if not tools.check_password(user.password, db_user.password):
+            if not tools.check_password(user.password, db_user['password']):
                 raise HTTPException(status_code=401, detail='incorrect email or password')
             else:
                 response.set_cookie(
                     key="access_jwt",
                     value=await tokenz.create_jwt(
                         ins={
-                            'sub': str(db_user.id)
+                            'sub': db_user['id']
                         },
                     ),
                     max_age=600
@@ -139,15 +142,19 @@ async def login(
                     key="refresh_jwt",
                     value=await tokenz.create_jwt(
                         ins={
-                            'sub': str(db_user.id)
+                            'sub': db_user['id']
                         },
                         is_refresh=True
                     ),
                     max_age=1209600
                 )
-                await r.set(f"user:{db_user.id}:object", db_user, ex=600)
+                cache_user = dict(db_user)
+                cache_user.pop('password', None)
+                await r.set(f"user:{db_user['id']}:object", json.dumps(cache_user), ex=600)
                 return db_user
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
@@ -170,5 +177,7 @@ async def logout(
         response.delete_cookie('refresh_jwt')
         await r.delete(f"user:{jwt_data.get('sub')}:object")
         return response
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')

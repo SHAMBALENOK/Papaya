@@ -1,7 +1,11 @@
 /* ==========================================================================
-   Papaya. Базовый слой.
+   Papaya. Базовый слой (монохромный минимализм).
    Основная стилизация — утилиты Tailwind (см. index.html и js-шаблоны).
-   Принципы: border: none, разделение «воздухом» и мягкими тенями.
+   Принципы (по ТЗ):
+     - border: none — у блоков нет рамок;
+     - разделение блоков — только «воздух» и мягкие многослойные тени;
+     - палитра чёрно-белая: фон #FFFFFF, текст #1A1A1A, серые производные;
+     - углы: 0px у поверхностей, до 4px у интерактивных элементов.
    ========================================================================== */
 
 :root { color-scheme: light; }
@@ -10,33 +14,34 @@ html { scroll-behavior: smooth; }
 
 body { text-rendering: optimizeLegibility; }
 
-::selection { background: #EBF2FA; color: #064789; }
+/* Выделение текста — тёплое, в дополнительной палитре:
+   фон #CBE896 (sage), текст #1A1A1A (контраст 14.2:1). */
+::selection { background: #CBE896; color: #1A1A1A; }
 
-/* Надзаголовок секции: навигационный синий + декоративный лаймовый маркер.
-   Маркер #A5BE00 — граический акцент (не текст), поэтому контраст к белому
-   не нормируется; текст #427AA1 на белом — 4.64:1 (AA). */
+/* Надзаголовок секции: маркер-квадрат 8px — эмбер #FF7F11 (декор),
+   текст #6B6B6B на #FFFFFF — 5.4:1 (WCAG AA). */
 .eyebrow {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: #427AA1;
+    color: #6B6B6B;
 }
 .eyebrow::before {
     content: '';
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     flex-shrink: 0;
-    background: #A5BE00;
-    border-radius: 2px;
+    background: #FF7F11;
+    border-radius: 1px;
 }
 
-/* Тонкий скроллбар модалок */
+/* Тонкий скроллбар модалок — нейтральные серые */
 .modal-scroll::-webkit-scrollbar { width: 8px; }
-.modal-scroll::-webkit-scrollbar-thumb { background: #EBF2FA; border-radius: 4px; }
+.modal-scroll::-webkit-scrollbar-thumb { background: #ECECEC; border-radius: 4px; }
 .modal-scroll::-webkit-scrollbar-track { background: transparent; }
 
 /* Анимация тостов */

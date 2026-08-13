@@ -1,6 +1,8 @@
 /* ==========================================================================
- * pages/myevents.js — «Мои события».
+ * pages/myevents.js — «Мои события» (GET /api/v1/events/dashboard/my_events).
  * Действия (PDF, добавить, обновить) вынесены в FAB «+» (см. app.js).
+ * Строки-карточки: белые поверхности с elev-1, разделение — space-y-6;
+ * статус «в архиве» — sand-бейдж (#C6BFA9, тёмный текст).
  * ========================================================================== */
 
 async function renderMyEvents() {
@@ -27,7 +29,10 @@ function drawMyEvents() {
             <div class="${UI.card} p-8 md:p-10 flex flex-col md:flex-row md:items-center gap-6">
                 <div class="flex-1 min-w-0">
                     <h2 class="text-xl font-bold tracking-tight leading-snug truncate">${escHtml(ev.name)}</h2>
-                    <p class="mt-3 text-sm text-ink/50">Обновлено ${formatDate(ev.updatedAt)}${ev.isActive === false ? ' · в архиве' : ''}</p>
+                    <div class="mt-3 flex items-center gap-3 flex-wrap">
+                        <p class="text-sm text-ink-soft">Обновлено ${formatDate(ev.updatedAt)}</p>
+                        ${ev.isActive === false ? `<span class="${UI.badge} ${UI.badgeNeutral}">В архиве</span>` : ''}
+                    </div>
                 </div>
                 <div class="flex flex-wrap gap-3 shrink-0">
                     <a href="#/event/${ev.id}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть</a>
@@ -37,7 +42,7 @@ function drawMyEvents() {
         : `
         <div class="py-24 text-center max-w-md mx-auto">
             <h2 class="text-2xl font-bold tracking-tight">У вас пока нет событий</h2>
-            <p class="mt-4 text-ink/60 leading-relaxed">Создайте первое событие или импортируйте список из PDF-таблицы через кнопку «+».</p>
+            <p class="mt-4 text-ink-soft leading-relaxed">Создайте первое событие или импортируйте список из PDF-таблицы через кнопку «+».</p>
             <div class="flex flex-wrap justify-center gap-3 mt-10">
                 <button id="myev-add-empty" class="${UI.btn} ${UI.btnPrimary}">Добавить событие</button>
                 <a href="#/" class="${UI.btn} ${UI.btnSecondary}">Смотреть каталог</a>
@@ -45,11 +50,11 @@ function drawMyEvents() {
         </div>`;
 
     page.innerHTML = `
-    <section class="pt-4 pb-14 md:pb-16">
+    <section class="pt-4 pb-16 md:pb-20">
         <div class="max-w-2xl">
             <p class="${UI.eyebrow}">Управление</p>
             <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Мои события</h1>
-            <p class="mt-6 text-lg text-ink/60 leading-relaxed">События, которые добавили вы. Здесь их можно редактировать и обновлять.</p>
+            <p class="mt-6 text-lg text-ink-soft leading-relaxed">События, которые добавили вы. Здесь их можно редактировать и обновлять.</p>
         </div>
     </section>
     <section aria-label="Мои события">${listHtml}</section>`;

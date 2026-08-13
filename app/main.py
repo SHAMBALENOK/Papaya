@@ -4,9 +4,10 @@ from fastapi.staticfiles import StaticFiles
 from app.database.database import get_db
 import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
-from app import models, schemas, database
+from app import database
 from typing import Annotated
 from app.routers import user, events, auth, admin
+from app.middlewares.task_queue import run_task
 import os
 from app.database.database import db_lifespan
 from app.caching.main import redis_lifespan, get_redis
@@ -42,17 +43,10 @@ async def get_user_from_cache_or_db(
     if cached_user:
         return json.loads(cached_user)
 
-    user_obj = await database.users.find_user_by_id(user_id, db, models.users.Users)
+    user_obj = await run_task(database.users.find_user_by_id, user_id)
     if user_obj:
-        user_dict = {
-            'id': str(user_obj.id),
-            'name': user_obj.name,
-            'surname': user_obj.surname,
-            'email': user_obj.email,
-            'role': user_obj.role,
-        }
-        await r.set(cache_key, json.dumps(user_dict), ex=600)
-        return user_dict
+        await r.set(cache_key, json.dumps(user_obj), ex=600)
+        return user_obj
 
     return None
 
@@ -72,6 +66,8 @@ async def main(
             raise HTTPException(status_code=404, detail="User not found")
 
         return JSONResponse(status_code=200, content=user_dict)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
 

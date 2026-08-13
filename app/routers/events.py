@@ -6,7 +6,8 @@ from app.database.database import get_db
 import app.middlewares.tokenz.main as tokenz
 import app.middlewares.parse_tables as table_handling
 from sqlalchemy.ext.asyncio import AsyncSession
-from app import models, schemas, database
+from app import schemas, database
+from app.middlewares.task_queue import run_task
 from typing import Annotated
 import shutil
 import uuid as uuid_mod
@@ -20,6 +21,33 @@ events_page = APIRouter(
 )
 
 UPLOAD_FOLDER = '../tables'
+
+
+async def _get_cached_user(sub: str, db: AsyncSession, r: aioredis.Redis) -> dict:
+    """
+    Возвращает пользователя из кэша или БД в виде dict.
+    При промахе кэша результат сериализуется и кладётся в кэш.
+    """
+    cache_key = f"user:{sub}:object"
+    cached = await r.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    user_obj = await run_task(database.users.find_user_by_id, sub)
+    if not user_obj:
+        raise HTTPException(status_code=404, detail='User not found')
+    await r.set(cache_key, json.dumps(user_obj), ex=600)
+    return user_obj
+
+
+async def _get_authorized_user(sub: str, db: AsyncSession, r: aioredis.Redis) -> dict:
+    """
+    Возвращает пользователя (кэш или БД) и проверяет права EDITOR/ADMIN.
+    """
+    user_obj = await _get_cached_user(sub, db, r)
+    if user_obj.get('role') not in ('EDITOR', 'ADMIN'):
+        raise HTTPException(status_code=403, detail='Permission denied')
+    return user_obj
+
 
 @events_page.post(
     '/add_event',
@@ -40,14 +68,10 @@ async def add_event(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        if user_obj.role != "EDITOR" or user_obj.role != "ADMIN":
-            raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
-        else:
-            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            if user_obj.role != "EDITOR" or user_obj.role != "ADMIN": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
+        await _get_authorized_user(jwt_data.get('sub'), db, r)  # Проверка прав
 
-        db_event = await database.events.add_event(
+        db_event = await run_task(
+            database.events.add_event,
             ins={
                 'owner': jwt_data.get('sub'),
                 'name': event.name,
@@ -55,12 +79,12 @@ async def add_event(
                 'preview_picture': event.preview_picture,
                 'picture': event.picture,
             },
-            session=db,
-            model=models.events.Events,
         )
-        await r.set(f"event:{db_event.id}", db_event, ex=600)
+        await r.set(f"event:{db_event['id']}", json.dumps(db_event), ex=600)
         return db_event
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
@@ -84,25 +108,19 @@ async def event_edit_details(
         refresh_jwt: Annotated[str | None, Cookie()] = None
 ):
     try:
-        #TODO: проверка прав
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        if user_obj.role != "EDITOR" or user_obj.role != "ADMIN":
-            raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
-        else:
-            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            if user_obj.role != "EDITOR" or user_obj.role != "ADMIN": raise HTTPException(status_code=403, detail=f'Permission denied')# Проверка прав
+        await _get_authorized_user(jwt_data.get('sub'), db, r)  # Проверка прав
 
-        if await r.get(f"event:{event_id}"):
-            db_event = r.get(f"event:{event_id}")
+        # Проверяем, что событие существует (кэш или БД)
+        cache_key = f"event:{event_id}"
+        cached = await r.get(cache_key)
+        if cached:
+            db_event = json.loads(cached)
         else:
-            db_event = await database.events.find_event_by_id(
-                event_id=str(event.id),
-                session=db,
-                model=models.events.Events
-            )
+            db_event = await run_task(database.events.find_event_by_id, event_id)
             if not db_event:
                 raise HTTPException(status_code=404, detail='Event not found')
+            await r.set(cache_key, json.dumps(db_event), ex=600)
 
         data = {
             'owner': event.owner,
@@ -114,15 +132,14 @@ async def event_edit_details(
 
         clean_data = {k: v for k, v in data.items() if v != 'null'}
 
-        up_event = await database.events.edit_event(
-            event_id=str(event.id),
-            ins=clean_data,
-            session=db,
-            model=models.events.Events
-        )
-        await r.set(f"event:{event_id}", up_event, ex=600)
+        up_event = await run_task(database.events.edit_event, event_id=event_id, ins=clean_data)
+        if not up_event:
+            raise HTTPException(status_code=404, detail='Event not found')
+        await r.set(cache_key, json.dumps(up_event), ex=600)
         return up_event
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
 
@@ -133,7 +150,7 @@ async def event_edit_details(
         200: {'description': 'OK'},
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯_(ツ)_/¯'},
+        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
     }
 )
 async def add_events_via_tables(
@@ -146,16 +163,12 @@ async def add_events_via_tables(
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         user_id = jwt_data.get('sub')
-        user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        if user_obj.role != "EDITOR" or user_obj.role != "ADMIN":
-            raise HTTPException(status_code=403, detail=f'Permission denied')  # Проверка прав
-        else:
-            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            if user_obj.role != "EDITOR" or user_obj.role != "ADMIN": raise HTTPException(status_code=403,
-                                                                                          detail=f'Permission denied')  # Проверка прав
+        await _get_authorized_user(user_id, db, r)  # Проверка прав
 
-        if r.get(f"user:{user_id}:tables"):
-            created = await r.get(f"user:{user_id}:tables")
+        tables_cache_key = f"user:{user_id}:tables"
+        cached = await r.get(tables_cache_key)
+        if cached:
+            created = json.loads(cached)
         else:
             filename = secure_filename(file.filename)
             tools.mkdir(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}")
@@ -165,18 +178,20 @@ async def add_events_via_tables(
 
             if filename.split('.')[-1] == 'pdf':
                 created = await table_handling.main.pdf_to_db(
-                    file_location, db, user_id
+                    file_location, user_id
                 )
-            elif filename.split('.')[-1] == 'xslx':
-                created = await table_handling.sql_processing.tabulate(
-                    file_location, db, user_id
-                )
-            await r.set(f"user:{user_id}:tables", created, ex=120)
+            elif filename.split('.')[-1] == 'xlsx':
+                created = await run_task(table_handling.sql_processing.tabulate, file_location, user_id)
+            else:
+                raise HTTPException(status_code=400, detail='Unsupported file format')
+            await r.set(tables_cache_key, json.dumps(created), ex=120)
         return created
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯_(ツ)_/¯'
+            detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯'
         )
 
 @events_page.get('/dashboard')
@@ -188,50 +203,32 @@ async def event_dashboard(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if await r.get(f"user:{jwt_data.get('sub')}:object"):
-            user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        else:
-            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
+        sub = jwt_data.get('sub')
+        user_obj = await _get_cached_user(sub, db, r)
 
-        if await r.get(f"user:{jwt_data.get('sub')}:events"):
-            events_list = r.get(f"user:{jwt_data.get('sub')}:events")
+        events_cache_key = f"user:{sub}:events"
+        cached = await r.get(events_cache_key)
+        if cached:
+            events_list = json.loads(cached)
         else:
-            random_events = await database.events.show_random_events(
-                quantity=await database.events.get_amount_of_events(session=db, model=models.events.Events),
-                session=db,
-                model=models.events.Events,
-            )
-
-            # Сериализуем events в словари
-            events_list = [
-                {
-                    'id': str(ev.id),
-                    'owner': str(ev.owner) if ev.owner else None,
-                    'name': ev.name,
-                    'disc': ev.disc,
-                    'preview_picture': ev.preview_picture,
-                    'picture': ev.picture,
-                    'isActive': ev.isActive,  # ← добавлено: статус нужен каталогу и архиву
-                    'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
-                    'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
-                }
-                for ev in random_events
-            ]
-            await r.set(f"user:{jwt_data.get('sub')}:events", random_events, ex=600)
+            quantity = await run_task(database.events.get_amount_of_events)
+            events_list = await run_task(database.events.show_random_events, quantity)
+            await r.set(events_cache_key, json.dumps(events_list), ex=600)
         return JSONResponse(status_code=200, content={
-            'user_id': str(user_obj.id),       # UUID → str
-            'user_name': user_obj.name,
-            'user_surname': user_obj.surname,
-            'user_email': user_obj.email,
-            'user_role': user_obj.role,
+            'user_id': str(user_obj['id']),       # UUID → str
+            'user_name': user_obj['name'],
+            'user_surname': user_obj['surname'],
+            'user_email': user_obj['email'],
+            'user_role': user_obj['role'],
             'events': events_list,
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
 
 @events_page.get('/dashboard/my_events')
-async def event_dashboard(
+async def my_event_dashboard(
         db: AsyncSession = Depends(get_db),
         r: aioredis.Redis = Depends(get_redis),
         access_jwt: Annotated[str | None, Cookie()] = None,
@@ -239,51 +236,34 @@ async def event_dashboard(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if await r.get(f"user:{jwt_data.get('sub')}:object"):
-            user_obj = await r.get(f"user:{jwt_data.get('sub')}:object")
-        else:
-            user_obj = await database.users.find_user_by_id(jwt_data.get('sub'), db, models.users.Users)
-            await r.set(f"user:{jwt_data.get('sub')}:object", user_obj, ex=600)
+        sub = jwt_data.get('sub')
+        user_obj = await _get_cached_user(sub, db, r)
 
-        if await r.get(f"user:{jwt_data.get('sub')}:my_events"):
-            my_events = json.loads(r.get(f"user:{jwt_data.get('sub')}:my_events"))
+        my_events_cache_key = f"user:{sub}:my_events"
+        cached_events = await r.get(my_events_cache_key)
+        if cached_events:
+            my_events = json.loads(cached_events)
         else:
-            random_events = await database.events.show_random_events(
-                quantity=await database.events.get_amount_of_events(session=db, model=models.events.Events),
-                session=db,
-                model=models.events.Events,
-            )
+            quantity = await run_task(database.events.get_amount_of_events)
+            events_list = await run_task(database.events.show_random_events, quantity)
 
             my_events = []
-            # Сериализуем events в словари
-            events_list = [
-                {
-                    'id': str(ev.id),
-                    'owner': str(ev.owner) if ev.owner else None,
-                    'name': ev.name,
-                    'disc': ev.disc,
-                    'preview_picture': ev.preview_picture,
-                    'picture': ev.picture,
-                    'isActive': ev.isActive,  # ← добавлено
-                    'createdAt': ev.createdAt.isoformat() if ev.createdAt else None,
-                    'updatedAt': ev.updatedAt.isoformat() if ev.updatedAt else None,
-                }
-                for ev in random_events
-            ]
             for event in events_list:
-                if event['owner'] == jwt_data.get('sub'):
+                if event['owner'] == sub:
                     my_events.append(event)
 
-            await r.set(f"user:{jwt_data.get('sub')}:my_events", json.dumps(my_events), ex=600)
+            await r.set(my_events_cache_key, json.dumps(my_events), ex=600)
 
         return JSONResponse(status_code=200, content={
-            'user_id': str(user_obj.id),       # UUID → str
-            'user_name': user_obj.name,
-            'user_surname': user_obj.surname,
-            'user_email': user_obj.email,
-            'user_role': user_obj.role,
+            'user_id': str(user_obj['id']),       # UUID → str
+            'user_name': user_obj['name'],
+            'user_surname': user_obj['surname'],
+            'user_email': user_obj['email'],
+            'user_role': user_obj['role'],
             'events': my_events,
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
 
@@ -307,16 +287,17 @@ async def event_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if await r.get(f"event:{event_id}"):
-            event = await r.get(f"event:{event_id}")
+        cache_key = f"event:{event_id}"
+        cached = await r.get(cache_key)
+        if cached:
+            event = json.loads(cached)
         else:
-            event = await database.events.find_event_by_id(
-                event_id=str(event_id),
-                session=db,
-                model=models.events.Events,
-            )
+            event = await run_task(database.events.find_event_by_id, str(event_id))
             if not event: raise HTTPException(status_code=404, detail='Page is missing')
+            await r.set(cache_key, json.dumps(event), ex=600)
 
         return event
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
