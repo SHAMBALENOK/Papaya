@@ -1,4 +1,5 @@
 import os
+import logging
 import pandas as pd
 from huggingface_hub import InferenceClient, get_token
 from huggingface_hub.errors import HfHubHTTPError
@@ -7,6 +8,8 @@ from googletrans import Translator
 import uuid as uuid_mod
 from app.middlewares.task_queue import task_queue, AsyncCeleryTask, run_task
 from app.middlewares.ai_filling.images import find_images
+
+logger = logging.getLogger(__name__)
 
 translator = Translator()
 
@@ -58,11 +61,19 @@ def _get_client() -> InferenceClient:
 
 async def translate_text(text):
     """
-    Translates text from russian to english
+    Translates text from russian to english.
+
+    Перевод не должен ронять весь импорт: googletrans — неофициальная
+    библиотека, она ломается при изменениях эндпоинтов Google и при
+    рейт-лимитах. При ошибке возвращаем исходный текст и продолжаем.
     """
-    translator = Translator()
-    result = await translator.translate(text, dest='en')
-    return result.text
+    try:
+        translator = Translator()
+        result = await translator.translate(text, dest='en')
+        return result.text
+    except Exception as e:
+        logger.warning("Translation failed (%s), using original text: %r", e, text)
+        return text
 
 async def _classify(sentences: list) -> list:
     """
