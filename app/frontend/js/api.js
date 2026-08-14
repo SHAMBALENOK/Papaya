@@ -1,5 +1,6 @@
 /* ==========================================================================
  * api.js — клиент API. Все запросы уходят с cookie (JWT: access/refresh).
+ * Пути совпадают с роутерами FastAPI под префиксом /api/v1.
  * ========================================================================== */
 const API_BASE = '/api/v1';
 
@@ -17,7 +18,6 @@ const api = {
             return { ok: res.ok, status: res.status, data: null };
         }
         const data = await res.json().catch(() => null);
-        /* Диагностика: любой неуспешный ответ виден в консоли DevTools */
         if (!res.ok) {
             console.error(`[API] ${method} ${path} → ${res.status}`, data);
         }
@@ -34,22 +34,27 @@ const api = {
     login(d)     { return this.post('/auth/login', d); },
     logout()     { return this.get('/auth/logout'); },
 
+    /* Текущий пользователь: GET /api/v1/ отдаёт полный профиль из JWT */
+    getMe()      { return this.get('/'); },
+    /* Приветствие: GET /api/v1/welcome → user_id, user_name, user_surname */
+    getWelcome() { return this.get('/welcome'); },
+
     /* Главный экран: пользователь (с ролью) + все события */
     getDashboard() { return this.get('/events/dashboard'); },
-    /* События текущего пользователя */
     getMyEvents()  { return this.get('/events/dashboard/my_events'); },
 
-    /* Пользователь */
+    /* Пользователи */
+    getUsers()       { return this.get('/user/users'); },
     getUser(id)      { return this.get(`/user/${id}`); },
     editUser(id, d)  { return this.post(`/user/${id}/edit_info`, d); },
 
-    /* События */
+    /* События — пути совпадают с app/routers/events.py */
     getEvent(id)     { return this.get(`/events/${id}`); },
     addEvent(d)      { return this.post('/events/add_event', d); },
-    editEvent(d)     { return this.post('/events/edit_event', d); },
-    addEventsPdf(fd) { return this.postForm('/events/add_events_via_pdf_tables', fd); },
+    editEvent(d)     { return this.post(`/events/edit_event/${d.id}`, d); },
+    addEventsPdf(fd) { return this.postForm('/events/add_events_via_tables', fd); },
 
-    /* Администрирование (только роль ADMIN на бэкенде) */
+    /* Администрирование (роль ADMIN на бэкенде) */
     adminUsers()     { return this.get('/admin/users'); },
     adminEvents()    { return this.get('/admin/events'); },
     banUser(id)      { return this.get(`/admin/ban/${id}`); },

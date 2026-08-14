@@ -1,16 +1,14 @@
 /* ==========================================================================
- * app.js — утилиты, дизайн-система UI, общие модалки, FAB, инициализация.
+ * app.js — утилиты, дизайн-система UI, chrome дашборда, модалки, FAB.
  *
- * Принципы разделения блоков (по ТЗ):
- *   - border: none — у блоков нет рамок;
- *   - «воздух»: секции py-14…py-24, гриды gap-8, карточки p-8…p-12;
- *   - глубина: elev-1 (покой) / elev-2 (hover) / elev-3 (модалки, тосты, FAB).
- *   - база: #FFFFFF/#FFFFFC фон, #1A1A1A текст; акценты (доп. палитра):
- *     sage #CBE896 (успех), sand #C6BFA9 (нейтраль), ember #FF7F11 (акцент),
- *     crimson #FF1B1C (ошибки). Текст на акцентах — ink (контраст ≥4.5:1).
+ * Принципы разделения блоков:
+ *   - border: none;
+ *   - «воздух»: секции py-14…py-20, гриды gap-8, карточки p-8…p-12;
+ *   - глубина: elev-1 / elev-2 / elev-3;
+ *   - база: #FFFFFF/#FFFFFC, текст #1A1A1A;
+ *     sage #CBE896, sand #C6BFA9, ember #FF7F11, crimson #FF1B1C.
  * ========================================================================== */
 
-/* ---------- Защита от XSS ---------- */
 function escHtml(str) {
     if (str === null || str === undefined) return '';
     const d = document.createElement('div');
@@ -27,13 +25,10 @@ function escAttr(str) {
         .replace(/>/g, '&gt;');
 }
 
-/* ---------- ДИЗАЙН-СИСТЕМА (монохром) ---------- */
 const UI = {
-    /* Надзаголовок секции: класс .eyebrow определён в style.css */
     eyebrow: 'eyebrow',
 
-    /* Кнопки: радиус 4px (интерактив), фокус-кольцо box-shadow, без границ.
-       Отступы: крупные — px-6 py-3, малые — px-4 py-2 (базовый шаг 4px). */
+    /* Кнопки: радиус 4px, фокус-кольцо, без границ. Отступы кратны 4px. */
     btn: 'inline-flex items-center justify-center gap-2 font-semibold rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/70 focus-visible:ring-offset-2 transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none',
     btnPrimary: 'bg-ink text-white px-6 py-3 shadow-elev-1 hover:bg-ink-deep hover:shadow-elev-2',
     btnSecondary: 'bg-sand text-ink px-6 py-3 shadow-elev-1 hover:shadow-elev-2',
@@ -41,13 +36,11 @@ const UI = {
     btnGhost: 'text-ink-soft px-4 py-2 hover:text-ink hover:bg-mist focus-visible:ring-ink/60',
     btnSmall: 'px-4 py-2 text-sm',
 
-    /* Формы: поля без границ — от белого фона их отделяет подложка mist;
-       фокус подчёркивается кольцом 2px (не рамкой). */
+    /* Поля без рамок: отделены подложкой mist, фокус — кольцо 2px. */
     label: 'block text-sm font-semibold text-ink mb-2',
     input: 'w-full bg-mist rounded px-4 py-3 text-base text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-ink/40 transition-shadow',
     field: 'mb-6',
 
-    /* Поверхности: белые, углы 0px, глубина — тень elev-1 */
     card: 'bg-white shadow-elev-1',
     badge: 'inline-flex items-center gap-2 rounded px-3 py-1.5 text-xs font-semibold whitespace-nowrap',
     badgeNeutral: 'bg-sand text-ink',
@@ -55,8 +48,6 @@ const UI = {
     badgeDanger: 'bg-crimson text-ink',
     badgeAdmin: 'bg-ink text-white',
 };
-
-/* ---------- Общие helpers ---------- */
 
 function loadingHtml(text = 'Загрузка…') {
     return `<div class="py-32 text-center" role="status"><p class="text-lg text-ink-soft animate-pulse">${escHtml(text)}</p></div>`;
@@ -96,6 +87,13 @@ function userFromDashboard(d) {
         email: d.user_email,
         role: d.user_role || 'USER',
     };
+}
+
+function userInitials(user) {
+    if (!user) return '?';
+    const a = (user.name || '?')[0] || '?';
+    const b = (user.surname || '')[0] || '';
+    return (a + b).toUpperCase();
 }
 
 /* ---------- Поля форм ---------- */
@@ -238,17 +236,17 @@ function openPdfModal(onDone) {
         <div id="modal-alert"></div>
         <form id="pdf-form">
             <div class="${UI.field}">
-                <label for="pdf-file" class="${UI.label}">PDF-файл с таблицей мероприятий <span class="text-crimson" aria-hidden="true">*</span></label>
-                <input id="pdf-file" name="file" type="file" accept=".pdf" required
+                <label for="pdf-file" class="${UI.label}">Файл таблицы мероприятий <span class="text-crimson" aria-hidden="true">*</span></label>
+                <input id="pdf-file" name="file" type="file" accept=".pdf,.xlsx" required
                        class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-ink file:text-white hover:file:bg-ink-deep file:transition-colors file:cursor-pointer">
-                <p class="mt-2 text-sm text-ink-soft leading-relaxed">Таблица будет распознана автоматически, события добавятся в каталог.</p>
+                <p class="mt-2 text-sm text-ink-soft leading-relaxed">Поддерживаются PDF и XLSX — как принимает маршрут /events/add_events_via_tables.</p>
             </div>
             <div class="flex flex-wrap justify-end gap-3 mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Загрузить</button>
             </div>
         </form>`;
-    const { overlay, close } = openModal('Импорт из PDF', body);
+    const { overlay, close } = openModal('Импорт из таблицы', body);
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
 
     overlay.querySelector('#pdf-form').addEventListener('submit', async e => {
@@ -274,7 +272,6 @@ function openPdfModal(onDone) {
     });
 }
 
-/* Редактирование события (общая для «Моих событий» и FAB) */
 function openEditEventModal(ev, onDone) {
     const body = `
         <div id="modal-alert"></div>
@@ -322,7 +319,6 @@ function openEditEventModal(ev, onDone) {
     });
 }
 
-/* «Обновить событие»: шаг 1 — выбор своего события, шаг 2 — форма */
 async function openUpdateEventModal(onDone) {
     if (!store.myEvents.length) {
         try {
@@ -336,7 +332,7 @@ async function openUpdateEventModal(onDone) {
 
     if (!events.length) {
         const { overlay } = openModal('Обновить событие', `
-            <p class="text-ink-soft leading-relaxed">У вас пока нет собственных событий — обновлять нечего. Добавьте первое событие через меню «+».</p>
+            <p class="text-ink-soft leading-relaxed">У вас пока нет собственных событий — обновлять нечего.</p>
             <div class="flex justify-end mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnPrimary}">Понятно</button>
             </div>`);
@@ -363,9 +359,7 @@ async function openUpdateEventModal(onDone) {
         }));
 }
 
-/* ---------- FAB «+»: единая точка действий со событиями ----------
- * Эмбер-квадрат #FF7F11 (позитивное действие), тень elev-2/elev-3.
- * Показывается на «Каталоге» и «Моих событиях». */
+/* ---------- FAB ---------- */
 
 function setFab(visible) {
     const existing = document.getElementById('fab');
@@ -387,17 +381,14 @@ function mountFab() {
              class="flex flex-col items-stretch gap-3 opacity-0 translate-y-2 pointer-events-none transition-all duration-200">
             <button type="button" role="menuitem" data-fab="pdf"
                     class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m0 0L7 8m5-5 5 5"></path><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>
-                Импорт из PDF
+                Импорт из таблицы
             </button>
             <button type="button" role="menuitem" data-fab="add"
                     class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                 Добавить событие
             </button>
             <button type="button" role="menuitem" data-fab="edit"
                     class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
                 Обновить событие
             </button>
         </div>
@@ -419,7 +410,6 @@ function mountFab() {
             else openUpdateEventModal(fabRefresh);
         }));
 
-    /* Клик вне FAB и ESC закрывают меню */
     document.addEventListener('click', e => { if (!wrap.contains(e.target)) closeFabMenu(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFabMenu(); });
 }
@@ -453,7 +443,6 @@ function closeFabMenu() {
     if (icon) icon.classList.remove('rotate-45');
 }
 
-/* Обновление текущей страницы после действий из FAB */
 function fabRefresh() {
     if (getRoute() === '/my-events') { renderMyEvents(); return; }
     (async () => {
@@ -463,10 +452,54 @@ function fabRefresh() {
     })();
 }
 
-/* ---------- Шапка и навигация ---------- */
+/* ---------- Chrome: сайдбар дашборда ---------- */
+
+function setChrome(visible) {
+    const sidebar = document.getElementById('sidebar');
+    const header = document.getElementById('header');
+    const frame = document.getElementById('app-frame');
+    if (!sidebar || !header || !frame) return;
+
+    if (visible) {
+        sidebar.classList.add('is-chrome');
+        header.classList.remove('hidden');
+        frame.classList.add('is-chrome');
+        renderHeader();
+    } else {
+        sidebar.classList.remove('is-chrome', 'is-open');
+        header.classList.add('hidden');
+        frame.classList.remove('is-chrome');
+        closeSidebar();
+    }
+}
+
+function openSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    const btn = document.getElementById('sidebar-open');
+    if (!sidebar) return;
+    sidebar.classList.add('is-open');
+    if (backdrop) {
+        backdrop.hidden = false;
+        backdrop.classList.remove('hidden');
+    }
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+}
+
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    const btn = document.getElementById('sidebar-open');
+    if (sidebar) sidebar.classList.remove('is-open');
+    if (backdrop) {
+        backdrop.hidden = true;
+        backdrop.classList.add('hidden');
+    }
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+}
 
 function navLinkClass(active) {
-    const base = 'px-4 py-2 rounded text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
+    const base = 'w-full text-left px-4 py-3 rounded text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
     return active
         ? `${base} bg-ink text-white`
         : `${base} text-ink-soft hover:text-ink hover:bg-mist`;
@@ -474,34 +507,59 @@ function navLinkClass(active) {
 
 function renderHeader() {
     const nav = document.getElementById('nav');
+    const userBox = document.getElementById('sidebar-user');
     if (!nav) return;
-    if (!store.user) { nav.innerHTML = ''; return; }
+    if (!store.user) {
+        nav.innerHTML = '';
+        if (userBox) userBox.innerHTML = '';
+        return;
+    }
 
     const links = [
+        { href: '#/welcome', route: '/welcome', label: 'Главная' },
         { href: '#/', route: '/', label: 'Олимпиады' },
         { href: '#/my-events', route: '/my-events', label: 'Мои события' },
         { href: '#/users', route: '/users', label: 'Пользователи' },
         { href: '#/profile', route: '/profile', label: 'Профиль' },
     ];
-    if (store.isAdmin()) links.push({ href: '#/admin', route: '/admin', label: 'Админ' });
+    if (store.isAdmin()) {
+        links.push({ href: '#/admin/users', route: '/admin', label: 'Админ' });
+    }
 
     nav.innerHTML = links.map(l =>
         `<a href="${l.href}" data-route="${l.route}" class="${navLinkClass(false)}">${l.label}</a>`
-    ).join('') + `<button id="btn-logout" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} ml-2">Выйти</button>`;
+    ).join('');
 
-    document.getElementById('btn-logout').addEventListener('click', logout);
+    if (userBox) {
+        const initials = userInitials(store.user);
+        userBox.innerHTML = `
+        <div class="bg-mist rounded p-4">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 rounded bg-ember text-ink text-sm font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
+                <div class="min-w-0">
+                    <p class="font-semibold text-sm truncate">${escHtml(store.user.name)} ${escHtml(store.user.surname)}</p>
+                    <p class="text-xs text-ink-soft truncate">${escHtml(store.user.email || '')}</p>
+                </div>
+            </div>
+            <button id="btn-logout" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} w-full mt-4">Выйти</button>
+        </div>`;
+        document.getElementById('btn-logout').addEventListener('click', logout);
+    }
+
     highlightNav(getRoute());
 }
 
 function highlightNav(path) {
-    let current = path;
+    let current = path || '/';
     if (path.startsWith('/event/')) current = '/';
     else if (path.startsWith('/users/')) current = '/users';
+    else if (path.startsWith('/admin')) current = '/admin';
     document.querySelectorAll('#nav a[data-route]').forEach(a => {
         const active = a.dataset.route === current;
         a.setAttribute('aria-current', active ? 'page' : 'false');
         a.className = navLinkClass(active);
     });
+    closeSidebar();
 }
 
 /* ---------- Bootstrap сессии ---------- */
@@ -524,12 +582,26 @@ async function bootstrap() {
 async function logout() {
     try { await api.logout(); } catch { /* сессия истечёт сама */ }
     store.clear();
-    renderHeader();
+    setChrome(false);
+    setFab(false);
     navigate('#/auth');
+}
+
+function bindChromeControls() {
+    const openBtn = document.getElementById('sidebar-open');
+    const closeBtn = document.getElementById('sidebar-close');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (openBtn) openBtn.addEventListener('click', openSidebar);
+    if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
+    if (backdrop) backdrop.addEventListener('click', closeSidebar);
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeSidebar();
+    });
 }
 
 /* ---------- Запуск приложения ---------- */
 (async function init() {
+    bindChromeControls();
     await bootstrap();
     router();
 })();

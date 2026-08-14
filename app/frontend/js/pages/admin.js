@@ -1,18 +1,16 @@
 /* ==========================================================================
  * pages/admin.js — панель администратора.
- * Страницы для API-маршрутов /admin/*: /admin/users, /admin/events,
- * ban/unban, grant/demote, archive.
- * Доступ: только пользователи с ролью ADMIN (проверка на входе).
- * Разделение блоков: только «воздух» (space-y-6) и тени elev-1.
- * Монохром: активная вкладка — чёрная, статусные бейджи — ч/б.
+ * Страницы: #/admin и #/admin/users → GET /admin/users
+ *           #/admin/events          → GET /admin/events
+ * Действия: ban, unban, grant, demote, archive.
  * ========================================================================== */
 
 let adminTab = 'users';
 
-function renderAdmin() {
+function renderAdmin(initialTab) {
     const page = document.getElementById('page');
+    adminTab = initialTab === 'events' ? 'events' : 'users';
 
-    /* Охрана доступа: без роли ADMIN показываем заглушку */
     if (!store.isAdmin()) {
         page.innerHTML = `
         <div class="max-w-narrow mx-auto py-24 md:py-32 text-center">
@@ -36,18 +34,13 @@ function renderAdmin() {
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">Управление пользователями и событиями: роли, блокировки, архив.</p>
     </section>
 
-    <!-- Сегментированные вкладки: активная — чёрная подложка, без границ -->
     <div class="flex sm:inline-flex flex-wrap gap-2 bg-mist rounded p-2 mb-12" role="tablist" aria-label="Разделы администрирования">
-        <button id="admin-tab-users" role="tab" aria-selected="true" class="flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-ink text-white shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Пользователи</button>
-        <button id="admin-tab-events" role="tab" aria-selected="false" class="flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">События</button>
+        <a href="#/admin/users" id="admin-tab-users" role="tab" aria-selected="true" class="flex-1 sm:flex-none sm:min-w-[10rem] text-center px-6 py-3 rounded text-sm font-semibold bg-ink text-white shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Пользователи</a>
+        <a href="#/admin/events" id="admin-tab-events" role="tab" aria-selected="false" class="flex-1 sm:flex-none sm:min-w-[10rem] text-center px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">События</a>
     </div>
 
     <section id="admin-content" aria-live="polite">${loadingHtml()}</section>`;
 
-    document.getElementById('admin-tab-users').addEventListener('click', () => selectAdminTab('users'));
-    document.getElementById('admin-tab-events').addEventListener('click', () => selectAdminTab('events'));
-
-    /* Делегирование действий (бан, роли, архив) на контейнере списка */
     document.getElementById('admin-content').addEventListener('click', async e => {
         const btn = e.target.closest('[data-act]');
         if (!btn || btn.disabled) return;
@@ -78,22 +71,20 @@ function renderAdmin() {
         btn.disabled = false;
     });
 
-    selectAdminTab('users');
+    paintAdminTabs(adminTab);
+    loadAdminTab(adminTab);
 }
 
-function selectAdminTab(tab) {
-    adminTab = tab;
+function paintAdminTabs(tab) {
     const usersBtn = document.getElementById('admin-tab-users');
     const eventsBtn = document.getElementById('admin-tab-events');
     if (!usersBtn || !eventsBtn) return;
 
-    const base = 'flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
+    const base = 'flex-1 sm:flex-none sm:min-w-[10rem] text-center px-6 py-3 rounded text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
     usersBtn.className = tab === 'users' ? `${base} bg-ink text-white shadow-elev-1` : `${base} text-ink-soft hover:text-ink`;
     eventsBtn.className = tab === 'events' ? `${base} bg-ink text-white shadow-elev-1` : `${base} text-ink-soft hover:text-ink`;
     usersBtn.setAttribute('aria-selected', String(tab === 'users'));
     eventsBtn.setAttribute('aria-selected', String(tab === 'events'));
-
-    loadAdminTab(tab);
 }
 
 async function loadAdminTab(tab) {
@@ -116,7 +107,6 @@ async function loadAdminTab(tab) {
         : eventsListHtml(res.data.events || []);
 }
 
-/* Список пользователей: строки-карточки, разделённые только отступами */
 function usersListHtml(users) {
     if (!users.length) return `<p class="py-24 text-center text-lg text-ink-soft">Пользователи не найдены</p>`;
 
@@ -126,7 +116,7 @@ function usersListHtml(users) {
     <div class="space-y-6">
         ${users.map(u => {
             const initials = (((u.name || '?')[0] || '?') + ((u.surname || '')[0] || '')).toUpperCase();
-            const isSelf = u.id === selfId;
+            const isSelf = String(u.id) === String(selfId);
             const roleBadge = u.role === 'ADMIN'
                 ? `<span class="${UI.badge} ${UI.badgeAdmin}">Администратор</span>`
                 : `<span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(u.role || 'USER')}</span>`;
@@ -160,7 +150,6 @@ function usersListHtml(users) {
     </div>`;
 }
 
-/* Список событий: такой же принцип — карточки и «воздух» вместо линий */
 function eventsListHtml(events) {
     if (!events.length) return `<p class="py-24 text-center text-lg text-ink-soft">Событий пока нет</p>`;
 

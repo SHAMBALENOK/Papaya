@@ -1,13 +1,14 @@
 /* ==========================================================================
  * pages/auth.js — экраны входа и регистрации.
- * Монохром: активная вкладка — чёрная (bg-ink), поля — подложка mist;
- * акцент: точка логотипа — эмбер #FF7F11 (как в шапке).
+ * Активная вкладка — чёрная (bg-ink), поля — подложка mist.
  * ========================================================================== */
 
 const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-ink text-white shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
 const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
 
 function renderAuth() {
+    if (store.user) { navigate('#/welcome'); return; }
+
     const page = document.getElementById('page');
     page.innerHTML = `
     <div class="max-w-narrow mx-auto py-12 md:py-24">
@@ -73,9 +74,6 @@ function renderAuth() {
 
     function showErr(msg) { alertEl.innerHTML = alertHtml(msg, 'error'); }
 
-    /* Заполняем store из ответа и ведём пользователя на приветствие
-       (#/welcome — страница маршрута GET /api/v1/welcome):
-       cookie уже установлены сервером. */
     function enterApp(userData) {
         store.setUser({
             id: userData && userData.id,

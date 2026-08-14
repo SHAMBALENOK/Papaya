@@ -1,7 +1,6 @@
 /* ==========================================================================
  * pages/event.js — страница события (GET /api/v1/events/{id}).
- * Узкая колонка max-w-narrow, крупные заголовки, dl-сетка без линий —
- * строки разделены только gap-y-9 («воздух»).
+ * Узкая колонка, dl-сетка без линий — строки разделены gap-y-9.
  * ========================================================================== */
 async function renderEvent(eventId) {
     const page = document.getElementById('page');
@@ -41,7 +40,6 @@ async function renderEvent(eventId) {
                  onerror="this.onerror=null;this.parentElement.style.display='none'">
         </div>` : ''}
 
-        <!-- Заголовок: увеличенные вертикальные разрывы вокруг -->
         <header class="mt-14">
             ${statusBadge}
             <h1 class="mt-7 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(ev.name)}</h1>
@@ -53,7 +51,6 @@ async function renderEvent(eventId) {
             <p class="mt-7 text-lg text-ink leading-[1.8] whitespace-pre-wrap">${escHtml(ev.disc)}</p>
         </section>` : ''}
 
-        <!-- Информация: dl-сетка, строки разделены только отступами gap-y-9 -->
         <section class="mt-16 mb-8" aria-labelledby="event-info-title">
             <h2 id="event-info-title" class="${UI.eyebrow}">Информация</h2>
             <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">

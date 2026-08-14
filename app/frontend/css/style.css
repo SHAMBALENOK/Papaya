@@ -1,10 +1,10 @@
 /* ==========================================================================
-   Papaya. Базовый слой (монохромный минимализм).
-   Основная стилизация — утилиты Tailwind (см. index.html и js-шаблоны).
-   Принципы (по ТЗ):
+   Papaya. Базовый слой (просторный минимализм, dashboard).
+   Основная стилизация — утилиты Tailwind (index.html и js-шаблоны).
+   Принципы:
      - border: none — у блоков нет рамок;
-     - разделение блоков — только «воздух» и мягкие многослойные тени;
-     - палитра чёрно-белая: фон #FFFFFF, текст #1A1A1A, серые производные;
+     - разделение — только «воздух» и мягкие многослойные тени;
+     - фон #FFFFFC / поверхности #FFFFFF, текст #1A1A1A;
      - углы: 0px у поверхностей, до 4px у интерактивных элементов.
    ========================================================================== */
 
@@ -14,12 +14,14 @@ html { scroll-behavior: smooth; }
 
 body { text-rendering: optimizeLegibility; }
 
-/* Выделение текста — тёплое, в дополнительной палитре:
-   фон #CBE896 (sage), текст #1A1A1A (контраст 14.2:1). */
+/* Выделение: sage #CBE896 + ink #1A1A1A (контраст 14.2:1). */
 ::selection { background: #CBE896; color: #1A1A1A; }
 
-/* Надзаголовок секции: маркер-квадрат 8px — эмбер #FF7F11 (декор),
-   текст #6B6B6B на #FFFFFF — 5.4:1 (WCAG AA). */
+/*
+  Надзаголовок секции.
+  Маркер 8px — ember #FF7F11 (декор).
+  Текст #6B6B6B на #FFFFFF — 5.4:1 (WCAG AA).
+*/
 .eyebrow {
     display: inline-flex;
     align-items: center;
@@ -39,16 +41,31 @@ body { text-rendering: optimizeLegibility; }
     border-radius: 1px;
 }
 
-/* Тонкий скроллбар модалок — нейтральные серые */
+/* Сайдбар: без chrome скрыт; на мобиле — drawer, на desktop — колонка. */
+#sidebar {
+    display: none;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+}
+#sidebar.is-chrome {
+    display: flex;
+}
+#sidebar.is-chrome.is-open {
+    transform: translateX(0);
+}
+@media (min-width: 768px) {
+    #sidebar.is-chrome { transform: translateX(0); }
+    #app-frame.is-chrome { padding-left: 15rem; } /* = w-sidebar, воздух колонки */
+}
+
+/* Тонкий скроллбар модалок — нейтральные серые, без рамок */
 .modal-scroll::-webkit-scrollbar { width: 8px; }
 .modal-scroll::-webkit-scrollbar-thumb { background: #ECECEC; border-radius: 4px; }
 .modal-scroll::-webkit-scrollbar-track { background: transparent; }
 
-/* Анимация тостов */
 .toast { opacity: 0; transform: translateY(-8px); transition: opacity .25s ease, transform .25s ease; }
 .toast.toast-visible { opacity: 1; transform: translateY(0); }
 
-/* Сниженное движение (доступность) */
 @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     *, *::before, *::after {
