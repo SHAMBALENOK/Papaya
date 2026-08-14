@@ -68,6 +68,9 @@ services:
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       TABLES_DIR: "/app/app/tables"
+    # Google Translate из Docker часто ломается из-за IPv6 (httpx -> ConnectTimeout)
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     ports:
       - "5000:5000"
     volumes:
@@ -109,6 +112,9 @@ services:
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       TABLES_DIR: "/app/app/tables"
+    # Google Translate из Docker часто ломается из-за IPv6 (httpx -> ConnectTimeout)
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     volumes:
       - ./app/tables:/app/app/tables
       - ml-models-cache:/app/.cache

@@ -59,21 +59,35 @@ def _get_client() -> InferenceClient:
     """Создаёт клиент Inference API с актуальным токеном из окружения."""
     return InferenceClient(model=MODEL_ID, token=_get_hf_token())
 
-async def translate_text(text):
+HF_TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-ru-en"
+
+
+async def translate_text(text, hf_client: InferenceClient | None = None):
     """
     Translates text from russian to english.
 
-    Перевод не должен ронять весь импорт: googletrans — неофициальная
-    библиотека, она ломается при изменениях эндпоинтов Google и при
-    рейт-лимитах. При ошибке возвращаем исходный текст и продолжаем.
+    Порядок фолбэков:
+    1) Google Translate (googletrans) — быстро, но нестабильно и зависит
+       от доступности Google из сети/контейнера;
+    2) модель перевода на Hugging Face Inference API — использует тот же
+       токен, что и классификация, и работает даже когда Google недоступен;
+    3) исходный текст — перевод не должен ронять весь импорт.
     """
     try:
         translator = Translator()
         result = await translator.translate(text, dest='en')
         return result.text
     except Exception as e:
-        logger.warning("Translation failed (%s), using original text: %r", e, text)
-        return text
+        logger.warning("Google translation failed (%s), trying HF model", e)
+
+    if hf_client is not None:
+        try:
+            result = hf_client.translation(text, model=HF_TRANSLATION_MODEL)
+            return result.translation_text
+        except Exception as e:
+            logger.warning("HF translation failed (%s), using original text: %r", e, text)
+
+    return text
 
 async def _classify(sentences: list) -> list:
     """
@@ -85,7 +99,7 @@ async def _classify(sentences: list) -> list:
     for i, sentence in enumerate(sentences):
         try:
             data = client.zero_shot_classification(
-                await translate_text(sentence),
+                await translate_text(sentence, hf_client=client),
                 candidate_labels=LABELS,
             )
         except HfHubHTTPError as e:
