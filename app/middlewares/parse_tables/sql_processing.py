@@ -1,17 +1,24 @@
 import os
+import asyncio
+import inspect
 import logging
 import pandas as pd
 from huggingface_hub import InferenceClient, get_token
 from huggingface_hub.errors import HfHubHTTPError
 from app.database import events as db_events
-from googletrans import Translator
 import uuid as uuid_mod
 from app.middlewares.task_queue import task_queue, AsyncCeleryTask, run_task
 from app.middlewares.ai_filling.images import find_images
 
 logger = logging.getLogger(__name__)
 
-translator = Translator()
+# googletrans — необязательная зависимость: её API несовместим с await
+# (translate() в 4.0.0-rc1 синхронный), а пин httpx==0.13.3 конфликтует
+# с huggingface_hub (httpx>=0.23). Основной перевод — модель на HF.
+try:
+    from googletrans import Translator as _GoogleTranslator
+except Exception:  # библиотека не установлена или не импортируется
+    _GoogleTranslator = None
 
 MODEL_ID = "facebook/bart-large-mnli"
 LABELS = ['olympiad']
@@ -67,27 +74,72 @@ async def translate_text(text, hf_client: InferenceClient | None = None):
     Translates text from russian to english.
 
     Порядок фолбэков:
-    1) Google Translate (googletrans) — быстро, но нестабильно и зависит
-       от доступности Google из сети/контейнера;
-    2) модель перевода на Hugging Face Inference API — использует тот же
-       токен, что и классификация, и работает даже когда Google недоступен;
+    1) Google Translate (googletrans) — только если библиотека установлена;
+    2) модель перевода на Hugging Face Inference API (Helsinki-NLP/opus-mt-ru-en)
+       — использует тот же токен, что и классификация;
     3) исходный текст — перевод не должен ронять весь импорт.
     """
-    try:
-        translator = Translator()
-        result = await translator.translate(text, dest='en')
-        return result.text
-    except Exception as e:
-        logger.warning("Google translation failed (%s), trying HF model", e)
+    if _GoogleTranslator is not None:
+        try:
+            # googletrans 4.0.0-rc1 синхронный — вызываем в потоке,
+            # чтобы не блокировать event loop; форки с async API тоже поддержаны.
+            result = await asyncio.to_thread(
+                _GoogleTranslator().translate, text, dest='en'
+            )
+            if inspect.isawaitable(result):
+                result = await result
+            return result.text
+        except Exception as e:
+            logger.warning("Google translation failed (%s), trying HF model", e)
 
     if hf_client is not None:
         try:
             result = hf_client.translation(text, model=HF_TRANSLATION_MODEL)
-            return result.translation_text
+            # Новые версии huggingface_hub возвращают объект TranslationOutput (dict),
+            # старые — list[dict] с ключом translation_text.
+            if isinstance(result, (list, tuple)):
+                result = result[0] if result else {}
+            if isinstance(result, dict):
+                translated = result.get("translation_text")
+            else:
+                translated = getattr(result, "translation_text", None)
+            if translated:
+                return translated
         except Exception as e:
             logger.warning("HF translation failed (%s), using original text: %r", e, text)
 
     return text
+
+
+def _extract_score(data) -> float:
+    """
+    Достаёт score из ответа zero-shot classification.
+
+    Устойчиво к разным форматам ответа в разных версиях huggingface_hub:
+    - list[ZeroShotClassificationOutputElement] (dataclass+dict) — новые версии;
+    - list[dict] — версии 0.16-0.26;
+    - dict с ключом 'scores' — совсем старые версии.
+    """
+    if isinstance(data, (list, tuple)):
+        if not data:
+            raise ValueError("Empty response from zero-shot classification")
+        data = data[0]
+    if isinstance(data, dict):
+        score = data.get("score")
+        if score is None:
+            scores = data.get("scores")
+            if isinstance(scores, (list, tuple)) and scores:
+                score = scores[0]
+        if score is None:
+            raise ValueError(f"No 'score' in response: {data!r}")
+        return float(score)
+    score = getattr(data, "score", None)
+    if score is None:
+        raise ValueError(
+            f"Unexpected response type {type(data).__name__}: {data!r}"
+        )
+    return float(score)
+
 
 async def _classify(sentences: list) -> list:
     """
@@ -98,10 +150,13 @@ async def _classify(sentences: list) -> list:
 
     for i, sentence in enumerate(sentences):
         try:
+            translated = await translate_text(sentence, hf_client=client)
             data = client.zero_shot_classification(
-                await translate_text(sentence, hf_client=client),
+                translated,
                 candidate_labels=LABELS,
             )
+            output[i] = _extract_score(data)
+            logger.info("header #%d score=%.3f (%r)", i, output[i], sentence)
         except HfHubHTTPError as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status == 401:
@@ -113,11 +168,22 @@ async def _classify(sentences: list) -> list:
                     "перезапустите воркер: токен читается при старте процесса. "
                     f"Ответ Hugging Face: {e}"
                 ) from e
-            raise
+            logger.warning(
+                "HF returned HTTP %s for header #%d %r; score set to 0",
+                status, i, sentence,
+            )
+            output[i] = 0.0
+        except Exception as e:
+            # Ошибка анализа одного заголовка не должна ронять весь импорт:
+            # полный трейсбек попадает в лог, а столбец получит нулевой скоринг.
+            logger.exception(
+                "Classification failed for header #%d %r; score set to 0",
+                i, sentence,
+            )
+            output[i] = 0.0
 
-        # .get() совместимо и с новыми версиями huggingface_hub (dataclass+dict),
-        # и со старыми (обычные dict)
-        output[i] = data[0].get("score")
+    if not output:
+        raise ValueError("Таблица не содержит заголовков для анализа")
 
     name = (sentences.index(sentences[max(output, key=output.get)]) ,sentences.pop(max(output, key=output.get)))
     classified = list()
@@ -127,7 +193,7 @@ async def _classify(sentences: list) -> list:
 
     return classified
 
-@task_queue.task(base=AsyncCeleryTask, time_limit=120, default_retry_delay=30, retry_backoff=True, retry_backoff_max=120, queue="heavy")
+@task_queue.task(base=AsyncCeleryTask, time_limit=600, default_retry_delay=30, retry_backoff=True, retry_backoff_max=120, queue="heavy")
 async def tabulate(xlsx_path: str, owner: str):
     """
     Converting information from an Excel table to SQL
@@ -156,8 +222,16 @@ async def tabulate(xlsx_path: str, owner: str):
             payload['disc'] += f'\n{i[1]}: {value}'
 
         if payload.get('name', 'null') != 'null':
-            pictures = await run_task(find_images, query=payload.get('name', 'null'))
-            payload.update(pictures)
+            # Поиск картинок не должен ронять импорт: при сбое событие
+            # создаётся без превью и фоновой картинки.
+            try:
+                pictures = await run_task(find_images, query=payload.get('name', 'null'))
+                payload.update(pictures)
+            except Exception as e:
+                logger.warning(
+                    "Image search failed for %r (%s); event will be created without pictures",
+                    payload.get('name'), e,
+                )
             created = await db_events.add_event(ins=payload)
             created_events.append(created)
     return created_events

@@ -12,9 +12,8 @@ pydantic[email]
 bcrypt
 pandas
 numpy==1.26.4
-huggingface_hub
+huggingface_hub>=0.26,<2.0
 opencv-python-headless
-googletrans==4.0.0-rc1
 python-multipart
 redis
 celery[redis]
