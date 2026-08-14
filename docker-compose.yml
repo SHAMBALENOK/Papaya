@@ -1,5 +1,9 @@
 name: papaya
 
+# Запуск: docker compose up -d --build
+# Приложение: http://localhost:5000
+# pgAdmin:    http://localhost:5050
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -20,11 +24,6 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 4G
     networks:
       - project
 
@@ -40,11 +39,6 @@ services:
     ports:
       - "5050:80"
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 1G
     networks:
       - project
 
@@ -61,11 +55,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
     networks:
       - project
 
@@ -73,21 +62,28 @@ services:
     build: .
     container_name: web
     environment:
-      JWT_KEY: 'change_this_secret_key'
-      DATABASE_URL: 'postgresql+asyncpg://postgres:postgres@postgres:5432/postgres'
-      HF_TOKEN: 'your_secret_token'
-      REDIS_HOST: 'redis'
-      REDIS_PORT: '6379'
+      JWT_KEY: "change_this_secret_key"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/postgres"
+      HF_TOKEN: "your_secret_token"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      TABLES_DIR: "/app/app/tables"
     ports:
       - "5000:5000"
     volumes:
-      - ./tables:/app/tables
+      - ./app/tables:/app/app/tables
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
     networks:
       - project
@@ -98,26 +94,23 @@ services:
           target: /app/app
           ignore:
             - __pycache__
-            - '*.pyc'
+            - "*.pyc"
         - action: rebuild
           path: requirements.txt
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 12G
 
   celery:
     build: .
     container_name: celery
     command: ["celery", "-A", "app.middlewares.task_queue.task_queue", "worker", "-Q", "heavy", "-l", "info", "-c", "2"]
     environment:
-      DATABASE_URL: 'postgresql+asyncpg://postgres:postgres@postgres:5432/postgres'
-      HF_TOKEN: 'your_secret_token'
-      REDIS_HOST: 'redis'
-      REDIS_PORT: '6379'
+      JWT_KEY: "change_this_secret_key"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/postgres"
+      HF_TOKEN: "your_secret_token"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      TABLES_DIR: "/app/app/tables"
     volumes:
-      - ./tables:/app/tables
+      - ./app/tables:/app/app/tables
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
@@ -127,11 +120,6 @@ services:
     restart: unless-stopped
     networks:
       - project
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
 
 volumes:
   postgres-data:

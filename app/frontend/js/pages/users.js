@@ -1,13 +1,9 @@
 /* ==========================================================================
  * pages/users.js — страницы маршрутов:
- *   #/users      → GET /api/v1/user/users  — каталог пользователей;
- *   #/users/{id} → GET /api/v1/user/{id}   — публичная карточка пользователя.
- *
- * Ответ /user/users: user_id, user_name, user_surname, user_email,
- * user_role + users[] — карточки выводят все поля, которые отдаёт бэкенд.
+ *   #/users      → GET /api/v1/user/users
+ *   #/users/{id} → GET /api/v1/user/{id}
  * ========================================================================== */
 
-/* --- Каталог пользователей (#/users) --- */
 async function renderUsers() {
     const page = document.getElementById('page');
     if (!store.user) { navigate('#/auth'); return; }
@@ -72,7 +68,6 @@ function drawUsers(users) {
     <section aria-label="Список пользователей">${listHtml}</section>`;
 }
 
-/* --- Публичная карточка пользователя (#/users/{id}) --- */
 async function renderUserPublic(userId) {
     const page = document.getElementById('page');
     if (!store.user) { navigate('#/auth'); return; }
@@ -92,9 +87,8 @@ async function renderUserPublic(userId) {
     }
 
     const u = res.data;
-    const isSelf = store.user && store.user.id === u.id;
+    const isSelf = store.user && String(store.user.id) === String(u.id);
 
-    /* Карточка отрисовывается общим шаблоном из profile.js (без редактирования) */
     page.innerHTML = (isSelf
         ? `<div class="max-w-narrow mx-auto">${alertHtml('Это ваш профиль — редактировать его можно на странице «Профиль».', 'success')}</div>`
         : '') + userProfileHtml(u, { editable: false });

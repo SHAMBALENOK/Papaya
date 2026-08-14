@@ -1,11 +1,10 @@
 /* ==========================================================================
  * pages/profile.js — «Мой профиль».
- * Страница маршрута GET /api/v1/ (сводка текущего пользователя):
- * id, email, name, surname, gender, bday, bio, phone, country, region,
- * status, role, isActive, createdAt, updatedAt — всё, что отдаёт бэкенд.
+ * Источник: GET /api/v1/ (полный объект пользователя).
+ * Запасной источник: GET /api/v1/user/{id} — тот же UserResponse.
  *
- * userProfileHtml(u, { editable }) — общий рендер карточки пользователя,
- * используется также на публичной странице #/users/{id} (users.js).
+ * userProfileHtml(u, { editable }) — общий рендер карточки,
+ * используется также на #/users/{id}.
  * ========================================================================== */
 
 async function renderProfile() {
@@ -13,23 +12,50 @@ async function renderProfile() {
     if (!store.user) { navigate('#/auth'); return; }
     page.innerHTML = loadingHtml();
 
-    let res;
-    try { res = await api.getMe(); } catch { res = { ok: false }; }
+    let res = { ok: false, data: null };
 
-    if (!res.ok || !res.data) {
+    /* Основной маршрут профиля текущего пользователя */
+    try { res = await api.getMe(); } catch (err) {
+        console.error('[profile] GET / не удался:', err);
+        res = { ok: false, data: null };
+    }
+
+    /* Запасной путь — тот же набор полей по id из сессии */
+    const meLooksValid = res.ok && res.data && res.data.id;
+    if (!meLooksValid && store.user.id) {
+        try { res = await api.getUser(store.user.id); } catch (err) {
+            console.error('[profile] GET /user/{id} не удался:', err);
+        }
+    }
+
+    if (!res.ok || !res.data || !res.data.id) {
         page.innerHTML = `
         <div class="max-w-narrow mx-auto py-24">
             ${alertHtml('Не удалось загрузить профиль', 'error')}
-            <a href="#/" class="${UI.btn} ${UI.btnSecondary}">На главную</a>
+            <div class="flex flex-wrap gap-3">
+                <button type="button" id="profile-retry" class="${UI.btn} ${UI.btnPrimary}">Повторить</button>
+                <a href="#/" class="${UI.btn} ${UI.btnSecondary}">На главную</a>
+            </div>
         </div>`;
+        const retry = document.getElementById('profile-retry');
+        if (retry) retry.addEventListener('click', renderProfile);
         return;
     }
 
+    store.setUser({
+        id: res.data.id,
+        name: res.data.name,
+        surname: res.data.surname,
+        email: res.data.email,
+        role: res.data.role || 'USER',
+    });
+    renderHeader();
+
     page.innerHTML = userProfileHtml(res.data, { editable: true });
-    document.getElementById('btn-edit-profile').addEventListener('click', () => openEditProfileModal(res.data));
+    const editBtn = document.getElementById('btn-edit-profile');
+    if (editBtn) editBtn.addEventListener('click', () => openEditProfileModal(res.data));
 }
 
-/* Общий рендер карточки пользователя (поля — только из ответа API) */
 function userProfileHtml(u, { editable = false } = {}) {
     const initials = (((u.name || '?')[0] || '?') + ((u.surname || '')[0] || '')).toUpperCase();
     const genderText = u.gender === 'male' ? 'Мужской' : u.gender === 'female' ? 'Женский' : 'Не указан';
@@ -54,10 +80,9 @@ function userProfileHtml(u, { editable = false } = {}) {
     <div class="max-w-narrow mx-auto py-4">
         <a href="${editable ? '#/' : '#/users'}" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
-            ${editable ? 'На главную' : 'К списку пользователей'}
+            ${editable ? 'К каталогу' : 'К списку пользователей'}
         </a>
 
-        <!-- Шапка профиля -->
         <header class="mt-12 flex flex-col sm:flex-row sm:items-center gap-8">
             <div class="w-24 h-24 rounded bg-ember text-ink text-3xl font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
             <div class="min-w-0 flex-1">
@@ -71,7 +96,6 @@ function userProfileHtml(u, { editable = false } = {}) {
             </div>` : ''}
         </header>
 
-        <!-- Поля: сетка с крупными зазорами, разделение только «воздухом» -->
         <section class="mt-16" aria-label="Данные профиля">
             <h2 class="${UI.eyebrow}">Данные профиля</h2>
             <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">

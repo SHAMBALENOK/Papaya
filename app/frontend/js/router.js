@@ -1,10 +1,9 @@
 /* ==========================================================================
  * router.js — hash-роутер SPA.
+ * Каждому пользовательскому маршруту соответствует страница.
  * ========================================================================== */
 
 function navigate(hash) {
-    /* Страховка: если hash уже равен целевому, hashchange не сработает —
-       рендерим вручную. */
     if (window.location.hash === hash) {
         router();
         return;
@@ -14,44 +13,77 @@ function navigate(hash) {
 
 function getRoute() { return (window.location.hash || '#/').slice(1); }
 
+function renderNotFound() {
+    const page = document.getElementById('page');
+    page.innerHTML = `
+    <div class="max-w-narrow mx-auto py-24 text-center">
+        <p class="${UI.eyebrow}">404</p>
+        <h1 class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight">Страница не найдена</h1>
+        <p class="mt-5 text-lg text-ink-soft leading-relaxed">Такого маршрута в приложении нет.</p>
+        <a href="#/" class="${UI.btn} ${UI.btnPrimary} mt-10">К каталогу</a>
+    </div>`;
+}
+
 function router() {
-    const path = getRoute();
-    const header = document.getElementById('header');
+    const path = getRoute() || '/';
+    const page = document.getElementById('page');
 
     try {
-        if (path.startsWith('/event/')) {
-            header.classList.remove('hidden');
+        if (path === '/auth') {
+            setChrome(false);
+            setFab(false);
+            renderAuth();
+            highlightNav(path);
+            return;
+        }
+
+        /* Остальные страницы требуют сессии (кроме уже обработанного /auth) */
+        if (!store.user) {
+            setChrome(false);
+            setFab(false);
+            navigate('#/auth');
+            return;
+        }
+
+        setChrome(true);
+
+        if (path === '/welcome') {
+            renderWelcome();
+        } else if (path === '/' || path === '') {
+            renderDashboard();
+        } else if (path.startsWith('/event/') && path.split('/event/')[1]) {
             renderEvent(path.split('/event/')[1]);
         } else if (path === '/profile') {
-            header.classList.remove('hidden');
             renderProfile();
         } else if (path === '/my-events') {
-            header.classList.remove('hidden');
             renderMyEvents();
-        } else if (path === '/admin') {
-            header.classList.remove('hidden');
-            renderAdmin();
-        } else if (path === '/auth') {
-            header.classList.add('hidden');
-            renderAuth();
+        } else if (path === '/users') {
+            renderUsers();
+        } else if (path.startsWith('/users/') && path.split('/users/')[1]) {
+            renderUserPublic(path.split('/users/')[1]);
+        } else if (path === '/admin' || path === '/admin/users') {
+            renderAdmin('users');
+        } else if (path === '/admin/events') {
+            renderAdmin('events');
         } else {
-            header.classList.remove('hidden');
-            renderDashboard();
+            renderNotFound();
         }
-        highlightNav(path);
 
-        /* FAB «+» живёт только на каталоге и «Моих событиях» */
-        setFab(path === '/' || path === '/my-events');
+        highlightNav(path);
+        /* FAB только там, где есть работа с событиями, и только при роли EDITOR/ADMIN */
+        setFab((path === '/' || path === '/my-events') && store.canManageEvents());
     } catch (err) {
         console.error('[router] ошибка рендера:', err);
         setFab(false);
-        document.getElementById('page').innerHTML = `
-        <div class="max-w-narrow mx-auto py-24 text-center">
-            <h1 class="text-3xl font-extrabold tracking-tight">Не удалось открыть страницу</h1>
-            <p class="mt-5 text-ink/60 leading-relaxed">Внутренняя ошибка: ${escHtml(String((err && err.message) || err))}</p>
-            <p class="mt-3 text-sm text-ink/45">Если файлы проекта недавно обновлялись — перезагрузите страницу с очисткой кэша (Ctrl+Shift+R).</p>
-            <button onclick="location.reload()" class="mt-10 inline-flex items-center justify-center font-semibold rounded bg-primary text-white px-6 py-3 shadow-elev-1">Перезагрузить</button>
-        </div>`;
+        if (page) {
+            page.innerHTML = `
+            <div class="max-w-narrow mx-auto py-24 text-center">
+                <h1 class="text-3xl font-extrabold tracking-tight">Не удалось открыть страницу</h1>
+                <p class="mt-5 text-ink-soft leading-relaxed">Внутренняя ошибка: ${escHtml(String((err && err.message) || err))}</p>
+                <p class="mt-3 text-sm text-ink-faint">Если файлы недавно обновлялись — перезагрузите страницу с очисткой кэша (Ctrl+Shift+R).</p>
+                <button type="button" onclick="location.reload()" class="${UI.btn} ${UI.btnPrimary} mt-10">Перезагрузить</button>
+            </div>`;
+        }
     }
 }
 

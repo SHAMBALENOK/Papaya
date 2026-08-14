@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas, database
 from app.middlewares.task_queue import run_task
 from typing import Annotated
+import os
 import shutil
 import uuid as uuid_mod
 import redis.asyncio as aioredis
@@ -20,7 +21,11 @@ events_page = APIRouter(
     tags=['events']
 )
 
-UPLOAD_FOLDER = '../tables'
+# Каталог загрузок: в Docker задаётся TABLES_DIR=/app/app/tables
+UPLOAD_FOLDER = os.getenv(
+    'TABLES_DIR',
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tables')),
+)
 
 
 async def _get_cached_user(sub: str, db: AsyncSession, r: aioredis.Redis) -> dict:
@@ -56,7 +61,7 @@ async def _get_authorized_user(sub: str, db: AsyncSession, r: aioredis.Redis) ->
         200: {'description': 'OK'},
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
+        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
     }
 )
 async def add_event(
@@ -86,7 +91,7 @@ async def add_event(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
+        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯')
 
 @events_page.post(
     '/edit_event/{event_id}',
@@ -96,7 +101,7 @@ async def add_event(
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
         404: {'description': 'Event not found'},
-        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
+        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
     }
 )
 async def event_edit_details(
@@ -141,7 +146,7 @@ async def event_edit_details(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
+        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯')
 
 @events_page.post(
     '/add_events_via_tables',
@@ -150,7 +155,7 @@ async def event_edit_details(
         200: {'description': 'OK'},
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
+        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
     }
 )
 async def add_events_via_tables(
@@ -191,7 +196,7 @@ async def add_events_via_tables(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯'
+            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯'
         )
 
 @events_page.get('/dashboard')
@@ -275,7 +280,7 @@ async def my_event_dashboard(
         401: {'description': 'Access or refresh token missing'},
         403: {'description': 'Invalid refresh or access token'},
         404: {'description': 'Page is missing'},
-        500: {'description': 'Something has broken ¯\_(ツ)_/¯'},
+        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
     }
 )
 async def event_details(
@@ -300,4 +305,4 @@ async def event_details(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\_(ツ)_/¯')
+        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯')

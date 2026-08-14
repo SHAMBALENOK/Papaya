@@ -1,11 +1,8 @@
 /* ==========================================================================
- * pages/dashboard.js — главный экран: дашборд + каталог олимпиад.
+ * pages/dashboard.js — каталог олимпиад (GET /events/dashboard).
  *
- * Дашборд-блок строится строго на данных GET /events/dashboard:
- *   user_id, user_name, user_surname, user_email, user_role, events[].
- * Метрики — это производные от массива events (подсчёт, не выдумка):
- *   всего событий, активных, в архиве + роль пользователя.
- * Действия (PDF, добавить, обновить) вынесены в FAB «+» (см. app.js).
+ * Поля ответа: user_id, user_name, user_surname, user_email, user_role, events[].
+ * Метрики — подсчёт по массиву events, не выдуманные значения.
  * ========================================================================== */
 
 const FALLBACK_IMG = 'https://placehold.co/640x360/C6BFA9/1A1A1A?text=Papaya';
@@ -48,7 +45,6 @@ function drawDashboard() {
     const page = document.getElementById('page');
     const events = store.events;
 
-    /* --- Метрики дашборда (подсчёт по данным бэкенда) --- */
     const total = events.length;
     const active = events.filter(ev => ev.isActive !== false).length;
     const archived = total - active;
@@ -81,8 +77,7 @@ function drawDashboard() {
                 </svg>
             </div>
             <h2 class="text-2xl font-bold tracking-tight">Событий пока нет</h2>
-            <p class="mt-4 text-ink-soft leading-relaxed">Загляните позже — мы обязательно добавим что-нибудь интересное. Или добавьте первое событие через кнопку «+».</p>
-            <button id="btn-add-first" class="${UI.btn} ${UI.btnPrimary} mt-10">Добавить первое событие</button>
+            <p class="mt-4 text-ink-soft leading-relaxed">Загляните позже — каталог пуст. Если у вас есть права EDITOR или ADMIN, добавьте событие через кнопку «+».</p>
         </div>`;
     } else {
         listHtml = `<div class="grid gap-8 md:grid-cols-2 xl:grid-cols-3">` + events.map(ev => {
@@ -115,20 +110,10 @@ function drawDashboard() {
                 Всероссийские и региональные мероприятия для школьников.
                 Откройте карточку, чтобы узнать подробности.
             </p>
-            <a href="#/welcome" class="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-ink-soft hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                Приветствие →
-            </a>
         </div>
     </section>
 
-    <!-- Блок метрик: глубина — elev-1, разделение — gap-6, без рамок -->
     <section class="pb-16 md:pb-20" aria-label="Сводка">${statsHtml}</section>
 
     <section aria-label="Список олимпиад">${listHtml}</section>`;
-
-    const first = document.getElementById('btn-add-first');
-    if (first) first.addEventListener('click', () => openAddEventModal(async () => {
-        try { await loadDashboardData(); } catch { /* остаются текущие данные */ }
-        drawDashboard();
-    }));
 }

@@ -83,6 +83,9 @@ async def welcome(
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         user_dict = await get_user_from_cache_or_db(jwt_data.get('sub'), r, db)
 
+        if not user_dict:
+            return JSONResponse(status_code=200, content={})
+
         return JSONResponse(status_code=200, content={
             'user_id': user_dict.get('id'),
             'user_name': user_dict.get('name'),
@@ -105,5 +108,4 @@ app.mount('/frontend', StaticFiles(directory=FRONTEND_DIR), name='frontend')
 async def spa_fallback(path: str = ''):
     file_path = os.path.join(FRONTEND_DIR, path)
     if path and os.path.isfile(file_path):
-        return FileResponse(file_path)
-    return FileResponse(os.path.join(FRONTEND_DIR, 'index.html'))
+        return
