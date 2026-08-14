@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import database
 from typing import Annotated
 from app.routers import user, events, auth, admin
-from app.middlewares.task_queue import run_task
 import os
 from app.database.database import db_lifespan
 from app.caching.main import redis_lifespan, get_redis
@@ -43,7 +42,7 @@ async def get_user_from_cache_or_db(
     if cached_user:
         return json.loads(cached_user)
 
-    user_obj = await run_task(database.users.find_user_by_id, user_id)
+    user_obj = await database.users.find_user_by_id(user_id)
     if user_obj:
         await r.set(cache_key, json.dumps(user_obj), ex=600)
         return user_obj
@@ -98,7 +97,8 @@ async def welcome(
 
 
 # --- Frontend ---
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), 'frontend')
+FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), 'frontend'))
+INDEX_FILE = os.path.join(FRONTEND_DIR, 'index.html')
 
 app.mount('/frontend', StaticFiles(directory=FRONTEND_DIR), name='frontend')
 
@@ -106,6 +106,16 @@ app.mount('/frontend', StaticFiles(directory=FRONTEND_DIR), name='frontend')
 @app.get('/')
 @app.get('/{path:path}')
 async def spa_fallback(path: str = ''):
-    file_path = os.path.join(FRONTEND_DIR, path)
-    if path and os.path.isfile(file_path):
-        return
+    """Отдать файл фронтенда или точку входа SPA для клиентского маршрута."""
+    if path:
+        file_path = os.path.realpath(os.path.join(FRONTEND_DIR, path))
+        if (
+            os.path.commonpath((FRONTEND_DIR, file_path)) == FRONTEND_DIR
+            and os.path.isfile(file_path)
+        ):
+            return FileResponse(file_path)
+
+    return FileResponse(
+        INDEX_FILE,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )

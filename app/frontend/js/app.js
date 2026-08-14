@@ -516,7 +516,6 @@ function renderHeader() {
     }
 
     const links = [
-        { href: '#/welcome', route: '/welcome', label: 'Главная' },
         { href: '#/', route: '/', label: 'Олимпиады' },
         { href: '#/my-events', route: '/my-events', label: 'Мои события' },
         { href: '#/users', route: '/users', label: 'Пользователи' },
@@ -564,17 +563,21 @@ function highlightNav(path) {
 
 /* ---------- Bootstrap сессии ---------- */
 async function bootstrap() {
+    const route = getRoute() || '/';
+    const isPublicRoute = route === '/' || route === '/welcome' || route === '/auth';
+
     try {
-        const res = await api.getDashboard();
+        /* На публичных страницах отсутствие JWT не должно уводить с визитки. */
+        const res = await api.getDashboard({ skipAuthRedirect: isPublicRoute });
         if (res.ok && res.data && res.data.user_id) {
             store.setUser(userFromDashboard(res.data));
             store.setEvents(res.data.events);
-        } else if (!getRoute().startsWith('/auth')) {
+        } else if (!isPublicRoute) {
             navigate('#/auth');
         }
     } catch (err) {
         console.error('[bootstrap] ошибка проверки сессии:', err);
-        if (!getRoute().startsWith('/auth')) navigate('#/auth');
+        if (!isPublicRoute) navigate('#/auth');
     }
     renderHeader();
 }
@@ -602,6 +605,21 @@ function bindChromeControls() {
 /* ---------- Запуск приложения ---------- */
 (async function init() {
     bindChromeControls();
+
+    const route = getRoute() || '/';
+    const isPublicRoute = route === '/' || route === '/welcome' || route === '/auth';
+
+    /*
+     * Публичный экран не должен ждать ответа API: при недоступных БД/Redis
+     * проверка сессии может занять время, но визитка и авторизация уже видны.
+     */
+    if (isPublicRoute) {
+        router();
+    } else {
+        const page = document.getElementById('page');
+        if (page) page.innerHTML = loadingHtml('Проверяем сессию…');
+    }
+
     await bootstrap();
     router();
 })();

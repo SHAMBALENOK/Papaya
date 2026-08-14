@@ -4,17 +4,7 @@ from sqlalchemy import select, func
 from app.database.database import AsyncSessionLocal
 from app.models.users import Users
 from app.middlewares.serializers import user_to_dict
-from app.middlewares.task_queue import task_queue, AsyncCeleryTask
 import uuid as uuid_mod
-
-DB_TASK_OPTIONS = dict(
-    base=AsyncCeleryTask,
-    time_limit=10,
-    default_retry_delay=2,
-    retry_backoff=True,
-    retry_backoff_max=6,
-    queue="heavy",
-)
 
 
 def _full_user_dict(user) -> dict:
@@ -29,7 +19,6 @@ def _full_user_dict(user) -> dict:
     return data
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def add_user(ins: dict):
     """
     Функция для создания пользователя в базе данных
@@ -48,7 +37,6 @@ async def add_user(ins: dict):
         return user_to_dict(user)
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def find_user_by_email(email: str):
     """
     Функция для поиска пользователя по email
@@ -61,7 +49,6 @@ async def find_user_by_email(email: str):
         return _full_user_dict(user) if user else None
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def find_user_by_id(user_id: str):
     """
     Функция для поиска пользователя по id
@@ -76,7 +63,6 @@ async def find_user_by_id(user_id: str):
         return user_to_dict(user) if user else None
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def edit_user(user_id: str, ins: dict):
     """
     Функция редактирования данных
@@ -99,7 +85,6 @@ async def edit_user(user_id: str, ins: dict):
         return user_to_dict(user)
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def get_amount_of_users() -> int:
     """
     Функция показывающая количество пользователей
@@ -111,7 +96,6 @@ async def get_amount_of_users() -> int:
         return result.scalar()
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def show_random_users(quantity: int):
     """
     Функция для показа пользователей

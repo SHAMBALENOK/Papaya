@@ -4,8 +4,24 @@
  * ========================================================================== */
 const API_BASE = '/api/v1';
 
+function isJwtAuthError(status, data) {
+    if (status !== 401 && status !== 403) return false;
+    const detail = data && typeof data.detail === 'string' ? data.detail.toLowerCase() : '';
+    return detail.includes('access token')
+        || detail.includes('refresh token')
+        || detail.includes('token expired')
+        || detail.includes('expired token');
+}
+
+function redirectToAuthAfterJwtError() {
+    store.clear();
+    if (typeof setChrome === 'function') setChrome(false);
+    if (typeof setFab === 'function') setFab(false);
+    if (window.location.hash !== '#/auth') window.location.hash = '#/auth';
+}
+
 const api = {
-    async request(method, path, body = null, isFormData = false) {
+    async request(method, path, body = null, isFormData = false, { skipAuthRedirect = false } = {}) {
         const opts = { method, credentials: 'include', headers: {} };
         if (body && !isFormData) {
             opts.headers['Content-Type'] = 'application/json';
@@ -20,13 +36,16 @@ const api = {
         const data = await res.json().catch(() => null);
         if (!res.ok) {
             console.error(`[API] ${method} ${path} → ${res.status}`, data);
+            if (!skipAuthRedirect && isJwtAuthError(res.status, data)) {
+                redirectToAuthAfterJwtError();
+            }
         }
         return { ok: res.ok, status: res.status, data };
     },
 
-    get(path) { return this.request('GET', path); },
-    post(path, body) { return this.request('POST', path, body); },
-    postForm(path, formData) { return this.request('POST', path, formData, true); },
+    get(path, options) { return this.request('GET', path, null, false, options); },
+    post(path, body, options) { return this.request('POST', path, body, false, options); },
+    postForm(path, formData, options) { return this.request('POST', path, formData, true, options); },
 
     /* Аутентификация */
     checkAuth()  { return this.get('/auth/'); },
@@ -36,11 +55,9 @@ const api = {
 
     /* Текущий пользователь: GET /api/v1/ отдаёт полный профиль из JWT */
     getMe()      { return this.get('/'); },
-    /* Приветствие: GET /api/v1/welcome → user_id, user_name, user_surname */
-    getWelcome() { return this.get('/welcome'); },
 
     /* Главный экран: пользователь (с ролью) + все события */
-    getDashboard() { return this.get('/events/dashboard'); },
+    getDashboard(options) { return this.get('/events/dashboard', options); },
     getMyEvents()  { return this.get('/events/dashboard/my_events'); },
 
     /* Пользователи */

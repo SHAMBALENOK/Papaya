@@ -7,7 +7,6 @@ import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas, database
-from app.middlewares.task_queue import run_task
 from typing import Annotated
 import redis.asyncio as aioredis
 from app.caching.main import get_redis
@@ -35,7 +34,7 @@ async def users(
         if cached_user:
             user_obj = json.loads(cached_user)
         else:
-            user_obj = await run_task(database.users.find_user_by_id, sub)
+            user_obj = await database.users.find_user_by_id(sub)
             if not user_obj:
                 raise HTTPException(status_code=404, detail='User not found')
             await r.set(user_cache_key, json.dumps(user_obj), ex=600)
@@ -46,8 +45,8 @@ async def users(
         if cached_users:
             users_list = json.loads(cached_users)
         else:
-            quantity = await run_task(database.users.get_amount_of_users)
-            users_list = await run_task(database.users.show_random_users, quantity)
+            quantity = await database.users.get_amount_of_users()
+            users_list = await database.users.show_random_users(quantity)
             await r.set(users_cache_key, json.dumps(users_list), ex=600)
 
         return JSONResponse(status_code=200, content={
@@ -88,7 +87,7 @@ async def user_details(
         if cached:
             user_obj = json.loads(cached)
         else:
-            user_obj = await run_task(database.users.find_user_by_id, user_id)
+            user_obj = await database.users.find_user_by_id(user_id)
             if not user_obj:
                 raise HTTPException(status_code=404, detail='User not found')
             await r.set(cache_key, json.dumps(user_obj), ex=600)
@@ -120,7 +119,7 @@ async def user_edit_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        db_user = await run_task(database.users.find_user_by_email, user.email)
+        db_user = await database.users.find_user_by_email(user.email)
         if not db_user:
             raise HTTPException(status_code=404, detail='Cannot find this user in database, try something else)')
         if db_user['id'] != jwt_data.get('sub'):
@@ -140,7 +139,7 @@ async def user_edit_details(
         }
 
         clean_user = {k: v for k, v in get_user.items() if v is not None}
-        updated_user = await run_task(database.users.edit_user, user_id, clean_user)
+        updated_user = await database.users.edit_user(user_id, clean_user)
         if not updated_user:
             raise HTTPException(status_code=404, detail='Cannot find this user in database, try something else)')
 
