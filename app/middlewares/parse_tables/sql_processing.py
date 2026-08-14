@@ -5,6 +5,7 @@ import logging
 import pandas as pd
 from huggingface_hub import InferenceClient, get_token
 from huggingface_hub.errors import HfHubHTTPError
+from huggingface_hub.utils import get_session
 from app.database import events as db_events
 import uuid as uuid_mod
 from app.middlewares.task_queue import task_queue, AsyncCeleryTask, run_task
@@ -67,6 +68,56 @@ def _get_client() -> InferenceClient:
     return InferenceClient(model=MODEL_ID, token=_get_hf_token())
 
 HF_TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-ru-en"
+
+# URL классического hf-inference маршрута (совпадает с тем, что использует
+# InferenceClient): используется для резервного прямого запроса.
+ZERO_SHOT_URL = f"https://router.huggingface.co/hf-inference/models/{MODEL_ID}"
+
+
+def _raw_zero_shot_scores(text: str) -> list[float]:
+    """
+    Прямой запрос к HF Inference API в обход высокоуровневого метода.
+
+    Нужен как резервный путь: в версиях huggingface_hub <1.2.0 метод
+    zero_shot_classification() сломан — библиотека ждёт от сервера dict,
+    а сервер возвращает list, из-за чего возникает
+    "TypeError: list indices must be integers or slices, not str".
+
+    Разбор ответа сделан устойчивым: принимаем и список словарей
+    [{"sequence": ..., "labels": [...], "scores": [...]}], и одиночный dict.
+    """
+    response = get_session().post(
+        ZERO_SHOT_URL,
+        json={
+            "inputs": text,
+            "parameters": {"candidate_labels": LABELS},
+        },
+        headers={"Authorization": f"Bearer {_get_hf_token()}"},
+        timeout=(10, 120),
+    )
+    if response.status_code == 401:
+        raise RuntimeError(
+            "Hugging Face отклонил токен (401 Unauthorized). "
+            "Убедитесь, что HF_TOKEN содержит актуальный read-токен "
+            "(или fine-grained токен с разрешением \"Make calls to "
+            "Inference Providers\") и пересоздайте контейнеры/перезапустите "
+            "воркер. Ответ Hugging Face: " + (response.text or "")[:300]
+        )
+    response.raise_for_status()
+
+    payload = response.json()
+    if isinstance(payload, (list, tuple)):
+        payload = payload[0] if payload else {}
+    if not isinstance(payload, dict):
+        raise ValueError(f"Unexpected zero-shot response: {payload!r}")
+
+    scores = payload.get("scores")
+    if not isinstance(scores, (list, tuple)) or not scores:
+        score = payload.get("score")
+        scores = [score] if score is not None else []
+    if not scores:
+        raise ValueError(f"No scores in zero-shot response: {payload!r}")
+    return [float(s) for s in scores]
 
 
 async def translate_text(text, hf_client: InferenceClient | None = None):
@@ -141,6 +192,33 @@ def _extract_score(data) -> float:
     return float(score)
 
 
+def _classify_one(client: InferenceClient, translated: str) -> float:
+    """
+    Возвращает score заголовка по метке LABELS[0].
+
+    Сначала пробуем высокоуровневый zero_shot_classification(). В старых
+    версиях huggingface_hub (<1.2.0) он падает с TypeError «list indices
+    must be integers or slices, not str» из-за ошибки разбора ответа
+    сервера — тогда делаем тот же запрос напрямую и разбираем ответ сами.
+    """
+    try:
+        data = client.zero_shot_classification(translated, candidate_labels=LABELS)
+        return _extract_score(data)
+    except HfHubHTTPError:
+        raise
+    except Exception as first_error:
+        logger.warning(
+            "zero_shot_classification() failed (%s); trying raw request", first_error
+        )
+        try:
+            scores = _raw_zero_shot_scores(translated)
+        except Exception:
+            # Резервный запрос не помог — пробрасываем исходную ошибку,
+            # чтобы её обработал общий обработчик с полным трейсбеком.
+            raise first_error
+        return float(scores[0]) if scores else 0.0
+
+
 async def _classify(sentences: list) -> list:
     """
     Searches for a name in table headers and description
@@ -151,11 +229,7 @@ async def _classify(sentences: list) -> list:
     for i, sentence in enumerate(sentences):
         try:
             translated = await translate_text(sentence, hf_client=client)
-            data = client.zero_shot_classification(
-                translated,
-                candidate_labels=LABELS,
-            )
-            output[i] = _extract_score(data)
+            output[i] = _classify_one(client, translated)
             logger.info("header #%d score=%.3f (%r)", i, output[i], sentence)
         except HfHubHTTPError as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
@@ -173,6 +247,10 @@ async def _classify(sentences: list) -> list:
                 status, i, sentence,
             )
             output[i] = 0.0
+        except RuntimeError:
+            # Ошибки токена (401) из резервного запроса фатальны и не должны
+            # маскироваться нулевым скорингом.
+            raise
         except Exception as e:
             # Ошибка анализа одного заголовка не должна ронять весь импорт:
             # полный трейсбек попадает в лог, а столбец получит нулевой скоринг.
