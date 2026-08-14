@@ -37,7 +37,7 @@ async def _get_cached_user(sub: str, db: AsyncSession, r: aioredis.Redis) -> dic
     cached = await r.get(cache_key)
     if cached:
         return json.loads(cached)
-    user_obj = await run_task(database.users.find_user_by_id, sub)
+    user_obj = await database.users.find_user_by_id(sub)
     if not user_obj:
         raise HTTPException(status_code=404, detail='User not found')
     await r.set(cache_key, json.dumps(user_obj), ex=600)
@@ -75,8 +75,7 @@ async def add_event(
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
         await _get_authorized_user(jwt_data.get('sub'), db, r)  # Проверка прав
 
-        db_event = await run_task(
-            database.events.add_event,
+        db_event = await database.events.add_event(
             ins={
                 'owner': jwt_data.get('sub'),
                 'name': event.name,
@@ -122,7 +121,7 @@ async def event_edit_details(
         if cached:
             db_event = json.loads(cached)
         else:
-            db_event = await run_task(database.events.find_event_by_id, event_id)
+            db_event = await database.events.find_event_by_id(event_id)
             if not db_event:
                 raise HTTPException(status_code=404, detail='Event not found')
             await r.set(cache_key, json.dumps(db_event), ex=600)
@@ -137,7 +136,7 @@ async def event_edit_details(
 
         clean_data = {k: v for k, v in data.items() if v != 'null'}
 
-        up_event = await run_task(database.events.edit_event, event_id=event_id, ins=clean_data)
+        up_event = await database.events.edit_event(event_id=event_id, ins=clean_data)
         if not up_event:
             raise HTTPException(status_code=404, detail='Event not found')
         await r.set(cache_key, json.dumps(up_event), ex=600)
@@ -216,8 +215,8 @@ async def event_dashboard(
         if cached:
             events_list = json.loads(cached)
         else:
-            quantity = await run_task(database.events.get_amount_of_events)
-            events_list = await run_task(database.events.show_random_events, quantity)
+            quantity = await database.events.get_amount_of_events()
+            events_list = await database.events.show_random_events(quantity)
             await r.set(events_cache_key, json.dumps(events_list), ex=600)
         return JSONResponse(status_code=200, content={
             'user_id': str(user_obj['id']),       # UUID → str
@@ -249,8 +248,8 @@ async def my_event_dashboard(
         if cached_events:
             my_events = json.loads(cached_events)
         else:
-            quantity = await run_task(database.events.get_amount_of_events)
-            events_list = await run_task(database.events.show_random_events, quantity)
+            quantity = await database.events.get_amount_of_events()
+            events_list = await database.events.show_random_events(quantity)
 
             my_events = []
             for event in events_list:
@@ -297,7 +296,7 @@ async def event_details(
         if cached:
             event = json.loads(cached)
         else:
-            event = await run_task(database.events.find_event_by_id, str(event_id))
+            event = await database.events.find_event_by_id(str(event_id))
             if not event: raise HTTPException(status_code=404, detail='Page is missing')
             await r.set(cache_key, json.dumps(event), ex=600)
 

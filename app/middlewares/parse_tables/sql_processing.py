@@ -5,6 +5,7 @@ from app.database import events as db_events
 from googletrans import Translator
 import uuid as uuid_mod
 from app.middlewares.task_queue import task_queue, AsyncCeleryTask, run_task
+from app.middlewares.ai_filling.images import find_images
 
 translator = Translator()
 
@@ -74,6 +75,8 @@ async def tabulate(xlsx_path: str, owner: str):
             payload['disc'] += f'\n{i[1]}: {value}'
 
         if payload.get('name', 'null') != 'null':
-            created = await run_task(db_events.add_event, ins=payload)
+            pictures = await run_task(find_images, query=payload.get('name', 'null'))
+            payload.update(pictures)
+            created = await db_events.add_event(ins=payload)
             created_events.append(created)
     return created_events

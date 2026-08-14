@@ -7,7 +7,7 @@ const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 roun
 const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
 
 function renderAuth() {
-    if (store.user) { navigate('#/welcome'); return; }
+    if (store.user) { navigate('#/'); return; }
 
     const page = document.getElementById('page');
     page.innerHTML = `
@@ -83,7 +83,7 @@ function renderAuth() {
             role: (userData && userData.role) || 'USER',
         });
         renderHeader();
-        navigate('#/welcome');
+        navigate('#/');
     }
 
     loginForm.addEventListener('submit', async e => {

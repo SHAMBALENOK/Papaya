@@ -7,7 +7,6 @@ import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
 from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas, database
-from app.middlewares.task_queue import run_task
 from typing import Annotated
 from app.caching.main import get_redis
 import redis.asyncio as aioredis
@@ -63,11 +62,10 @@ async def register(
         check_password = re_check.is_valid_password(user.password)
         if not check_password[0]:
             raise HTTPException(status_code=400, detail=check_password[1])
-        if await run_task(database.users.find_user_by_email, user.email):
+        if await database.users.find_user_by_email(user.email):
             raise HTTPException(status_code=409, detail='You already have account')
 
-        user_data = await run_task(
-            database.users.add_user,
+        user_data = await database.users.add_user(
             ins={
                 'name': user.name,
                 'surname': user.surname,
@@ -122,7 +120,7 @@ async def login(
         r: aioredis.Redis = Depends(get_redis),
 ):
     try:
-        db_user = await run_task(database.users.find_user_by_email, user.email)
+        db_user = await database.users.find_user_by_email(user.email)
         if not db_user:
             raise HTTPException(status_code=404, detail='your email is not in database, try to register')
         else:

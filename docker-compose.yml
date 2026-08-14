@@ -101,7 +101,7 @@ services:
   celery:
     build: .
     container_name: celery
-    command: ["celery", "-A", "app.middlewares.task_queue.task_queue", "worker", "-Q", "heavy", "-l", "info", "-c", "2"]
+    command: ["celery", "-A", "app.middlewares.task_queue.task_queue", "worker", "-Q", "heavy", "-l", "info", "-c", "4"]
     environment:
       JWT_KEY: "change_this_secret_key"
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/postgres"

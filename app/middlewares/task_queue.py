@@ -19,8 +19,6 @@ task_queue.conf.update(
     result_serializer="json",
     accept_content=["json"],
     imports=(
-        "app.database.users",
-        "app.database.events",
         "app.middlewares.parse_tables.pdf_processing",
         "app.middlewares.parse_tables.sql_processing",
     ),

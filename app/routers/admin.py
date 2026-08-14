@@ -7,7 +7,6 @@ from app.caching.main import get_redis
 import app.middlewares.tokenz.main as tokenz
 from app.database.database import get_db
 from app import schemas, database
-from app.middlewares.task_queue import run_task
 from typing import Annotated
 import json
 
@@ -30,7 +29,7 @@ async def _require_admin(r: aioredis.Redis, db: AsyncSession, access_jwt, refres
     if cached:
         admin_obj = json.loads(cached)
     else:
-        admin_obj = await run_task(database.users.find_user_by_id, jwt_data.get('sub'))
+        admin_obj = await database.users.find_user_by_id(jwt_data.get('sub'))
         if not admin_obj:
             raise HTTPException(status_code=403, detail='permission denied')
         await r.set(cache_key, json.dumps(admin_obj), ex=600)
@@ -85,8 +84,8 @@ async def list_users(
         if cached:
             users = json.loads(cached)
         else:
-            quantity = await run_task(database.users.get_amount_of_users)
-            users = await run_task(database.users.show_random_users, quantity)
+            quantity = await database.users.get_amount_of_users()
+            users = await database.users.show_random_users(quantity)
             await r.set(users_cache_key, json.dumps(users), ex=600)
         return JSONResponse(status_code=200, content={
             'users': [_serialize_user(u) for u in users],
@@ -112,8 +111,8 @@ async def list_events(
         if cached:
             events = json.loads(cached)
         else:
-            quantity = await run_task(database.events.get_amount_of_events)
-            events = await run_task(database.events.show_random_events, quantity)
+            quantity = await database.events.get_amount_of_events()
+            events = await database.events.show_random_events(quantity)
             await r.set(events_cache_key, json.dumps(events), ex=600)
         return JSONResponse(status_code=200, content={
             'events': [_serialize_event(e) for e in events],
@@ -143,7 +142,7 @@ async def ban(
     try:
         await _require_admin(r, db, access_jwt, refresh_jwt)
         await r.delete(f"user:{user_id}:object")
-        updated_user = await run_task(database.users.edit_user, user_id, {'isActive': False})
+        updated_user = await database.users.edit_user(user_id, {'isActive': False})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
         return updated_user
@@ -167,7 +166,7 @@ async def unban(
     """Разблокировка пользователя (isActive = True)."""
     try:
         await _require_admin(r, db, access_jwt, refresh_jwt)
-        updated_user = await run_task(database.users.edit_user, user_id, {'isActive': True})
+        updated_user = await database.users.edit_user(user_id, {'isActive': True})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
         await r.set(f"user:{user_id}:object", json.dumps(updated_user), ex=600)
@@ -193,7 +192,7 @@ async def archive_event(
     try:
         await _require_admin(r, db, access_jwt, refresh_jwt)
         await r.delete(f"event:{event_id}")
-        updated_event = await run_task(database.events.edit_event, event_id, {'isActive': False})
+        updated_event = await database.events.edit_event(event_id, {'isActive': False})
         if not updated_event:
             raise HTTPException(status_code=404, detail='Event not found')
         return updated_event
@@ -222,12 +221,12 @@ async def grant_admin(
         if cached:
             to_user = json.loads(cached)
         else:
-            to_user = await run_task(database.users.find_user_by_id, user_id)
+            to_user = await database.users.find_user_by_id(user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'ADMIN':
             raise HTTPException(status_code=403, detail='permission denied: user is already ADMIN')
-        updated_user = await run_task(database.users.edit_user, user_id, {'role': 'ADMIN'})
+        updated_user = await database.users.edit_user(user_id, {'role': 'ADMIN'})
         await r.set(user_cache_key, json.dumps(updated_user), ex=600)
         return updated_user
     except HTTPException:
@@ -255,12 +254,12 @@ async def demote_admin(
         if cached:
             to_user = json.loads(cached)
         else:
-            to_user = await run_task(database.users.find_user_by_id, user_id)
+            to_user = await database.users.find_user_by_id(user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'USER':
             raise HTTPException(status_code=403, detail='permission denied: user is already USER')
-        updated_user = await run_task(database.users.edit_user, user_id, {'role': 'USER'})
+        updated_user = await database.users.edit_user(user_id, {'role': 'USER'})
         await r.set(user_cache_key, json.dumps(updated_user), ex=600)
         return updated_user
     except HTTPException:

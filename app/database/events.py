@@ -3,20 +3,9 @@ from sqlalchemy import select, func
 from app.database.database import AsyncSessionLocal
 from app.models.events import Events
 from app.middlewares.serializers import event_to_dict
-from app.middlewares.task_queue import task_queue, AsyncCeleryTask
 import uuid as uuid_mod
 
-DB_TASK_OPTIONS = dict(
-    base=AsyncCeleryTask,
-    time_limit=10,
-    default_retry_delay=2,
-    retry_backoff=True,
-    retry_backoff_max=6,
-    queue="heavy",
-)
 
-
-@task_queue.task(**DB_TASK_OPTIONS)
 async def add_event(ins: dict):
     """
     Функция для создания события в базе данных
@@ -37,7 +26,6 @@ async def add_event(ins: dict):
         return event_to_dict(event)
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def find_event_by_id(event_id: str):
     """
     Функция для поиска события по id
@@ -52,7 +40,6 @@ async def find_event_by_id(event_id: str):
         return event_to_dict(event) if event else None
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def show_random_events(quantity: int):
     """
     Функция для показа событий
@@ -64,7 +51,6 @@ async def show_random_events(quantity: int):
         return [event_to_dict(event) for event in result.scalars().all()]
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def edit_event(event_id: str, ins: dict):
     """
     Функция для редактирования
@@ -86,7 +72,6 @@ async def edit_event(event_id: str, ins: dict):
         return event_to_dict(event)
 
 
-@task_queue.task(**DB_TASK_OPTIONS)
 async def get_amount_of_events() -> int:
     """
     Функция показывающая количество событий

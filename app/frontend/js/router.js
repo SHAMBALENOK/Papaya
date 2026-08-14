@@ -29,6 +29,18 @@ function router() {
     const page = document.getElementById('page');
 
     try {
+        /* Визитка публична, но из авторизованной части на неё не ведём. */
+        if (path === '/welcome' || ((path === '/' || path === '') && !store.user)) {
+            setChrome(false);
+            setFab(false);
+            if (store.user) {
+                navigate('#/');
+                return;
+            }
+            renderWelcome();
+            return;
+        }
+
         if (path === '/auth') {
             setChrome(false);
             setFab(false);
@@ -37,7 +49,7 @@ function router() {
             return;
         }
 
-        /* Остальные страницы требуют сессии (кроме уже обработанного /auth) */
+        /* Все маршруты дашборда требуют активной сессии. */
         if (!store.user) {
             setChrome(false);
             setFab(false);
@@ -47,9 +59,7 @@ function router() {
 
         setChrome(true);
 
-        if (path === '/welcome') {
-            renderWelcome();
-        } else if (path === '/' || path === '') {
+        if (path === '/' || path === '') {
             renderDashboard();
         } else if (path.startsWith('/event/') && path.split('/event/')[1]) {
             renderEvent(path.split('/event/')[1]);
