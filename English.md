@@ -82,6 +82,22 @@ To view application logs in real-time:
 docker-compose logs -f
 ```
 
+### Setting Up the Hugging Face Token (HF_TOKEN)
+
+Table import uses the `facebook/bart-large-mnli` model via the Hugging Face Inference API, which requires a token:
+
+1. Create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens): type **Read** (or **Fine-grained** with the *Make calls to Inference Providers* permission).
+2. Verify the token:
+   ```bash
+   curl -s -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/api/whoami-v2
+   ```
+   A `200` response with your username means the token works. A `401 Invalid username or password` response means the token is invalid (revoked, expired, or copied incorrectly) — create a new one.
+3. Pass the token to the app:
+   - **Docker Compose:** create a `.env` file next to `docker-compose.yml` containing `HF_TOKEN=hf_...` (or export the variable in your shell) and recreate the containers: `docker compose up -d --build`.
+   - **Local run:** run `export HF_TOKEN=hf_...` before starting (or put the token in a `.env` file — the app picks it up automatically).
+
+> ⚠️ After changing the token you must recreate the containers — the token is read when the process starts, otherwise the old token keeps being sent with requests.
+
 ### 3. Stop and Cleanup
 
 To stop the services:

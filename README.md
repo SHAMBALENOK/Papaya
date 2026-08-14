@@ -85,6 +85,22 @@ docker-compose up -d --build
 docker-compose logs -f
 ```
 
+### Настройка токена Hugging Face (HF_TOKEN)
+
+Импорт таблиц использует нейросеть `facebook/bart-large-mnli` через Hugging Face Inference API, для этого нужен токен:
+
+1. Создайте токен на [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens): тип **Read** (или **Fine-grained** с разрешением *Make calls to Inference Providers*).
+2. Проверьте токен:
+   ```bash
+   curl -s -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/api/whoami-v2
+   ```
+   Ответ `200` с именем пользователя — токен рабочий. Ответ `401 Invalid username or password` — токен невалиден (отозван, просрочен или скопирован с ошибкой), создайте новый.
+3. Передайте токен приложению:
+   - **Docker Compose:** создайте рядом с `docker-compose.yml` файл `.env` со строкой `HF_TOKEN=hf_...` (или экспортируйте переменную в шелле) и пересоздайте контейнеры: `docker compose up -d --build`.
+   - **Локальный запуск:** выполните `export HF_TOKEN=hf_...` перед стартом (или положите токен в `.env` — приложение подхватит его автоматически).
+
+> ⚠️ После изменения токена обязательно пересоздайте контейнеры — токен читается при старте процесса, без перезапуска старый токен продолжит уходить в запросах.
+
 ### 3. Остановка и очистка
 
 Чтобы остановить сервисы:

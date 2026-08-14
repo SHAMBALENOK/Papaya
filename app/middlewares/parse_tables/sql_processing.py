@@ -1,6 +1,7 @@
 import os
 import pandas as pd
-from huggingface_hub import InferenceClient
+from huggingface_hub import InferenceClient, get_token
+from huggingface_hub.errors import HfHubHTTPError
 from app.database import events as db_events
 from googletrans import Translator
 import uuid as uuid_mod
@@ -9,12 +10,51 @@ from app.middlewares.ai_filling.images import find_images
 
 translator = Translator()
 
-client = InferenceClient(
-    model="facebook/bart-large-mnli",
-    token=os.getenv('HF_TOKEN')
-)
-
+MODEL_ID = "facebook/bart-large-mnli"
 LABELS = ['olympiad']
+
+# Загружаем переменные из .env, если приложение запущено не через Docker
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:  # python-dotenv может отсутствовать в минимальной установке
+    pass
+
+# Значения, которые явно означают "токен не настроен" (плейсхолдеры из шаблонов)
+_PLACEHOLDER_TOKENS = {
+    "", "your_secret_token", "your_token", "huggingface_token",
+    "hf_xxx", "hf_token", "changeme",
+}
+
+
+def _get_hf_token() -> str:
+    """
+    Читает токен Hugging Face на момент вызова.
+
+    Важно: токен читается при каждом запросе к Inference API, а не при
+    импорте модуля. Иначе обновлённый HF_TOKEN не подхватится, пока процесс
+    не перезапущен, и в Hugging Face будет уходить старый/неверный токен —
+    ровно это выглядит как 401 "Invalid username or password".
+    """
+    token = (os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN") or "").strip()
+    if token.lower() in _PLACEHOLDER_TOKENS:
+        token = ""
+    if not token:
+        # Запасной вариант: токен, сохранённый через `hf auth login`.
+        token = (get_token() or "").strip()
+    if not token or token.lower() in _PLACEHOLDER_TOKENS:
+        raise RuntimeError(
+            "Hugging Face токен не настроен. Задайте переменную окружения "
+            "HF_TOKEN (read-токен или fine-grained токен с разрешением "
+            "\"Make calls to Inference Providers\") и перезапустите сервис. "
+            "Создать токен: https://huggingface.co/settings/tokens"
+        )
+    return token
+
+
+def _get_client() -> InferenceClient:
+    """Создаёт клиент Inference API с актуальным токеном из окружения."""
+    return InferenceClient(model=MODEL_ID, token=_get_hf_token())
 
 async def translate_text(text):
     """
@@ -29,14 +69,30 @@ async def _classify(sentences: list) -> list:
     Searches for a name in table headers and description
     """
     output = {}
+    client = _get_client()
 
     for i, sentence in enumerate(sentences):
-        data = client.zero_shot_classification(
-            await translate_text(sentence),
-            candidate_labels=LABELS,
-        )
+        try:
+            data = client.zero_shot_classification(
+                await translate_text(sentence),
+                candidate_labels=LABELS,
+            )
+        except HfHubHTTPError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 401:
+                raise RuntimeError(
+                    "Hugging Face отклонил токен (401 Unauthorized). "
+                    "Убедитесь, что HF_TOKEN содержит актуальный read-токен "
+                    "(или fine-grained токен с разрешением \"Make calls to "
+                    "Inference Providers\"), и пересоздайте контейнеры/"
+                    "перезапустите воркер: токен читается при старте процесса. "
+                    f"Ответ Hugging Face: {e}"
+                ) from e
+            raise
 
-        output[i] = data[0].score
+        # .get() совместимо и с новыми версиями huggingface_hub (dataclass+dict),
+        # и со старыми (обычные dict)
+        output[i] = data[0].get("score")
 
     name = (sentences.index(sentences[max(output, key=output.get)]) ,sentences.pop(max(output, key=output.get)))
     classified = list()
