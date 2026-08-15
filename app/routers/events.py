@@ -8,12 +8,16 @@ import app.middlewares.parse_tables as table_handling
 from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas, database
 from app.middlewares.task_queue import run_task
+from app.caching.main import (
+    get_redis,
+    get_events_catalog_version,
+    bump_events_catalog_version,
+)
 from typing import Annotated
 import os
 import shutil
 import uuid as uuid_mod
 import redis.asyncio as aioredis
-from app.caching.main import get_redis
 import json
 
 events_page = APIRouter(
@@ -85,6 +89,8 @@ async def add_event(
             },
         )
         await r.set(f"event:{db_event['id']}", json.dumps(db_event), ex=600)
+        # Каталоги у всех пользователей должны обновиться сразу
+        await bump_events_catalog_version(r)
         return db_event
 
     except HTTPException:
@@ -140,6 +146,8 @@ async def event_edit_details(
         if not up_event:
             raise HTTPException(status_code=404, detail='Event not found')
         await r.set(cache_key, json.dumps(up_event), ex=600)
+        # Отредактированное событие должно сразу отразиться в каталогах
+        await bump_events_catalog_version(r)
         return up_event
 
     except HTTPException:
@@ -169,12 +177,15 @@ async def add_events_via_tables(
         user_id = jwt_data.get('sub')
         await _get_authorized_user(user_id, db, r)  # Проверка прав
 
-        tables_cache_key = f"user:{user_id}:tables"
+        filename = secure_filename(file.filename)
+        # Кэш результата импорта привязан к конкретному файлу: раньше ключ
+        # не учитывал имя файла, и загрузка ДРУГОЙ таблицы в течение 120с
+        # возвращала результат предыдущей.
+        tables_cache_key = f"user:{user_id}:tables:{filename}"
         cached = await r.get(tables_cache_key)
         if cached:
             created = json.loads(cached)
         else:
-            filename = secure_filename(file.filename)
             tools.mkdir(f"{UPLOAD_FOLDER}/{filename.split('.')[0]}")
             file_location = f"{UPLOAD_FOLDER}/{filename.split('.')[0]}/{filename}"
             with open(file_location, "wb+") as file_object:
@@ -189,6 +200,8 @@ async def add_events_via_tables(
             else:
                 raise HTTPException(status_code=400, detail='Unsupported file format')
             await r.set(tables_cache_key, json.dumps(created), ex=120)
+            # Новые события должны сразу попасть в каталоги всех пользователей
+            await bump_events_catalog_version(r)
         return created
     except HTTPException:
         raise
@@ -210,7 +223,10 @@ async def event_dashboard(
         sub = jwt_data.get('sub')
         user_obj = await _get_cached_user(sub, db, r)
 
-        events_cache_key = f"user:{sub}:events"
+        # Ключ включает версию каталога: изменение событий увеличивает
+        # версию, и кэш мгновенно устаревает без ручной очистки.
+        version = await get_events_catalog_version(r)
+        events_cache_key = f"user:{sub}:events:v{version}"
         cached = await r.get(events_cache_key)
         if cached:
             events_list = json.loads(cached)
@@ -243,7 +259,9 @@ async def my_event_dashboard(
         sub = jwt_data.get('sub')
         user_obj = await _get_cached_user(sub, db, r)
 
-        my_events_cache_key = f"user:{sub}:my_events"
+        # Ключ включает версию каталога (см. event_dashboard)
+        version = await get_events_catalog_version(r)
+        my_events_cache_key = f"user:{sub}:my_events:v{version}"
         cached_events = await r.get(my_events_cache_key)
         if cached_events:
             my_events = json.loads(cached_events)

@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Cookie
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
-from app.caching.main import get_redis
+from app.caching.main import (
+    get_redis,
+    get_events_catalog_version,
+    bump_events_catalog_version,
+)
 
 import app.middlewares.tokenz.main as tokenz
 from app.database.database import get_db
@@ -106,7 +110,10 @@ async def list_events(
     """Все события со статусом активности (для архивирования)."""
     try:
         admin_obj = await _require_admin(r, db, access_jwt, refresh_jwt)
-        events_cache_key = f"user:{admin_obj.get('id')}:events"
+        # Ключ включает версию каталога: после изменений событий кэш
+        # устаревает мгновенно (см. app/caching/main.py)
+        version = await get_events_catalog_version(r)
+        events_cache_key = f"user:{admin_obj.get('id')}:events:v{version}"
         cached = await r.get(events_cache_key)
         if cached:
             events = json.loads(cached)
@@ -195,6 +202,8 @@ async def archive_event(
         updated_event = await database.events.edit_event(event_id, {'isActive': False})
         if not updated_event:
             raise HTTPException(status_code=404, detail='Event not found')
+        # Архивация должна сразу отразиться в каталогах всех пользователей
+        await bump_events_catalog_version(r)
         return updated_event
     except HTTPException:
         raise

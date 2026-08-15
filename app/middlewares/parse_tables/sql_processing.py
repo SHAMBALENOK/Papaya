@@ -10,6 +10,7 @@ from app.database import events as db_events
 import uuid as uuid_mod
 from app.middlewares.task_queue import task_queue, AsyncCeleryTask, run_task
 from app.middlewares.ai_filling.images import find_images
+from app.caching.main import bump_events_catalog_version_from_worker
 
 logger = logging.getLogger(__name__)
 
@@ -312,4 +313,12 @@ async def tabulate(xlsx_path: str, owner: str):
                 )
             created = await db_events.add_event(ins=payload)
             created_events.append(created)
+
+    if created_events:
+        # События созданы в воркере — сбрасываем кэш каталога напрямую,
+        # чтобы новые события сразу появились в каталоге у всех пользователей.
+        try:
+            await bump_events_catalog_version_from_worker()
+        except Exception as e:
+            logger.warning("Failed to invalidate events catalog cache: %s", e)
     return created_events
