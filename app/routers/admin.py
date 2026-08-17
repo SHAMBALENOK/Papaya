@@ -1,155 +1,156 @@
-from fastapi import APIRouter, Depends, HTTPException, Cookie
+from typing import Annotated
+
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Cookie, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-import redis.asyncio as aioredis
-from app.caching.main import get_redis
 
-import app.middlewares.tokenz.main as tokenz
+from app import database, schemas
+from app.caching.main import (
+    cache_event_after_write,
+    cache_user_after_write,
+    get_cached_events,
+    get_cached_user,
+    get_cached_users,
+    get_redis,
+)
 from app.database.database import get_db
-from app import schemas, database
-from typing import Annotated
-import json
+import app.middlewares.tokenz.main as tokenz
+
 
 admin_page = APIRouter(
     prefix='/admin',
-    tags=['administration']
+    tags=['administration'],
 )
 
 
-# ---------------------------------------------------------------------------
-# Вспомогательные функции
-# ---------------------------------------------------------------------------
-
-async def _require_admin(r: aioredis.Redis, db: AsyncSession, access_jwt, refresh_jwt):
-    """Проверяет JWT и роль ADMIN. Возвращает dict администратора
-    (из кэша или БД) либо бросает 401/403."""
+async def _require_admin(
+    r: aioredis.Redis,
+    access_jwt: str | None,
+    refresh_jwt: str | None,
+) -> dict:
+    """Проверить JWT и роль ADMIN, используя актуальную версию пользователя."""
     jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-    cache_key = f"user:{jwt_data.get('sub')}:object"
-    cached = await r.get(cache_key)
-    if cached:
-        admin_obj = json.loads(cached)
-    else:
-        admin_obj = await database.users.find_user_by_id(jwt_data.get('sub'))
-        if not admin_obj:
-            raise HTTPException(status_code=403, detail='permission denied')
-        await r.set(cache_key, json.dumps(admin_obj), ex=600)
-    if admin_obj.get('role') != 'ADMIN':
+    user_id = jwt_data.get('sub')
+    admin_obj = await get_cached_user(
+        r,
+        user_id,
+        lambda: database.users.find_user_by_id(user_id),
+    )
+    if not admin_obj or admin_obj.get('role') != 'ADMIN':
         raise HTTPException(status_code=403, detail='permission denied')
     return admin_obj
 
 
-def _serialize_user(u: dict) -> dict:
+def _serialize_user(user: dict) -> dict:
     """Пользователь для админ-панели: роль и активность обязательны."""
     return {
-        'id': u.get('id'),
-        'name': u.get('name'),
-        'surname': u.get('surname'),
-        'email': u.get('email'),
-        'role': u.get('role'),
-        'isActive': u.get('isActive'),
-        'createdAt': u.get('createdAt'),
+        'id': user.get('id'),
+        'name': user.get('name'),
+        'surname': user.get('surname'),
+        'email': user.get('email'),
+        'role': user.get('role'),
+        'isActive': user.get('isActive'),
+        'createdAt': user.get('createdAt'),
     }
 
 
-def _serialize_event(e: dict) -> dict:
+def _serialize_event(event: dict) -> dict:
     return {
-        'id': e.get('id'),
-        'owner': e.get('owner'),
-        'name': e.get('name'),
-        'disc': e.get('disc'),
-        'preview_picture': e.get('preview_picture'),
-        'picture': e.get('picture'),
-        'isActive': e.get('isActive'),
-        'createdAt': e.get('createdAt'),
-        'updatedAt': e.get('updatedAt'),
+        'id': event.get('id'),
+        'owner': event.get('owner'),
+        'name': event.get('name'),
+        'disc': event.get('disc'),
+        'preview_picture': event.get('preview_picture'),
+        'picture': event.get('picture'),
+        'isActive': event.get('isActive'),
+        'createdAt': event.get('createdAt'),
+        'updatedAt': event.get('updatedAt'),
     }
 
-
-# ---------------------------------------------------------------------------
-# Списки (данные для страницы #/admin)
-# ---------------------------------------------------------------------------
 
 @admin_page.get('/users')
 async def list_users(
-        db: AsyncSession = Depends(get_db),
-        r: aioredis.Redis = Depends(get_redis),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
-    """Все пользователи с ролями и статусом активности."""
+    """Все пользователи, включая заблокированных."""
     try:
-        admin_obj = await _require_admin(r, db, access_jwt, refresh_jwt)
-        users_cache_key = f"user:{admin_obj.get('id')}:users"
-        cached = await r.get(users_cache_key)
-        if cached:
-            users = json.loads(cached)
-        else:
-            quantity = await database.users.get_amount_of_users()
-            users = await database.users.show_random_users(quantity)
-            await r.set(users_cache_key, json.dumps(users), ex=600)
-        return JSONResponse(status_code=200, content={
-            'users': [_serialize_user(u) for u in users],
-        })
+        await _require_admin(r, access_jwt, refresh_jwt)
+        users = await get_cached_users(
+            r,
+            True,
+            lambda: database.users.list_users(include_inactive=True),
+        )
+        return JSONResponse(
+            status_code=200,
+            content={'users': [_serialize_user(user) for user in users]},
+        )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}',
+        )
 
 
 @admin_page.get('/events')
 async def list_events(
-        db: AsyncSession = Depends(get_db),
-        r: aioredis.Redis = Depends(get_redis),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
-    """Все события со статусом активности (для архивирования)."""
+    """Все события, включая архивные."""
     try:
-        admin_obj = await _require_admin(r, db, access_jwt, refresh_jwt)
-        events_cache_key = f"user:{admin_obj.get('id')}:events"
-        cached = await r.get(events_cache_key)
-        if cached:
-            events = json.loads(cached)
-        else:
-            quantity = await database.events.get_amount_of_events()
-            events = await database.events.show_random_events(quantity)
-            await r.set(events_cache_key, json.dumps(events), ex=600)
-        return JSONResponse(status_code=200, content={
-            'events': [_serialize_event(e) for e in events],
-        })
+        await _require_admin(r, access_jwt, refresh_jwt)
+        events = await get_cached_events(
+            r,
+            'all',
+            lambda: database.events.list_events(active_only=False),
+        )
+        return JSONResponse(
+            status_code=200,
+            content={'events': [_serialize_event(event) for event in events]},
+        )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}',
+        )
 
-
-# ---------------------------------------------------------------------------
-# Действия
-# ---------------------------------------------------------------------------
 
 @admin_page.get(
     '/ban/{user_id}',
     response_model=schemas.users.UserResponse,
 )
 async def ban(
-        user_id: str,
-        db: AsyncSession = Depends(get_db),
-        r: aioredis.Redis = Depends(get_redis),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
-    """Блокировка пользователя (isActive = False)."""
+    """Заблокировать пользователя (isActive = False)."""
     try:
-        await _require_admin(r, db, access_jwt, refresh_jwt)
-        await r.delete(f"user:{user_id}:object")
+        await _require_admin(r, access_jwt, refresh_jwt)
         updated_user = await database.users.edit_user(user_id, {'isActive': False})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
+        await cache_user_after_write(r, updated_user)
         return updated_user
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}',
+        )
 
 
 @admin_page.get(
@@ -157,24 +158,27 @@ async def ban(
     response_model=schemas.users.UserResponse,
 )
 async def unban(
-        user_id: str,
-        db: AsyncSession = Depends(get_db),
-        r: aioredis.Redis = Depends(get_redis),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
-    """Разблокировка пользователя (isActive = True)."""
+    """Разблокировать пользователя (isActive = True)."""
     try:
-        await _require_admin(r, db, access_jwt, refresh_jwt)
+        await _require_admin(r, access_jwt, refresh_jwt)
         updated_user = await database.users.edit_user(user_id, {'isActive': True})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await r.set(f"user:{user_id}:object", json.dumps(updated_user), ex=600)
+        await cache_user_after_write(r, updated_user)
         return updated_user
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}',
+        )
 
 
 @admin_page.get(
@@ -182,24 +186,32 @@ async def unban(
     response_model=schemas.events.EventResponse,
 )
 async def archive_event(
-        event_id: str,
-        db: AsyncSession = Depends(get_db),
-        r: aioredis.Redis = Depends(get_redis),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
-    """Перенос события в архив (isActive = False)."""
+    """Перенести событие в архив (isActive = False)."""
     try:
-        await _require_admin(r, db, access_jwt, refresh_jwt)
-        await r.delete(f"event:{event_id}")
-        updated_event = await database.events.edit_event(event_id, {'isActive': False})
+        await _require_admin(r, access_jwt, refresh_jwt)
+        updated_event = await database.events.edit_event(
+            event_id,
+            {'isActive': False},
+        )
         if not updated_event:
             raise HTTPException(status_code=404, detail='Event not found')
+        # Обновляет карточку события и меняет поколение всех списков. Поэтому
+        # каталог сразу скрывает архивное событие, а админка видит его архивным.
+        await cache_event_after_write(r, updated_event)
         return updated_event
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}',
+        )
 
 
 @admin_page.get(
@@ -207,32 +219,40 @@ async def archive_event(
     response_model=schemas.users.UserResponse,
 )
 async def grant_admin(
-        user_id: str,
-        db: AsyncSession = Depends(get_db),
-        r: aioredis.Redis = Depends(get_redis),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
-    """Назначение роли ADMIN."""
+    """Назначить роль ADMIN."""
     try:
-        await _require_admin(r, db, access_jwt, refresh_jwt)
-        user_cache_key = f"user:{user_id}:object"
-        cached = await r.get(user_cache_key)
-        if cached:
-            to_user = json.loads(cached)
-        else:
-            to_user = await database.users.find_user_by_id(user_id)
+        await _require_admin(r, access_jwt, refresh_jwt)
+        to_user = await get_cached_user(
+            r,
+            user_id,
+            lambda: database.users.find_user_by_id(user_id),
+        )
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'ADMIN':
-            raise HTTPException(status_code=403, detail='permission denied: user is already ADMIN')
+            raise HTTPException(
+                status_code=403,
+                detail='permission denied: user is already ADMIN',
+            )
+
         updated_user = await database.users.edit_user(user_id, {'role': 'ADMIN'})
-        await r.set(user_cache_key, json.dumps(updated_user), ex=600)
+        if not updated_user:
+            raise HTTPException(status_code=404, detail='User not found')
+        await cache_user_after_write(r, updated_user)
         return updated_user
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}',
+        )
 
 
 @admin_page.get(
@@ -240,29 +260,37 @@ async def grant_admin(
     response_model=schemas.users.UserResponse,
 )
 async def demote_admin(
-        user_id: str,
-        db: AsyncSession = Depends(get_db),
-        r: aioredis.Redis = Depends(get_redis),
-        access_jwt: Annotated[str | None, Cookie()] = None,
-        refresh_jwt: Annotated[str | None, Cookie()] = None,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
-    """Снятие роли ADMIN (до USER)."""
+    """Снять роль ADMIN до USER."""
     try:
-        await _require_admin(r, db, access_jwt, refresh_jwt)
-        user_cache_key = f"user:{user_id}:object"
-        cached = await r.get(user_cache_key)
-        if cached:
-            to_user = json.loads(cached)
-        else:
-            to_user = await database.users.find_user_by_id(user_id)
+        await _require_admin(r, access_jwt, refresh_jwt)
+        to_user = await get_cached_user(
+            r,
+            user_id,
+            lambda: database.users.find_user_by_id(user_id),
+        )
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'USER':
-            raise HTTPException(status_code=403, detail='permission denied: user is already USER')
+            raise HTTPException(
+                status_code=403,
+                detail='permission denied: user is already USER',
+            )
+
         updated_user = await database.users.edit_user(user_id, {'role': 'USER'})
-        await r.set(user_cache_key, json.dumps(updated_user), ex=600)
+        if not updated_user:
+            raise HTTPException(status_code=404, detail='User not found')
+        await cache_user_after_write(r, updated_user)
         return updated_user
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'App has broken caused by error\n{e}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'App has broken caused by error\n{e}',
+        )

@@ -12,13 +12,11 @@ pydantic[email]
 bcrypt
 pandas
 numpy==1.26.4
-huggingface_hub
 opencv-python-headless
-googletrans
 python-multipart
 redis
 celery[redis]
-AsyncDDGS
+ddgs>=9.14.4,<10
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.2.2+cpu

@@ -1,17 +1,15 @@
-import asyncio
+from app.middlewares.task_queue import run_task
+
 from . import pdf_processing as pdf
 from . import sql_processing as sql
 
 
 async def pdf_to_db(pdfname: str, owner: str):
-    """
-    Runs the PDF -> Excel -> SQL workflow as a Celery chain.
+    """Извлечь таблицу из PDF в worker и обработать XLSX без Celery-лимита.
 
-    extract_data() produces the xlsx path which is passed automatically to
-    tabulate() as its first argument; the result of the chain is the list of
-    created events (serializable dicts).
+    В Celery отправляется только CPU-intensive OCR. Полученный XLSX затем
+    обрабатывается обычной async-функцией в API-процессе, поэтому tabulate не
+    наследует worker time limit и не запускает синхронные подзадачи.
     """
-    chain = (pdf.extract_data.s(pdfname) | sql.tabulate.s(owner)).apply_async()
-    return await asyncio.to_thread(chain.get)
-
-#TODO: add error handling
+    xlsx_path = await run_task(pdf.extract_data, pdfname)
+    return await sql.tabulate(xlsx_path, owner)

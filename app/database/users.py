@@ -1,34 +1,32 @@
-import bcrypt
-from datetime import datetime, timezone
-from sqlalchemy import select, func
-from app.database.database import AsyncSessionLocal
-from app.models.users import Users
-from app.middlewares.serializers import user_to_dict
 import uuid as uuid_mod
+from datetime import datetime, timezone
+
+import bcrypt
+from sqlalchemy import func, select
+
+from app.database.database import AsyncSessionLocal
+from app.middlewares.serializers import user_to_dict
+from app.models.users import Users
 
 
 def _full_user_dict(user) -> dict:
-    """
-    Сериализация пользователя вместе с хэшем пароля.
-
-    Пароль нужен при входе (проверка пароля), поэтому в отличие от
-    user_to_dict() он сохраняется в результате задачи.
-    """
+    """Сериализовать пользователя вместе с хэшем пароля для входа."""
     data = user_to_dict(user)
     data['password'] = user.password
     return data
 
 
 async def add_user(ins: dict):
-    """
-    Функция для создания пользователя в базе данных
-    """
+    """Создать пользователя в базе данных."""
     salt = bcrypt.gensalt(rounds=12)
     user = Users(
         name=ins.get('name'),
         surname=ins.get('surname'),
         email=ins.get('email'),
-        password=bcrypt.hashpw(ins.get('password').encode('utf-8'), salt).decode('utf-8'),
+        password=bcrypt.hashpw(
+            ins.get('password').encode('utf-8'),
+            salt,
+        ).decode('utf-8'),
     )
     async with AsyncSessionLocal() as session:
         session.add(user)
@@ -38,9 +36,7 @@ async def add_user(ins: dict):
 
 
 async def find_user_by_email(email: str):
-    """
-    Функция для поиска пользователя по email
-    """
+    """Найти пользователя по email (включая хэш пароля)."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Users).where(Users.email == email)
@@ -50,9 +46,7 @@ async def find_user_by_email(email: str):
 
 
 async def find_user_by_id(user_id: str):
-    """
-    Функция для поиска пользователя по id
-    """
+    """Найти пользователя по id без выдачи хэша пароля."""
     if isinstance(user_id, str):
         user_id = uuid_mod.UUID(user_id)
     async with AsyncSessionLocal() as session:
@@ -64,9 +58,7 @@ async def find_user_by_id(user_id: str):
 
 
 async def edit_user(user_id: str, ins: dict):
-    """
-    Функция редактирования данных
-    """
+    """Изменить данные пользователя."""
     if isinstance(user_id, str):
         user_id = uuid_mod.UUID(user_id)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -85,10 +77,26 @@ async def edit_user(user_id: str, ins: dict):
         return user_to_dict(user)
 
 
+async def list_users(
+    *,
+    include_inactive: bool = False,
+    limit: int | None = None,
+) -> list[dict]:
+    """Вернуть пользователей для публичного или административного списка."""
+    statement = select(Users)
+    if not include_inactive:
+        statement = statement.where(Users.isActive.is_(True))
+    statement = statement.order_by(Users.createdAt.desc(), Users.id)
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(statement)
+        return [user_to_dict(user) for user in result.scalars().all()]
+
+
 async def get_amount_of_users() -> int:
-    """
-    Функция показывающая количество пользователей
-    """
+    """Вернуть общее количество пользователей."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(func.count()).select_from(Users)
@@ -97,11 +105,5 @@ async def get_amount_of_users() -> int:
 
 
 async def show_random_users(quantity: int):
-    """
-    Функция для показа пользователей
-    """
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Users).where(Users.isActive == True).limit(quantity)
-        )
-        return [user_to_dict(user) for user in result.scalars().all()]
+    """Обратная совместимость: вернуть активных пользователей."""
+    return await list_users(include_inactive=False, limit=quantity)
