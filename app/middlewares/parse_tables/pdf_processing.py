@@ -15,17 +15,25 @@ def get_ocr():
     return _ocr
 
 
-@task_queue.task(time_limit=60 ,default_retry_delay=30, retry_backoff=True, retry_backoff_max=120, queue="heavy")
+@task_queue.task(
+    time_limit=None,
+    soft_time_limit=None,
+    queue='heavy',
+)
 def extract_data(pdfname):
-    base_name = os.path.basename(pdfname).split('.')[0]
-    dir_path = f'../../tables/{base_name}'
+    # PDF уже сохранён маршрутом в TABLES_DIR, который одинаково смонтирован в
+    # web и celery. XLSX необходимо создавать рядом с исходным PDF: прежний
+    # относительный путь попадал в каталог внутри celery-контейнера, не
+    # разделяемый с web, поэтому следующий этап не находил готовый файл.
+    pdf_path = os.path.abspath(pdfname)
+    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    output_dir = os.path.dirname(pdf_path)
+    os.makedirs(output_dir, exist_ok=True)
 
-    os.makedirs(dir_path, exist_ok=True)
+    temp_output_path = os.path.join(output_dir, f'{base_name}_temp.xlsx')
+    final_output_path = os.path.join(output_dir, f'{base_name}.xlsx')
 
-    temp_output_path = os.path.join(dir_path, f'{base_name}_temp.xlsx')
-    final_output_path = os.path.join(dir_path, f'{base_name}.xlsx')
-
-    pdf = PDF(src=pdfname)
+    pdf = PDF(src=pdf_path)
 
     pdf.to_xlsx(temp_output_path,
                 ocr=get_ocr(),
