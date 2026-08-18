@@ -20,8 +20,6 @@
 
 Papaya is a web service for school students that brings information about nationwide and regional academic competitions together in one place. Users can register, manage their profiles, and browse educational events.
 
-Project demo: https://papaya-bm5w.onrender.com/ (the first request after an idle period may take some time).
-
 ## Changelog
 
 ### Current version
@@ -166,7 +164,3 @@ Every API route uses the `/api/v1` prefix. The complete interactive schema is av
 | `POST` | `/api/v1/user/<user_id>/edit_info` | Update the current user's profile | Profile owner |
 | `GET` | `/api/v1/admin/users` | Manage users | `ADMIN` |
 | `GET` | `/api/v1/admin/events` | Manage events and the archive | `ADMIN` |
-
-## License
-
-This project is distributed under the MIT License.
