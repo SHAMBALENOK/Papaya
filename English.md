@@ -16,7 +16,6 @@
 - [Prerequisites](#prerequisites)
 - [Local Setup](#local-setup)
 - [API and Routes](#api-and-routes)
-- [License](#license)
 
 Papaya is a web service for school students that brings information about nationwide and regional academic competitions together in one place. Users can register, manage their profiles, and browse educational events.
 
