@@ -164,7 +164,3 @@ docker compose down -v
 | `POST` | `/api/v1/user/<user_id>/edit_info` | Изменение собственного профиля | Владелец профиля |
 | `GET` | `/api/v1/admin/users` | Управление пользователями | `ADMIN` |
 | `GET` | `/api/v1/admin/events` | Управление событиями и архивом | `ADMIN` |
-
-## Лицензия
-
-Проект распространяется по лицензии MIT.
