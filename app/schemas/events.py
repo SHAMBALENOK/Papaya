@@ -9,25 +9,25 @@ class EventBase(BaseModel):
     disc: Optional[str] = None
     preview_picture: Optional[str] = None
     picture: Optional[str] = None
-    isActive: bool
+    isActive: bool = True
 
     @field_validator('id', mode='before')
     @classmethod
     def _empty_id_to_none(cls, v):
-        # клиент шлёт id: '' — превращаем в None, чтобы не падать на валидации UUID
         return None if v == '' or v is None else v
 
 class EventCreate(EventBase):
-    owner: str
-    createdAt: datetime
-    updatedAt: datetime
+    """Создание события. owner, createdAt, updatedAt задаются сервером."""
+    isActive: bool = True
 
-class EventUpdate(EventBase):
-    createdAt: datetime
-    updatedAt: datetime
+class EventUpdate(BaseModel):
+    """Частичное обновление события. Все поля опциональны."""
+    name: Optional[str] = None
+    disc: Optional[str] = None
+    preview_picture: Optional[str] = None
+    picture: Optional[str] = None
 
 class EventResponse(EventBase):
-    # Добавлено: даты отдаются на страницу события
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 

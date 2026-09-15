@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import database
+from app import database, schemas
 from app.caching.main import get_cached_user, get_redis, redis_lifespan
 from app.database.database import db_lifespan, get_db
 import app.middlewares.tokenz.main as tokenz
@@ -43,7 +43,17 @@ async def get_user_from_cache_or_db(
     )
 
 
-@app.get('/api/v1/')
+@app.get(
+    '/api/v1/',
+    response_model=schemas.users.UserResponse,
+    responses={
+        200: {'description': 'Current user profile'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Invalid token'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
 async def main(
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
@@ -65,7 +75,7 @@ async def main(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 

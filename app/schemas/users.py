@@ -8,18 +8,28 @@ class UserBase(BaseModel):
     name: str
     surname: str
     email: EmailStr
-    isActive: bool
+    isActive: bool = True
 
     @field_validator('id', mode='before')
     @classmethod
     def _empty_id_to_none(cls, v):
-        # клиент шлёт id: '' — превращаем в None, чтобы не падать на валидации UUID
         return None if v == '' or v is None else v
 
 class UserCreate(UserBase):
+    """Регистрация. isActive задаётся сервером."""
+    password: str
+    isActive: bool = True
+
+class LoginRequest(BaseModel):
+    """Логин: достаточно email и пароля."""
+    email: EmailStr
     password: str
 
-class UserUpdate(UserBase):
+class UserUpdate(BaseModel):
+    """Частичное обновление профиля. role и isActive нельзя менять через этот endpoint."""
+    name: Optional[str] = None
+    surname: Optional[str] = None
+    email: Optional[EmailStr] = None
     gender: Optional[str] = None
     bday: Optional[str] = None
     bio: Optional[str] = None
@@ -27,7 +37,6 @@ class UserUpdate(UserBase):
     country: Optional[str] = None
     region: Optional[str] = None
     status: Optional[str] = None
-    role: str
 
 class UserResponse(UserBase):
     gender: Optional[str] = None
@@ -36,10 +45,10 @@ class UserResponse(UserBase):
     phone: Optional[str] = None
     country: Optional[str] = None
     region: Optional[str] = None
-    status: Optional[str] = None # i.e. школьник студент учитель и проч
-    # Добавлено: роль и дата регистрации нужны профилю и админ-панели
+    status: Optional[str] = None
     role: str = 'USER'
     createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
 
     class Config:
         from_attributes = True
