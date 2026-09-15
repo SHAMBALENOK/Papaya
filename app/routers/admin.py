@@ -1,8 +1,10 @@
-from typing import Annotated
+import uuid
+from typing import Annotated, List
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
@@ -42,6 +44,36 @@ async def _require_admin(
     return admin_obj
 
 
+class AdminUserListItem(BaseModel):
+    id: str | None = None
+    name: str | None = None
+    surname: str | None = None
+    email: str | None = None
+    role: str | None = None
+    isActive: bool | None = None
+    createdAt: str | None = None
+
+
+class AdminUsersResponse(BaseModel):
+    users: List[AdminUserListItem]
+
+
+class AdminEventListItem(BaseModel):
+    id: str | None = None
+    owner: str | None = None
+    name: str | None = None
+    disc: str | None = None
+    preview_picture: str | None = None
+    picture: str | None = None
+    isActive: bool | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class AdminEventsResponse(BaseModel):
+    events: List[AdminEventListItem]
+
+
 def _serialize_user(user: dict) -> dict:
     """Пользователь для админ-панели: роль и активность обязательны."""
     return {
@@ -69,7 +101,16 @@ def _serialize_event(event: dict) -> dict:
     }
 
 
-@admin_page.get('/users')
+@admin_page.get(
+    '/users',
+    response_model=AdminUsersResponse,
+    responses={
+        200: {'description': 'List of all users including inactive'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        500: {'description': 'Internal server error'},
+    },
+)
 async def list_users(
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
@@ -93,11 +134,20 @@ async def list_users(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
-@admin_page.get('/events')
+@admin_page.get(
+    '/events',
+    response_model=AdminEventsResponse,
+    responses={
+        200: {'description': 'List of all events including archived'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        500: {'description': 'Internal server error'},
+    },
+)
 async def list_events(
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
@@ -121,16 +171,23 @@ async def list_events(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
-@admin_page.get(
+@admin_page.post(
     '/ban/{user_id}',
     response_model=schemas.users.UserResponse,
+    responses={
+        200: {'description': 'User banned successfully'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
 )
 async def ban(
-    user_id: str,
+    user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -149,16 +206,23 @@ async def ban(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
-@admin_page.get(
+@admin_page.post(
     '/unban/{user_id}',
     response_model=schemas.users.UserResponse,
+    responses={
+        200: {'description': 'User unbanned successfully'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
 )
 async def unban(
-    user_id: str,
+    user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -177,16 +241,23 @@ async def unban(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
-@admin_page.get(
+@admin_page.post(
     '/archive_event/{event_id}',
     response_model=schemas.events.EventResponse,
+    responses={
+        200: {'description': 'Event archived successfully'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Event not found'},
+        500: {'description': 'Internal server error'},
+    },
 )
 async def archive_event(
-    event_id: str,
+    event_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -210,16 +281,23 @@ async def archive_event(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
-@admin_page.get(
+@admin_page.post(
     '/grant_admin/{user_id}',
     response_model=schemas.users.UserResponse,
+    responses={
+        200: {'description': 'Admin role granted'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required or user is already ADMIN'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
 )
 async def grant_admin(
-    user_id: str,
+    user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -237,8 +315,8 @@ async def grant_admin(
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'ADMIN':
             raise HTTPException(
-                status_code=403,
-                detail='permission denied: user is already ADMIN',
+                status_code=409,
+                detail='User is already ADMIN',
             )
 
         updated_user = await database.users.edit_user(user_id, {'role': 'ADMIN'})
@@ -251,16 +329,23 @@ async def grant_admin(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
-@admin_page.get(
+@admin_page.post(
     '/demote_admin/{user_id}',
     response_model=schemas.users.UserResponse,
+    responses={
+        200: {'description': 'Admin role removed'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required or user is already USER'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
 )
 async def demote_admin(
-    user_id: str,
+    user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -278,8 +363,8 @@ async def demote_admin(
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'USER':
             raise HTTPException(
-                status_code=403,
-                detail='permission denied: user is already USER',
+                status_code=409,
+                detail='User is already USER',
             )
 
         updated_user = await database.users.edit_user(user_id, {'role': 'USER'})
@@ -292,5 +377,5 @@ async def demote_admin(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )

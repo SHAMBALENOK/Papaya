@@ -1,8 +1,10 @@
-from typing import Annotated
+import uuid
+from typing import Annotated, List
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
@@ -22,7 +24,44 @@ user_page = APIRouter(
 )
 
 
-@user_page.get('/users')
+class UserListItem(BaseModel):
+    id: str | None = None
+    name: str | None = None
+    surname: str | None = None
+    email: str | None = None
+    gender: str | None = None
+    bday: str | None = None
+    bio: str | None = None
+    phone: str | None = None
+    country: str | None = None
+    region: str | None = None
+    status: str | None = None
+    role: str | None = None
+    isActive: bool | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class UsersListResponse(BaseModel):
+    user_id: str | None = None
+    user_name: str | None = None
+    user_surname: str | None = None
+    user_email: str | None = None
+    user_role: str | None = None
+    users: List[UserListItem]
+
+
+@user_page.get(
+    '/users',
+    response_model=UsersListResponse,
+    responses={
+        200: {'description': 'Current user info and list of active users'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Invalid token'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
 async def users(
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
@@ -61,7 +100,7 @@ async def users(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
@@ -69,15 +108,15 @@ async def users(
     '/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'description': 'OK'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
+        200: {'description': 'User profile'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Invalid token'},
         404: {'description': 'User not found'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def user_details(
-    user_id: str,
+    user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -98,7 +137,7 @@ async def user_details(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
 
 
@@ -106,15 +145,15 @@ async def user_details(
     '/{user_id}/edit_info',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'description': 'OK'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
-        404: {'description': 'Cannot find this user in database'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        200: {'description': 'Profile updated'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Cannot edit other user\'s profile'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def user_edit_details(
-    user_id: str,
+    user_id: uuid.UUID,
     user: schemas.users.UserUpdate,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
@@ -127,41 +166,28 @@ async def user_edit_details(
         if str(user_id) != current_user_id:
             raise HTTPException(
                 status_code=403,
-                detail='It looks like you are trying to change not your profile',
+                detail='You can only edit your own profile',
             )
 
-        db_user = await database.users.find_user_by_email(user.email)
-        if not db_user:
-            raise HTTPException(
-                status_code=404,
-                detail='Cannot find this user in database, try something else)',
-            )
-        if str(db_user['id']) != current_user_id:
+        db_user = await database.users.find_user_by_email(user.email) if user.email else None
+        if user.email and db_user and str(db_user['id']) != current_user_id:
             raise HTTPException(
                 status_code=403,
-                detail='It looks like you are trying to change not your profile',
+                detail='Email is already taken by another user',
             )
 
-        user_data = {
-            'name': user.name,
-            'surname': user.surname,
-            'gender': user.gender,
-            'bday': user.bday,
-            'bio': user.bio,
-            'phone': user.phone,
-            'country': user.country,
-            'region': user.region,
-            'status': user.status,
-            'role': user.role,
-        }
-        clean_user = {
-            key: value for key, value in user_data.items() if value is not None
-        }
-        updated_user = await database.users.edit_user(user_id, clean_user)
+        user_data = user.model_dump(exclude_unset=True)
+        if not user_data:
+            raise HTTPException(
+                status_code=400,
+                detail='No fields to update',
+            )
+
+        updated_user = await database.users.edit_user(user_id, user_data)
         if not updated_user:
             raise HTTPException(
                 status_code=404,
-                detail='Cannot find this user in database, try something else)',
+                detail='User not found',
             )
 
         await cache_user_after_write(r, updated_user)
@@ -171,5 +197,5 @@ async def user_edit_details(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )

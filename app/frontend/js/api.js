@@ -51,7 +51,7 @@ const api = {
     checkAuth()  { return this.get('/auth/'); },
     register(d)  { return this.post('/auth/register', d); },
     login(d)     { return this.post('/auth/login', d); },
-    logout()     { return this.get('/auth/logout'); },
+    logout()     { return this.post('/auth/logout'); },
 
     /* Текущий пользователь: GET /api/v1/ отдаёт полный профиль из JWT */
     getMe()      { return this.get('/'); },
@@ -74,9 +74,9 @@ const api = {
     /* Администрирование (роль ADMIN на бэкенде) */
     adminUsers()     { return this.get('/admin/users'); },
     adminEvents()    { return this.get('/admin/events'); },
-    banUser(id)      { return this.get(`/admin/ban/${id}`); },
-    unbanUser(id)    { return this.get(`/admin/unban/${id}`); },
-    grantAdmin(id)   { return this.get(`/admin/grant_admin/${id}`); },
-    demoteAdmin(id)  { return this.get(`/admin/demote_admin/${id}`); },
-    archiveEvent(id) { return this.get(`/admin/archive_event/${id}`); },
+    banUser(id)      { return this.post(`/admin/ban/${id}`); },
+    unbanUser(id)    { return this.post(`/admin/unban/${id}`); },
+    grantAdmin(id)   { return this.post(`/admin/grant_admin/${id}`); },
+    demoteAdmin(id)  { return this.post(`/admin/demote_admin/${id}`); },
+    archiveEvent(id) { return this.post(`/admin/archive_event/${id}`); },
 };

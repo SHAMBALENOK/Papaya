@@ -25,10 +25,9 @@ auth_page = APIRouter(
 @auth_page.get(
     '/',
     responses={
-        200: {'description': 'OK'},
-        403: {'description': 'Invalid token or already signed in'},
-        401: {'description': 'Access or refresh token missing'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        200: {'description': 'OK — not signed in'},
+        403: {'description': 'Already signed in'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def auth(
@@ -40,25 +39,28 @@ async def auth(
         token = await tokenz.jwt_check(access_jwt, refresh_jwt)
         if token:
             raise HTTPException(status_code=403, detail='Already signed in')
+        return JSONResponse(status_code=200, content=None)
     except HTTPException as e:
-        if e.status_code in (401, 403):
+        if e.status_code == 401:
             return JSONResponse(status_code=200, content=None)
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
 
 
 @auth_page.post(
     '/register',
     response_model=schemas.users.UserResponse,
+    status_code=201,
     responses={
-        200: {'description': 'OK'},
+        201: {'description': 'User created successfully'},
         400: {'description': 'Incorrect password format'},
-        409: {'description': 'You already have account'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        409: {'description': 'Account already exists'},
+        422: {'description': 'Validation error'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def register(
@@ -103,7 +105,7 @@ async def register(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
 
 
@@ -111,15 +113,15 @@ async def register(
     '/login',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'description': 'OK'},
-        404: {'description': 'Email is not in database'},
-        401: {'description': 'Incorrect email or password'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        200: {'description': 'Login successful'},
+        401: {'description': 'Invalid email or password'},
+        422: {'description': 'Validation error'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def login(
     response: Response,
-    user: schemas.users.UserCreate,
+    user: schemas.users.LoginRequest,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
 ):
@@ -127,13 +129,13 @@ async def login(
         db_user = await database.users.find_user_by_email(user.email)
         if not db_user:
             raise HTTPException(
-                status_code=404,
-                detail='your email is not in database, try to register',
+                status_code=401,
+                detail='Invalid email or password',
             )
         if not tools.check_password(user.password, db_user['password']):
             raise HTTPException(
                 status_code=401,
-                detail='incorrect email or password',
+                detail='Invalid email or password',
             )
 
         response.set_cookie(
@@ -163,17 +165,17 @@ async def login(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
 
 
-@auth_page.get(
+@auth_page.post(
     '/logout',
     responses={
-        200: {'description': 'OK'},
-        403: {'description': 'Invalid refresh or access token'},
-        401: {'description': 'Access or refresh token missing'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        200: {'description': 'Logged out successfully'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Invalid token'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def logout(
@@ -185,12 +187,11 @@ async def logout(
         response = JSONResponse(status_code=200, content=None)
         response.delete_cookie('access_jwt')
         response.delete_cookie('refresh_jwt')
-        # Logout does not mutate a user, so it must not invalidate shared data.
         return response
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )

@@ -1,11 +1,12 @@
 import os
 import shutil
 import uuid as uuid_mod
-from typing import Annotated
+from typing import Annotated, List
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from werkzeug.utils import secure_filename
 
@@ -28,7 +29,6 @@ events_page = APIRouter(
     tags=['events'],
 )
 
-# Каталог загрузок: в Docker задаётся TABLES_DIR=/app/app/tables.
 UPLOAD_FOLDER = os.getenv(
     'TABLES_DIR',
     os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tables')),
@@ -56,14 +56,25 @@ async def _get_authorized_user(sub: str, r: aioredis.Redis) -> dict:
     return user_obj
 
 
+class DashboardUser(BaseModel):
+    user_id: str | None = None
+    user_name: str | None = None
+    user_surname: str | None = None
+    user_email: str | None = None
+    user_role: str | None = None
+    events: List[schemas.events.EventResponse]
+
+
 @events_page.post(
     '/add_event',
     response_model=schemas.events.EventResponse,
+    status_code=201,
     responses={
-        200: {'description': 'OK'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        201: {'description': 'Event created successfully'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Editor or admin role required'},
+        422: {'description': 'Validation error'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def add_event(
@@ -94,7 +105,7 @@ async def add_event(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
 
 
@@ -102,16 +113,17 @@ async def add_event(
     '/edit_event/{event_id}',
     response_model=schemas.events.EventResponse,
     responses={
-        200: {'description': 'OK'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
+        200: {'description': 'Event updated'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Editor or admin role required'},
         404: {'description': 'Event not found'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        422: {'description': 'Validation error'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def event_edit_details(
-    event_id: str,
-    event: schemas.events.EventCreate,
+    event_id: uuid_mod.UUID,
+    event: schemas.events.EventUpdate,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
@@ -129,18 +141,16 @@ async def event_edit_details(
         if not db_event:
             raise HTTPException(status_code=404, detail='Event not found')
 
-        data = {
-            'owner': event.owner,
-            'name': event.name,
-            'disc': event.disc,
-            'preview_picture': event.preview_picture,
-            'picture': event.picture,
-        }
-        clean_data = {key: value for key, value in data.items() if value != 'null'}
+        update_data = event.model_dump(exclude_unset=True)
+        if not update_data:
+            raise HTTPException(
+                status_code=400,
+                detail='No fields to update',
+            )
 
         updated_event = await database.events.edit_event(
             event_id=event_id,
-            ins=clean_data,
+            ins=update_data,
         )
         if not updated_event:
             raise HTTPException(status_code=404, detail='Event not found')
@@ -151,7 +161,7 @@ async def event_edit_details(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
 
 
@@ -159,11 +169,11 @@ async def event_edit_details(
     '/add_events_via_tables',
     response_model=list[schemas.events.EventResponse],
     responses={
-        200: {'description': 'OK'},
+        200: {'description': 'Events imported successfully'},
         400: {'description': 'Unsupported file format'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Editor or admin role required'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def add_events_via_tables(
@@ -211,11 +221,21 @@ async def add_events_via_tables(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
 
 
-@events_page.get('/dashboard')
+@events_page.get(
+    '/dashboard',
+    response_model=DashboardUser,
+    responses={
+        200: {'description': 'Dashboard with user info and active events'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Invalid token'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
 async def event_dashboard(
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
@@ -247,11 +267,21 @@ async def event_dashboard(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
-@events_page.get('/dashboard/my_events')
+@events_page.get(
+    '/dashboard/my_events',
+    response_model=DashboardUser,
+    responses={
+        200: {'description': 'Dashboard with user info and own events'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Invalid token'},
+        404: {'description': 'User not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
 async def my_event_dashboard(
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
@@ -283,7 +313,7 @@ async def my_event_dashboard(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail=f'Internal server error: {e}',
         )
 
 
@@ -291,11 +321,11 @@ async def my_event_dashboard(
     '/{event_id}',
     response_model=schemas.events.EventResponse,
     responses={
-        200: {'description': 'OK'},
-        401: {'description': 'Access or refresh token missing'},
-        403: {'description': 'Invalid refresh or access token'},
-        404: {'description': 'Page is missing'},
-        500: {'description': 'Something has broken ¯\\_(ツ)_/¯'},
+        200: {'description': 'Event details'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Invalid token'},
+        404: {'description': 'Event not found'},
+        500: {'description': 'Internal server error'},
     },
 )
 async def event_details(
@@ -314,12 +344,12 @@ async def event_details(
             lambda: database.events.find_event_by_id(event_id_string),
         )
         if not event:
-            raise HTTPException(status_code=404, detail='Page is missing')
+            raise HTTPException(status_code=404, detail='Event not found')
         return event
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯',
+            detail=f'Internal server error: {e}',
         )
