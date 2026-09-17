@@ -16,9 +16,17 @@ class EventBase(BaseModel):
     def _empty_id_to_none(cls, v):
         return None if v == '' or v is None else v
 
-class EventCreate(EventBase):
-    """Создание события. owner, createdAt, updatedAt задаются сервером."""
-    isActive: bool = True
+
+class EventCreate(BaseModel):
+    """Создание события.
+
+    Контракт: id, owner, isActive, createdAt и updatedAt задаёт сервер.
+    Поля name/disc/preview_picture/picture приходят от клиента.
+    """
+    name: str
+    disc: Optional[str] = None
+    preview_picture: Optional[str] = None
+    picture: Optional[str] = None
 
 class EventUpdate(BaseModel):
     """Частичное обновление события. Все поля опциональны."""
@@ -28,6 +36,7 @@ class EventUpdate(BaseModel):
     picture: Optional[str] = None
 
 class EventResponse(EventBase):
+    owner: Optional[UUID] = None
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 

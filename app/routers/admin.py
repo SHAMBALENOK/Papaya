@@ -289,10 +289,11 @@ async def archive_event(
     '/grant_admin/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'description': 'Admin role granted'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required or user is already ADMIN'},
-        404: {'description': 'User not found'},
+200: {'description': 'Admin role granted'},
+         401: {'description': 'Access token missing'},
+         403: {'description': 'Admin role required'},
+         404: {'description': 'User not found'},
+         409: {'description': 'User is already ADMIN'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -337,10 +338,11 @@ async def grant_admin(
     '/demote_admin/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'description': 'Admin role removed'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required or user is already USER'},
-        404: {'description': 'User not found'},
+200: {'description': 'Admin role removed'},
+         401: {'description': 'Access token missing'},
+         403: {'description': 'Admin role required'},
+         404: {'description': 'User not found'},
+         409: {'description': 'User is already USER'},
         500: {'description': 'Internal server error'},
     },
 )
