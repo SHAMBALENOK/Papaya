@@ -17,7 +17,7 @@ from app import database, schemas
 from app.caching.main import get_cached_user, get_redis, redis_lifespan
 from app.database.database import db_lifespan, get_db
 import app.middlewares.tokenz.main as tokenz
-from app.routers import admin, auth, events, user
+from app.routers import admin, auth, events, health, user
 
 
 logger = logging.getLogger('papaya.main')
@@ -38,6 +38,7 @@ app.include_router(user.user_page, prefix='/api/v1')
 app.include_router(events.events_page, prefix='/api/v1')
 app.include_router(auth.auth_page, prefix='/api/v1')
 app.include_router(admin.admin_page, prefix='/api/v1')
+app.include_router(health.health_page)
 
 
 async def get_user_from_cache_or_db(
