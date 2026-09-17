@@ -15,6 +15,7 @@ from app.caching.main import (
     get_cached_users,
     get_redis,
 )
+from app.core.cache_guard import safe_cache_write
 from app.database.database import get_db
 import app.middlewares.tokenz.main as tokenz
 
@@ -195,7 +196,7 @@ async def user_edit_details(
                 detail='User not found',
             )
 
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise

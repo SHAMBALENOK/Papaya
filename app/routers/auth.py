@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_cached_user, get_redis
+from app.core.cache_guard import safe_cache_write
 from app.core.config import COOKIE_SECURE
 from app.database.database import get_db
 import app.middlewares.re_check as re_check
@@ -135,7 +136,9 @@ async def register(
                 'password': user.password,
             },
         )
-        await cache_user_after_write(r, user_data)
+        if user_data is None:
+            raise HTTPException(status_code=409, detail='You already have account')
+        await safe_cache_write(cache_user_after_write(r, user_data))
 
         _set_auth_cookies(
             response,
@@ -196,10 +199,12 @@ async def login(
 
         # Заполняем новую версию через общий cache-aside helper. Пароль в Redis
         # не попадает, а конкурентное изменение профиля не может быть затёрто.
-        await get_cached_user(
-            r,
-            str(db_user['id']),
-            lambda: database.users.find_user_by_id(str(db_user['id'])),
+        await safe_cache_write(
+            get_cached_user(
+                r,
+                str(db_user['id']),
+                lambda: database.users.find_user_by_id(str(db_user['id'])),
+            )
         )
         return db_user
     except HTTPException:

@@ -20,6 +20,7 @@ from app.caching.main import (
     get_cached_user,
     get_redis,
 )
+from app.core.cache_guard import safe_cache_write
 from app.core.config import ALLOWED_TABLE_EXTENSIONS, TABLES_DIR
 from app.database.database import get_db
 import app.middlewares.parse_tables as table_handling
@@ -96,7 +97,7 @@ async def add_event(
                 'picture': event.picture,
             },
         )
-        await cache_event_after_write(r, db_event)
+        await safe_cache_write(cache_event_after_write(r, db_event))
         return db_event
     except HTTPException:
         raise
@@ -163,7 +164,7 @@ async def event_edit_details(
         )
         if not updated_event:
             raise HTTPException(status_code=404, detail='Event not found')
-        await cache_event_after_write(r, updated_event)
+        await safe_cache_write(cache_event_after_write(r, updated_event))
         return updated_event
     except HTTPException:
         raise
@@ -224,7 +225,7 @@ async def add_events_via_tables(
                 user_id,
             )
 
-        await cache_events_after_write(r, created)
+        await safe_cache_write(cache_events_after_write(r, created))
         return created
     except HTTPException:
         raise

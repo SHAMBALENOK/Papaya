@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database.base import Base
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import DateTime, Column, String, Boolean
@@ -29,5 +29,15 @@ class Users(Base):
     role = Column(String, default='USER')
     isActive = Column(Boolean, default=True)
     # Индекс помогает сортировке списков пользователей по дате создания.
-    createdAt = Column(DateTime, default=datetime.now, index=True)
-    updatedAt = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    # Timezone-aware, как и в events, чтобы обе таблицы имели общий контракт
+    # времени (миграция 0003 выровняла legacy-колонки).
+    createdAt = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+    updatedAt = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

@@ -17,6 +17,7 @@ from app.caching.main import (
     get_cached_users,
     get_redis,
 )
+from app.core.cache_guard import safe_cache_write
 from app.database.database import get_db
 import app.middlewares.tokenz.main as tokenz
 
@@ -204,7 +205,7 @@ async def ban(
         updated_user = await database.users.edit_user(user_id, {'isActive': False})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
@@ -240,7 +241,7 @@ async def unban(
         updated_user = await database.users.edit_user(user_id, {'isActive': True})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
@@ -281,7 +282,7 @@ async def archive_event(
             raise HTTPException(status_code=404, detail='Event not found')
         # Обновляет карточку события и меняет поколение всех списков. Поэтому
         # каталог сразу скрывает архивное событие, а админка видит его архивным.
-        await cache_event_after_write(r, updated_event)
+        await safe_cache_write(cache_event_after_write(r, updated_event))
         return updated_event
     except HTTPException:
         raise
@@ -331,7 +332,7 @@ async def grant_admin(
         updated_user = await database.users.edit_user(user_id, {'role': 'ADMIN'})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
@@ -381,7 +382,7 @@ async def demote_admin(
         updated_user = await database.users.edit_user(user_id, {'role': 'USER'})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
