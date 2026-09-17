@@ -130,7 +130,7 @@ async def event_edit_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        await _get_authorized_user(jwt_data.get('sub'), r)
+        editor = await _get_authorized_user(jwt_data.get('sub'), r)
 
         db_event = await get_cached_event(
             r,
@@ -139,6 +139,16 @@ async def event_edit_details(
         )
         if not db_event:
             raise HTTPException(status_code=404, detail='Event not found')
+
+        # Object-level проверка: EDITOR редактирует только свои события,
+        # ADMIN — любые.
+        if editor.get('role') == 'EDITOR' and str(db_event['owner']) != str(
+            jwt_data.get('sub')
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail='You can only edit your own events',
+            )
 
         update_data = event.model_dump(exclude_unset=True)
         if not update_data:
