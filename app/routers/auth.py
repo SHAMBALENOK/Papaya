@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_cached_user, get_redis
+from app.core.config import COOKIE_SECURE
 from app.database.database import get_db
 import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
@@ -23,6 +24,52 @@ auth_page = APIRouter(
 )
 
 logger = logging.getLogger('papaya.auth')
+
+
+def _set_auth_cookies(response: Response, access_jwt: str, refresh_jwt: str) -> None:
+    """Записать JWT в HttpOnly-куки.
+
+    ``secure=True`` ставится только в production (COOKIE_SECURE), чтобы локальная
+    разработка по HTTP продолжала работать. ``SameSite=Lax`` отсекает
+    state-changing cross-site запросы (базовая защита от CSRF) и не мешает
+    обычной навигации SPA.
+    """
+    response.set_cookie(
+        key='access_jwt',
+        value=access_jwt,
+        max_age=600,
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
+    response.set_cookie(
+        key='refresh_jwt',
+        value=refresh_jwt,
+        max_age=1209600,
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    """Снять HttpOnly-куки при logout с теми же параметрами."""
+    response.delete_cookie(
+        'access_jwt',
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
+    response.delete_cookie(
+        'refresh_jwt',
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
 
 
 @auth_page.get(
@@ -90,18 +137,13 @@ async def register(
         )
         await cache_user_after_write(r, user_data)
 
-        response.set_cookie(
-            key='access_jwt',
-            value=await tokenz.create_jwt(ins={'sub': user_data['id']}),
-            max_age=600,
-        )
-        response.set_cookie(
-            key='refresh_jwt',
-            value=await tokenz.create_jwt(
+        _set_auth_cookies(
+            response,
+            access_jwt=await tokenz.create_jwt(ins={'sub': user_data['id']}),
+            refresh_jwt=await tokenz.create_jwt(
                 ins={'sub': user_data['id']},
                 is_refresh=True,
             ),
-            max_age=1209600,
         )
         return user_data
     except HTTPException:
@@ -143,18 +185,13 @@ async def login(
                 detail='Invalid email or password',
             )
 
-        response.set_cookie(
-            key='access_jwt',
-            value=await tokenz.create_jwt(ins={'sub': db_user['id']}),
-            max_age=600,
-        )
-        response.set_cookie(
-            key='refresh_jwt',
-            value=await tokenz.create_jwt(
+        _set_auth_cookies(
+            response,
+            access_jwt=await tokenz.create_jwt(ins={'sub': db_user['id']}),
+            refresh_jwt=await tokenz.create_jwt(
                 ins={'sub': db_user['id']},
                 is_refresh=True,
             ),
-            max_age=1209600,
         )
 
         # Заполняем новую версию через общий cache-aside helper. Пароль в Redis
@@ -191,8 +228,7 @@ async def logout(
     try:
         await tokenz.jwt_check(access_jwt, refresh_jwt)
         response = JSONResponse(status_code=200, content=None)
-        response.delete_cookie('access_jwt')
-        response.delete_cookie('refresh_jwt')
+        _clear_auth_cookies(response)
         return response
     except HTTPException:
         raise
