@@ -21,7 +21,7 @@ from app.caching.main import (
     get_redis,
 )
 from app.core.cache_guard import safe_cache_write
-from app.core.config import ALLOWED_TABLE_EXTENSIONS, TABLES_DIR
+from app.core.config import ALLOWED_TABLE_EXTENSIONS, MAX_UPLOAD_MB, TABLES_DIR
 from app.database.database import get_db
 import app.middlewares.parse_tables as table_handling
 import app.middlewares.tokenz.main as tokenz
@@ -178,12 +178,13 @@ async def event_edit_details(
 
 @events_page.post(
     '/add_events_via_tables',
-    response_model=list[schemas.events.EventResponse],
+response_model=list[schemas.events.EventResponse],
     responses={
         200: {'description': 'Events imported successfully'},
         400: {'description': 'Unsupported file format'},
         401: {'description': 'Access token missing'},
         403: {'description': 'Editor or admin role required'},
+        413: {'description': 'File exceeds the upload size limit'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -209,24 +210,37 @@ async def add_events_via_tables(
         upload_dir = os.path.join(TABLES_DIR, uuid_mod.uuid4().hex)
         os.makedirs(upload_dir, exist_ok=False)
         file_location = os.path.join(upload_dir, filename)
+        max_bytes = MAX_UPLOAD_MB * 1024 * 1024
         try:
+            # Чтение с лимитом: копируем по чанку и прерываемся, если файл
+            # превышает MAX_UPLOAD_MB (защита от неограниченного потребления
+            # диска/CPU при парсинге PDF и XLSX).
+            written = 0
             with open(file_location, 'wb') as file_object:
-                shutil.copyfileobj(file.file, file_object)
+                while chunk := await file.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f'File exceeds the {MAX_UPLOAD_MB} MB limit',
+                        )
+                    file_object.write(chunk)
+
+            if extension == '.pdf':
+                created = await table_handling.main.pdf_to_db(file_location, user_id)
+            else:
+                # XLSX обрабатывается напрямую: здесь нет Celery-задачи, а значит
+                # нет worker time limit и синхронного ожидания AsyncResult.
+                created = await table_handling.sql_processing.tabulate(
+                    file_location,
+                    user_id,
+                )
+
+            await safe_cache_write(cache_events_after_write(r, created))
+            return created
         finally:
             await file.close()
-
-        if extension == '.pdf':
-            created = await table_handling.main.pdf_to_db(file_location, user_id)
-        else:
-            # XLSX обрабатывается напрямую: здесь нет Celery-задачи, а значит
-            # нет worker time limit и синхронного ожидания AsyncResult.
-            created = await table_handling.sql_processing.tabulate(
-                file_location,
-                user_id,
-            )
-
-        await safe_cache_write(cache_events_after_write(r, created))
-        return created
+            shutil.rmtree(upload_dir, ignore_errors=True)
     except HTTPException:
         raise
     except Exception:
