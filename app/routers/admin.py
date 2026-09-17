@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated, List
 
@@ -24,6 +25,8 @@ admin_page = APIRouter(
     prefix='/admin',
     tags=['administration'],
 )
+
+logger = logging.getLogger('papaya.admin')
 
 
 async def _require_admin(
@@ -131,10 +134,11 @@ async def list_users(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -168,10 +172,11 @@ async def list_events(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -203,10 +208,11 @@ async def ban(
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -238,10 +244,11 @@ async def unban(
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -278,10 +285,11 @@ async def archive_event(
         return updated_event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -327,10 +335,11 @@ async def grant_admin(
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -376,8 +385,9 @@ async def demote_admin(
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )

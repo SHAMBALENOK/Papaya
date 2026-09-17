@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated, List
 
@@ -22,6 +23,8 @@ user_page = APIRouter(
     prefix='/user',
     tags=['users'],
 )
+
+logger = logging.getLogger('papaya.user')
 
 
 class UserListItem(BaseModel):
@@ -97,10 +100,11 @@ async def users(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -134,10 +138,11 @@ async def user_details(
         return user_obj
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -194,8 +199,9 @@ async def user_edit_details(
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )

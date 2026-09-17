@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated
 
@@ -20,6 +21,8 @@ auth_page = APIRouter(
     prefix='/auth',
     tags=['authentication'],
 )
+
+logger = logging.getLogger('papaya.auth')
 
 
 @auth_page.get(
@@ -44,10 +47,11 @@ async def auth(
         if e.status_code == 401:
             return JSONResponse(status_code=200, content=None)
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -102,10 +106,11 @@ async def register(
         return user_data
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -162,10 +167,11 @@ async def login(
         return db_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -190,8 +196,9 @@ async def logout(
         return response
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )

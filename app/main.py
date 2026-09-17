@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -9,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import validate_config
+from app.core.errors import install_exception_handlers
 
 validate_config()
 from app import database, schemas
@@ -16,6 +18,9 @@ from app.caching.main import get_cached_user, get_redis, redis_lifespan
 from app.database.database import db_lifespan, get_db
 import app.middlewares.tokenz.main as tokenz
 from app.routers import admin, auth, events, user
+
+
+logger = logging.getLogger('papaya.main')
 
 
 @asynccontextmanager
@@ -26,6 +31,8 @@ async def main_lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=main_lifespan)
+
+install_exception_handlers(app)
 
 app.include_router(user.user_page, prefix='/api/v1')
 app.include_router(events.events_page, prefix='/api/v1')
@@ -75,10 +82,11 @@ async def main(
         return JSONResponse(status_code=200, content=user_dict)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -108,10 +116,11 @@ async def welcome(
         )
     except HTTPException:
         return JSONResponse(status_code=200, content={})
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'App has broken caused by error\n{e}',
+            detail='Internal server error',
         )
 
 

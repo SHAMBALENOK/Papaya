@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import uuid as uuid_mod
@@ -29,6 +30,8 @@ events_page = APIRouter(
     prefix='/events',
     tags=['events'],
 )
+
+logger = logging.getLogger('papaya.events')
 
 
 async def _get_cached_user(sub: str, r: aioredis.Redis) -> dict:
@@ -97,10 +100,11 @@ async def add_event(
         return db_event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -153,10 +157,11 @@ async def event_edit_details(
         return updated_event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -213,10 +218,11 @@ async def add_events_via_tables(
         return created
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -259,10 +265,11 @@ async def event_dashboard(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -305,10 +312,11 @@ async def my_event_dashboard(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -343,8 +351,9 @@ async def event_details(
         return event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
