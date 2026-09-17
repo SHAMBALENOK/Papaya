@@ -748,8 +748,8 @@ Papaya строит:
 - [ ] Rate limiting.
 - [ ] Security headers.
 - [ ] Structured logging.
-- [ ] Healthcheck.
-- [ ] Нормальные error responses.
+- [X] Healthcheck.
+- [X] Нормальные error responses.
 - [ ] API documentation.
 - [ ] Проверка CORS/CSRF.
 
