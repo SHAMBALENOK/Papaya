@@ -6,6 +6,12 @@ from sqlalchemy import DateTime, Column, String, Boolean
 
 
 class Users(Base):
+    """Пользователь Papaya.
+
+    Роль может быть одной из: USER (обычный школьник), EDITOR (создаёт и
+    правит события) или ADMIN (администратор платформы).
+    """
+
     __tablename__ = 'users'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -22,5 +28,6 @@ class Users(Base):
     status = Column(String, nullable=True)
     role = Column(String, default='USER')
     isActive = Column(Boolean, default=True)
-    createdAt = Column(DateTime, default=datetime.now)
+    # Индекс помогает сортировке списков пользователей по дате создания.
+    createdAt = Column(DateTime, default=datetime.now, index=True)
     updatedAt = Column(DateTime, default=datetime.now, onupdate=datetime.now)
