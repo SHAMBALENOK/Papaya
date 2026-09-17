@@ -46,6 +46,8 @@ Papaya — веб-сервис для школьников, где в одном
 
 ## Стек технологий
 
+![architecturemap](./docs/ArchitectureMap.png)
+
 - **Backend:** Python 3.11, FastAPI, Gunicorn, Uvicorn
 - **Frontend:** HTML, CSS, JavaScript SPA, Tailwind CSS
 - **База данных:** PostgreSQL 16, SQLAlchemy (async ORM), asyncpg
