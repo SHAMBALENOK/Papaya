@@ -6,7 +6,6 @@
 нет: иначе схема на production и в тестах разъезжается с миграциями.
 """
 
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,9 +16,13 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-DATABASE_URL = os.getenv('DATABASE_URL')
-if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
-    DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://', 1)
+from app.core.config import DATABASE_URL
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        'DATABASE_URL is not set. Set it (e.g. '
+        'postgresql+asyncpg://user:pass@host:5432/db) before starting the app.'
+    )
 
 # NullPool: каждая задача/запрос получает своё соединение; пул не переживает
 # разные event loop'ы (Celery asyncio.run).

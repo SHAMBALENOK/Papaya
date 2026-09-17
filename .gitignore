@@ -2,3 +2,12 @@
 .idea/
 __pycache__/
 test.py
+
+# Секреты и локальное окружение
+.env
+.env.*
+!.env.example
+
+# Загруженные таблицы (пользовательские PDF/XLSX на диске)
+app/tables/*
+!app/tables/README.md

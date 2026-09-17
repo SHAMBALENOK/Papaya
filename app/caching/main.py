@@ -7,7 +7,6 @@ new generation with stale data.
 """
 
 import json
-import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Awaitable, Callable, TypeVar
@@ -15,22 +14,12 @@ from typing import Any, AsyncGenerator, Awaitable, Callable, TypeVar
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 
+from app.core.config import CACHE_TTL, REDIS_URL
+
 
 T = TypeVar('T')
 _MISSING = object()
 
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-
-
-CACHE_TTL = _env_int('CACHE_TTL', 600)
-REDIS_URL = os.getenv('REDIS_URL')
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
-REDIS_PORT = _env_int('REDIS_PORT', 6379)
 
 _USERS_VERSION_KEY = 'papaya:cache:users:version'
 _EVENTS_VERSION_KEY = 'papaya:cache:events:version'
@@ -62,16 +51,11 @@ def _events_data_key(scope: str, version: int) -> str:
 
 
 def _connection_pool() -> aioredis.ConnectionPool:
-    options = {
-        'decode_responses': True,
-        'max_connections': 20,
-    }
-    if REDIS_URL:
-        return aioredis.ConnectionPool.from_url(REDIS_URL, **options)
-    return aioredis.ConnectionPool(
-        host=REDIS_HOST,
-        port=REDIS_PORT,
-        **options,
+    """Пул соединений Redis: URL всегда вычислен в конфигурации."""
+    return aioredis.ConnectionPool.from_url(
+        REDIS_URL,
+        decode_responses=True,
+        max_connections=20,
     )
 
 

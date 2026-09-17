@@ -19,6 +19,7 @@ from app.caching.main import (
     get_cached_user,
     get_redis,
 )
+from app.core.config import ALLOWED_TABLE_EXTENSIONS, TABLES_DIR
 from app.database.database import get_db
 import app.middlewares.parse_tables as table_handling
 import app.middlewares.tokenz.main as tokenz
@@ -28,12 +29,6 @@ events_page = APIRouter(
     prefix='/events',
     tags=['events'],
 )
-
-UPLOAD_FOLDER = os.getenv(
-    'TABLES_DIR',
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tables')),
-)
-_ALLOWED_TABLE_EXTENSIONS = {'.pdf', '.xlsx'}
 
 
 async def _get_cached_user(sub: str, r: aioredis.Redis) -> dict:
@@ -190,12 +185,12 @@ async def add_events_via_tables(
 
         filename = secure_filename(file.filename or '')
         extension = os.path.splitext(filename)[1].lower()
-        if not filename or extension not in _ALLOWED_TABLE_EXTENSIONS:
+        if not filename or extension not in ALLOWED_TABLE_EXTENSIONS:
             raise HTTPException(status_code=400, detail='Unsupported file format')
 
         # У каждого импорта свой каталог. Результат POST-запроса намеренно не
         # кэшируется: повторная загрузка обязана создать события из нового файла.
-        upload_dir = os.path.join(UPLOAD_FOLDER, uuid_mod.uuid4().hex)
+        upload_dir = os.path.join(TABLES_DIR, uuid_mod.uuid4().hex)
         os.makedirs(upload_dir, exist_ok=False)
         file_location = os.path.join(upload_dir, filename)
         try:

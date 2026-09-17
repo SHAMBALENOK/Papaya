@@ -8,6 +8,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import validate_config
+
+validate_config()
 from app import database, schemas
 from app.caching.main import get_cached_user, get_redis, redis_lifespan
 from app.database.database import db_lifespan, get_db
