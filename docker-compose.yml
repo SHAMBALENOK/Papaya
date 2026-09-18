@@ -62,12 +62,19 @@ services:
     build: .
     container_name: web
     environment:
-      JWT_KEY: "change_this_secret_key"
-      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/postgres"
-      HF_TOKEN: "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"
+      ENVIRONMENT: "${ENVIRONMENT:-development}"
+      # ВАЖНО: реальный HF_TOKEN был случайно добавлен в этот файл ранее.
+      # Он удалён; сам токен нужно отозвать на https://huggingface.co/settings/tokens.
+      # Если токен потребуется снова, передавайте его через .env:
+      #   HF_TOKEN: "${HF_TOKEN:-}"
+      JWT_KEY: "${JWT_KEY:-change_this_secret_key}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/postgres}"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
+      CACHE_TTL: "${CACHE_TTL:-600}"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-30}"
       TABLES_DIR: "/app/app/tables"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
     ports:
       - "5000:5000"
     volumes:
@@ -79,7 +86,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -103,11 +110,13 @@ services:
     container_name: celery
     command: ["celery", "-A", "app.middlewares.task_queue.task_queue", "worker", "-Q", "heavy", "-l", "info", "-c", "4"]
     environment:
-      JWT_KEY: "change_this_secret_key"
-      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/postgres"
-      HF_TOKEN: "your_secret_hf_token"
+      ENVIRONMENT: "${ENVIRONMENT:-development}"
+      JWT_KEY: "${JWT_KEY:-change_this_secret_key}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/postgres}"
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
+      CACHE_TTL: "${CACHE_TTL:-600}"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-30}"
       TABLES_DIR: "/app/app/tables"
     volumes:
       - ./app/tables:/app/app/tables
@@ -118,6 +127,42 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - project
+
+  test:
+    image: papaya-web:latest
+    profiles: ["testing"]
+    container_name: papaya-test
+    command: >
+      sh -c "pip install --no-cache-dir -q -r /app/requirements-dev.txt &&
+             pytest -q"
+    environment:
+      ENVIRONMENT: "testing"
+      JWT_KEY: "pytest_secret_key_for_local_tests_only"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/papaya_test"
+      DATABASE_URL_TEST: "postgresql+asyncpg://postgres:postgres@postgres:5432/papaya_test"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_URL: "redis://redis:6379/0"
+      CACHE_TTL: "60"
+      MAX_UPLOAD_MB: "1"
+      TABLES_DIR: "/tmp/papaya-tables-test"
+      TABLE_IMPORT_IMAGES: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Тесты запускаются против рабочего дерева, а не против кода,
+      # запечённого в образ: правки в app/ и tests/ подхватываются без rebuild.
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./tests:/app/tests
+      - ./pytest.ini:/app/pytest.ini
+      - ./alembic.ini:/app/alembic.ini
+      - ./requirements-dev.txt:/app/requirements-dev.txt
     networks:
       - project
 

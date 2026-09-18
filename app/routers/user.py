@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated, List
 
@@ -5,6 +6,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
@@ -14,6 +16,7 @@ from app.caching.main import (
     get_cached_users,
     get_redis,
 )
+from app.core.cache_guard import safe_cache_write
 from app.database.database import get_db
 import app.middlewares.tokenz.main as tokenz
 
@@ -22,6 +25,8 @@ user_page = APIRouter(
     prefix='/user',
     tags=['users'],
 )
+
+logger = logging.getLogger('papaya.user')
 
 
 class UserListItem(BaseModel):
@@ -97,10 +102,11 @@ async def users(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -134,10 +140,11 @@ async def user_details(
         return user_obj
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -190,12 +197,21 @@ async def user_edit_details(
                 detail='User not found',
             )
 
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except IntegrityError:
+        # Редкая гонка: email занят другим пользователем уже после pre-check.
+        # Отдаём честный 409 вместо 500.
+        logger.warning('Email uniqueness conflict on user %s edit', user_id)
+        raise HTTPException(
+            status_code=409,
+            detail='Email is already taken by another user',
+        )
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )

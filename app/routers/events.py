@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import uuid as uuid_mod
@@ -19,6 +20,8 @@ from app.caching.main import (
     get_cached_user,
     get_redis,
 )
+from app.core.cache_guard import safe_cache_write
+from app.core.config import ALLOWED_TABLE_EXTENSIONS, MAX_UPLOAD_MB, TABLES_DIR
 from app.database.database import get_db
 import app.middlewares.parse_tables as table_handling
 import app.middlewares.tokenz.main as tokenz
@@ -29,11 +32,7 @@ events_page = APIRouter(
     tags=['events'],
 )
 
-UPLOAD_FOLDER = os.getenv(
-    'TABLES_DIR',
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tables')),
-)
-_ALLOWED_TABLE_EXTENSIONS = {'.pdf', '.xlsx'}
+logger = logging.getLogger('papaya.events')
 
 
 async def _get_cached_user(sub: str, r: aioredis.Redis) -> dict:
@@ -98,14 +97,15 @@ async def add_event(
                 'picture': event.picture,
             },
         )
-        await cache_event_after_write(r, db_event)
+        await safe_cache_write(cache_event_after_write(r, db_event))
         return db_event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -131,7 +131,7 @@ async def event_edit_details(
 ):
     try:
         jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        await _get_authorized_user(jwt_data.get('sub'), r)
+        editor = await _get_authorized_user(jwt_data.get('sub'), r)
 
         db_event = await get_cached_event(
             r,
@@ -140,6 +140,16 @@ async def event_edit_details(
         )
         if not db_event:
             raise HTTPException(status_code=404, detail='Event not found')
+
+        # Object-level проверка: EDITOR редактирует только свои события,
+        # ADMIN — любые.
+        if editor.get('role') == 'EDITOR' and str(db_event['owner']) != str(
+            jwt_data.get('sub')
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail='You can only edit your own events',
+            )
 
         update_data = event.model_dump(exclude_unset=True)
         if not update_data:
@@ -154,25 +164,27 @@ async def event_edit_details(
         )
         if not updated_event:
             raise HTTPException(status_code=404, detail='Event not found')
-        await cache_event_after_write(r, updated_event)
+        await safe_cache_write(cache_event_after_write(r, updated_event))
         return updated_event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
 @events_page.post(
     '/add_events_via_tables',
-    response_model=list[schemas.events.EventResponse],
+response_model=list[schemas.events.EventResponse],
     responses={
         200: {'description': 'Events imported successfully'},
         400: {'description': 'Unsupported file format'},
         401: {'description': 'Access token missing'},
         403: {'description': 'Editor or admin role required'},
+        413: {'description': 'File exceeds the upload size limit'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -190,38 +202,52 @@ async def add_events_via_tables(
 
         filename = secure_filename(file.filename or '')
         extension = os.path.splitext(filename)[1].lower()
-        if not filename or extension not in _ALLOWED_TABLE_EXTENSIONS:
+        if not filename or extension not in ALLOWED_TABLE_EXTENSIONS:
             raise HTTPException(status_code=400, detail='Unsupported file format')
 
         # У каждого импорта свой каталог. Результат POST-запроса намеренно не
         # кэшируется: повторная загрузка обязана создать события из нового файла.
-        upload_dir = os.path.join(UPLOAD_FOLDER, uuid_mod.uuid4().hex)
+        upload_dir = os.path.join(TABLES_DIR, uuid_mod.uuid4().hex)
         os.makedirs(upload_dir, exist_ok=False)
         file_location = os.path.join(upload_dir, filename)
+        max_bytes = MAX_UPLOAD_MB * 1024 * 1024
         try:
+            # Чтение с лимитом: копируем по чанку и прерываемся, если файл
+            # превышает MAX_UPLOAD_MB (защита от неограниченного потребления
+            # диска/CPU при парсинге PDF и XLSX).
+            written = 0
             with open(file_location, 'wb') as file_object:
-                shutil.copyfileobj(file.file, file_object)
+                while chunk := await file.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f'File exceeds the {MAX_UPLOAD_MB} MB limit',
+                        )
+                    file_object.write(chunk)
+
+            if extension == '.pdf':
+                created = await table_handling.main.pdf_to_db(file_location, user_id)
+            else:
+                # XLSX обрабатывается напрямую: здесь нет Celery-задачи, а значит
+                # нет worker time limit и синхронного ожидания AsyncResult.
+                created = await table_handling.sql_processing.tabulate(
+                    file_location,
+                    user_id,
+                )
+
+            await safe_cache_write(cache_events_after_write(r, created))
+            return created
         finally:
             await file.close()
-
-        if extension == '.pdf':
-            created = await table_handling.main.pdf_to_db(file_location, user_id)
-        else:
-            # XLSX обрабатывается напрямую: здесь нет Celery-задачи, а значит
-            # нет worker time limit и синхронного ожидания AsyncResult.
-            created = await table_handling.sql_processing.tabulate(
-                file_location,
-                user_id,
-            )
-
-        await cache_events_after_write(r, created)
-        return created
+            shutil.rmtree(upload_dir, ignore_errors=True)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -264,10 +290,11 @@ async def event_dashboard(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -310,10 +337,11 @@ async def my_event_dashboard(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -348,8 +376,9 @@ async def event_details(
         return event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )

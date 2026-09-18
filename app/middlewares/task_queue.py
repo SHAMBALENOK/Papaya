@@ -1,14 +1,8 @@
 import asyncio
-import os
 
 from celery import Celery
 
-
-REDIS_URL = os.getenv('REDIS_URL')
-if not REDIS_URL:
-    host = os.getenv('REDIS_HOST', 'localhost')
-    port = os.getenv('REDIS_PORT', '6379')
-    REDIS_URL = f'redis://{host}:{port}/0'
+from app.core.config import REDIS_URL
 
 
 task_queue = Celery(

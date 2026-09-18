@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated
 
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_cached_user, get_redis
+from app.core.cache_guard import safe_cache_write
+from app.core.config import COOKIE_SECURE
 from app.database.database import get_db
 import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
@@ -20,6 +23,54 @@ auth_page = APIRouter(
     prefix='/auth',
     tags=['authentication'],
 )
+
+logger = logging.getLogger('papaya.auth')
+
+
+def _set_auth_cookies(response: Response, access_jwt: str, refresh_jwt: str) -> None:
+    """Записать JWT в HttpOnly-куки.
+
+    ``secure=True`` ставится только в production (COOKIE_SECURE), чтобы локальная
+    разработка по HTTP продолжала работать. ``SameSite=Lax`` отсекает
+    state-changing cross-site запросы (базовая защита от CSRF) и не мешает
+    обычной навигации SPA.
+    """
+    response.set_cookie(
+        key='access_jwt',
+        value=access_jwt,
+        max_age=600,
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
+    response.set_cookie(
+        key='refresh_jwt',
+        value=refresh_jwt,
+        max_age=1209600,
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    """Снять HttpOnly-куки при logout с теми же параметрами."""
+    response.delete_cookie(
+        'access_jwt',
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
+    response.delete_cookie(
+        'refresh_jwt',
+        httponly=True,
+        samesite='lax',
+        secure=COOKIE_SECURE,
+        path='/',
+    )
 
 
 @auth_page.get(
@@ -44,10 +95,11 @@ async def auth(
         if e.status_code == 401:
             return JSONResponse(status_code=200, content=None)
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -84,28 +136,26 @@ async def register(
                 'password': user.password,
             },
         )
-        await cache_user_after_write(r, user_data)
+        if user_data is None:
+            raise HTTPException(status_code=409, detail='You already have account')
+        await safe_cache_write(cache_user_after_write(r, user_data))
 
-        response.set_cookie(
-            key='access_jwt',
-            value=await tokenz.create_jwt(ins={'sub': user_data['id']}),
-            max_age=600,
-        )
-        response.set_cookie(
-            key='refresh_jwt',
-            value=await tokenz.create_jwt(
+        _set_auth_cookies(
+            response,
+            access_jwt=await tokenz.create_jwt(ins={'sub': user_data['id']}),
+            refresh_jwt=await tokenz.create_jwt(
                 ins={'sub': user_data['id']},
                 is_refresh=True,
             ),
-            max_age=1209600,
         )
         return user_data
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -138,34 +188,32 @@ async def login(
                 detail='Invalid email or password',
             )
 
-        response.set_cookie(
-            key='access_jwt',
-            value=await tokenz.create_jwt(ins={'sub': db_user['id']}),
-            max_age=600,
-        )
-        response.set_cookie(
-            key='refresh_jwt',
-            value=await tokenz.create_jwt(
+        _set_auth_cookies(
+            response,
+            access_jwt=await tokenz.create_jwt(ins={'sub': db_user['id']}),
+            refresh_jwt=await tokenz.create_jwt(
                 ins={'sub': db_user['id']},
                 is_refresh=True,
             ),
-            max_age=1209600,
         )
 
         # Заполняем новую версию через общий cache-aside helper. Пароль в Redis
         # не попадает, а конкурентное изменение профиля не может быть затёрто.
-        await get_cached_user(
-            r,
-            str(db_user['id']),
-            lambda: database.users.find_user_by_id(str(db_user['id'])),
+        await safe_cache_write(
+            get_cached_user(
+                r,
+                str(db_user['id']),
+                lambda: database.users.find_user_by_id(str(db_user['id'])),
+            )
         )
         return db_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -185,13 +233,13 @@ async def logout(
     try:
         await tokenz.jwt_check(access_jwt, refresh_jwt)
         response = JSONResponse(status_code=200, content=None)
-        response.delete_cookie('access_jwt')
-        response.delete_cookie('refresh_jwt')
+        _clear_auth_cookies(response)
         return response
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
