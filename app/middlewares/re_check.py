@@ -6,7 +6,8 @@ def is_valid_password(password: str) -> tuple[bool, str]:
 
     Правила (настраиваемые):
     - Минимум 8 символов
-    - Максимум 128 символов
+    - Максимум 72 байта (предел bcrypt: bcrypt.hashpw/checkpw бросают
+      ValueError на паролях длиннее 72 байт в UTF-8)
     - Хотя бы одна заглавная буква
     - Хотя бы одна строчная буква
     - Хотя бы одна цифра
@@ -19,12 +20,12 @@ def is_valid_password(password: str) -> tuple[bool, str]:
     if not password:
         return False, "Пароль не может быть пустым"
 
-    # Проверка длины
+    # Проверка длины: лимит считается по байтам UTF-8, как у bcrypt
+    if len(password.encode('utf-8')) > 72:
+        return False, "Пароль слишком длинный (максимум 72 байта)"
+
     if len(password) < 8:
         return False, "Пароль должен содержать минимум 8 символов"
-
-    if len(password) > 128:
-        return False, "Пароль слишком длинный (максимум 128 символов)"
 
     # Проверка на пробелы
     if ' ' in password:

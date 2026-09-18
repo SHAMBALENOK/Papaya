@@ -20,6 +20,15 @@ def allowed_file(filename: str, extensions: list) -> bool:
 def check_password(entered_password: str, stored_hash: bytes) -> bool:
     """
     Функция для проверки пароля
+
+    Оборачивает ValueError bcrypt: пароль длиннее 72 байт (или битый хэш)
+    не должен превращаться в 500, а просто считается неверным.
     """
     import bcrypt
-    return bcrypt.checkpw(entered_password.encode('utf-8'), stored_hash.encode('utf-8'))
+    try:
+        return bcrypt.checkpw(
+            entered_password.encode('utf-8'),
+            stored_hash.encode('utf-8'),
+        )
+    except ValueError:
+        return False

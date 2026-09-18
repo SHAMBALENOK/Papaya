@@ -6,6 +6,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
@@ -200,6 +201,14 @@ async def user_edit_details(
         return updated_user
     except HTTPException:
         raise
+    except IntegrityError:
+        # Редкая гонка: email занят другим пользователем уже после pre-check.
+        # Отдаём честный 409 вместо 500.
+        logger.warning('Email uniqueness conflict on user %s edit', user_id)
+        raise HTTPException(
+            status_code=409,
+            detail='Email is already taken by another user',
+        )
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(

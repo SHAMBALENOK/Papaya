@@ -130,6 +130,42 @@ services:
     networks:
       - project
 
+  test:
+    image: papaya-web:latest
+    profiles: ["testing"]
+    container_name: papaya-test
+    command: >
+      sh -c "pip install --no-cache-dir -q -r /app/requirements-dev.txt &&
+             pytest -q"
+    environment:
+      ENVIRONMENT: "testing"
+      JWT_KEY: "pytest_secret_key_for_local_tests_only"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/papaya_test"
+      DATABASE_URL_TEST: "postgresql+asyncpg://postgres:postgres@postgres:5432/papaya_test"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_URL: "redis://redis:6379/0"
+      CACHE_TTL: "60"
+      MAX_UPLOAD_MB: "1"
+      TABLES_DIR: "/tmp/papaya-tables-test"
+      TABLE_IMPORT_IMAGES: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Тесты запускаются против рабочего дерева, а не против кода,
+      # запечённого в образ: правки в app/ и tests/ подхватываются без rebuild.
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./tests:/app/tests
+      - ./pytest.ini:/app/pytest.ini
+      - ./alembic.ini:/app/alembic.ini
+      - ./requirements-dev.txt:/app/requirements-dev.txt
+    networks:
+      - project
+
 volumes:
   postgres-data:
   pgadmin-data:

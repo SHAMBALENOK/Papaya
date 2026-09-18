@@ -134,7 +134,15 @@ app.mount('/frontend', StaticFiles(directory=FRONTEND_DIR), name='frontend')
 @app.get('/')
 @app.get('/{path:path}')
 async def spa_fallback(path: str = ''):
-    """Отдать файл фронтенда или точку входа SPA для клиентского маршрута."""
+    """Отдать файл фронтенда или точку входа SPA для клиентского маршрута.
+
+    Несуществующие пути под ``/api/v1/`` возвращают JSON 404, а не HTML: иначе
+    опечатка в URL API тихо превращается в 200 с index.html и клиент не может
+    отличить «роут не найден» от успешного ответа.
+    """
+    if path.startswith('api/'):
+        raise HTTPException(status_code=404, detail='Not found')
+
     if path:
         file_path = os.path.realpath(os.path.join(FRONTEND_DIR, path))
         if (

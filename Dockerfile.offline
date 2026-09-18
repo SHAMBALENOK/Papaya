@@ -15,6 +15,9 @@ COPY scripts /app/scripts
 COPY migrations /app/migrations
 COPY alembic.ini /app/alembic.ini
 COPY requirements.txt /app/requirements.txt
+COPY requirements-dev.txt /app/requirements-dev.txt
+COPY pytest.ini /app/pytest.ini
+COPY tests /app/tests
 
 COPY setup.sh /setup.sh
 RUN chmod +x /setup.sh

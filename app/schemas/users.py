@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
@@ -56,5 +56,4 @@ class UserResponse(UserBase):
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
