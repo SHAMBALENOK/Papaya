@@ -76,19 +76,30 @@ cd Papaya
 
 Start Docker Desktop if you use it.
 
-### 2. Configure the Tokens
+### 2. Configure the Environment
 
-Before the first launch, open `docker-compose.yml` and fill in `JWT_KEY` and `HF_TOKEN` under the `environment` sections of both the `web` and `celery` services:
+Copy `.env.example` to `.env` and fill it in if needed:
 
-```yaml
-JWT_KEY: "your_long_random_secret"
-HF_TOKEN: "hf_your_Hugging_Face_token"
+```bash
+cp .env.example .env
 ```
 
-Use the same values for both services (Celery and Web):
+All tokens and secrets are passed through environment variables (the `.env` file
+or the `environment` section of `docker-compose.yml`) — never commit a real
+secret to the repository.
 
-- `JWT_KEY` is a long random secret used to sign JWTs;
-- `HF_TOKEN` is a read-access Hugging Face token, available from the [token settings page](https://huggingface.co/settings/tokens).
+Main variables:
+
+- `JWT_KEY` — the JWT signing secret. In production use a long random string
+  (e.g. from `python -c "import secrets; print(secrets.token_hex(32))"`).
+  Use the same value in both the `web` and `celery` services;
+- `ENVIRONMENT` — `development` (default) or `production` (enables the `Secure`
+  cookie flag and rejects placeholder secrets);
+- `DATABASE_URL` — PostgreSQL connection (the schema is managed by Alembic
+  migrations, applied automatically when the container starts);
+- `MAX_UPLOAD_MB` — maximum size of an uploaded table, `30` by default;
+- `HF_TOKEN` — optional read-access Hugging Face token for model downloads,
+  available from the [token settings page](https://huggingface.co/settings/tokens).
 
 Do not publish real tokens or commit them to a public repository.
 

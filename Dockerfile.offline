@@ -1,0 +1,29 @@
+# Оффлайн-пересборка поверх проверенного образа.
+#
+# Используется, когда apt/PyPI недоступны (например, VPN-ограничения):
+# базовый образ papaya-web:latest уже содержит все закреплённые версии зависимостей
+# из requirements.txt (проверено pip freeze). Этот файл лишь перекладывает актуальный
+# код и точки входа, не трогая установку пакетов.
+#
+# Каноничный (онлайн) вариант остаётся в Dockerfile.
+FROM papaya-web:latest
+
+WORKDIR /app
+
+COPY app /app/app
+COPY scripts /app/scripts
+COPY migrations /app/migrations
+COPY alembic.ini /app/alembic.ini
+COPY requirements.txt /app/requirements.txt
+COPY requirements-dev.txt /app/requirements-dev.txt
+COPY pytest.ini /app/pytest.ini
+COPY tests /app/tests
+
+COPY setup.sh /setup.sh
+RUN chmod +x /setup.sh
+
+# Единственная зависимость, которую (исторически) доставляли в контейнер
+# вручную. Остальные закреплённые версии уже есть в базовом образе.
+RUN pip install --no-cache-dir alembic==1.20.0
+
+# ENTRYPOINT/CMD и EXPOSE наследуются из базового образа.

@@ -80,8 +80,20 @@ async def show_random_events(quantity: int):
     return await list_events(active_only=True, limit=quantity)
 
 
+# Поля, которые разрешено менять через edit_event. ver: id, owner,
+# createdAt и updatedAt задаёт сервер, их нельзя протащить через setattr —
+# иначе будущий endpoint может случайно (или намеренно) перезаписать метаданные.
+_EVENT_EDITABLE_FIELDS = frozenset({
+    'name', 'disc', 'preview_picture', 'picture', 'isActive',
+})
+
+
 async def edit_event(event_id: str, ins: dict):
-    """Изменить событие."""
+    """Изменить событие.
+
+    Применяются только поля из allowlist ``_EVENT_EDITABLE_FIELDS``; всё
+    остальное игнорируется. ``updatedAt`` перезаписывается сервером.
+    """
     if isinstance(event_id, str):
         event_id = uuid_mod.UUID(event_id)
     async with AsyncSessionLocal() as session:
@@ -92,7 +104,8 @@ async def edit_event(event_id: str, ins: dict):
         if not event:
             return None
         for key, value in ins.items():
-            setattr(event, key, value)
+            if key in _EVENT_EDITABLE_FIELDS:
+                setattr(event, key, value)
         event.updatedAt = datetime.now(timezone.utc)
         await session.commit()
         await session.refresh(event)

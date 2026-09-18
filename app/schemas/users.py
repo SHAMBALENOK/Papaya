@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
@@ -15,10 +15,16 @@ class UserBase(BaseModel):
     def _empty_id_to_none(cls, v):
         return None if v == '' or v is None else v
 
-class UserCreate(UserBase):
-    """Регистрация. isActive задаётся сервером."""
+class UserCreate(BaseModel):
+    """Регистрация.
+
+    Контракт: id, isActive, role, createdAt и updatedAt задаёт сервер.
+    Пароль принимается только на входе и не возвращается в ответах.
+    """
+    name: str
+    surname: str
+    email: EmailStr
     password: str
-    isActive: bool = True
 
 class LoginRequest(BaseModel):
     """Логин: достаточно email и пароля."""
@@ -50,5 +56,4 @@ class UserResponse(UserBase):
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

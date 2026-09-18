@@ -1,9 +1,8 @@
 import jwt
-import os
 from fastapi import HTTPException
 from datetime import datetime, timezone, timedelta
 
-SECRET = os.getenv('JWT_KEY')
+from app.core.config import JWT_KEY as SECRET
 
 async def create_jwt(
         ins: dict,

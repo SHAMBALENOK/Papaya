@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import bcrypt
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
 from app.middlewares.serializers import user_to_dict
@@ -17,7 +18,12 @@ def _full_user_dict(user) -> dict:
 
 
 async def add_user(ins: dict):
-    """Создать пользователя в базе данных."""
+    """Создать пользователя в базе данных.
+
+    Возвращает ``None``, если такой email уже существует (закрывает гонку
+    двух одновременных регистраций: между SELECT и INSERT мог появиться второй
+    пользователь с тем же адресом).
+    """
     salt = bcrypt.gensalt(rounds=12)
     user = Users(
         name=ins.get('name'),
@@ -30,7 +36,11 @@ async def add_user(ins: dict):
     )
     async with AsyncSessionLocal() as session:
         session.add(user)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            return None
         await session.refresh(user)
         return user_to_dict(user)
 
@@ -57,11 +67,24 @@ async def find_user_by_id(user_id: str):
         return user_to_dict(user) if user else None
 
 
+# Поля, которые разрешено менять через edit_user. Пароль сознательно не входит:
+# смена пароля должна проходить отдельный путь с хешированием, а не setattr.
+# id, createdAt и updatedAt задаёт сервер.
+_USER_EDITABLE_FIELDS = frozenset({
+    'name', 'surname', 'email', 'gender', 'bday', 'bio', 'phone',
+    'country', 'region', 'status', 'role', 'isActive',
+})
+
+
 async def edit_user(user_id: str, ins: dict):
-    """Изменить данные пользователя."""
+    """Изменить данные пользователя.
+
+    Применяются только поля из allowlist ``_USER_EDITABLE_FIELDS``; остальное
+    игнорируется. ``updatedAt`` перезаписывается сервером.
+    """
     if isinstance(user_id, str):
         user_id = uuid_mod.UUID(user_id)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Users).where(Users.id == user_id)
@@ -70,9 +93,17 @@ async def edit_user(user_id: str, ins: dict):
         if not user:
             return None
         for key, value in ins.items():
-            setattr(user, key, value)
+            if key in _USER_EDITABLE_FIELDS:
+                setattr(user, key, value)
         user.updatedAt = now
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Email-unique конфликт (гонка двух одновременных обновлений).
+            # Транзакция после исключения не должна оставаться «сломанной»:
+            # явный rollback, затем пробрасываем наверх для HTTP 409.
+            await session.rollback()
+            raise
         await session.refresh(user)
         return user_to_dict(user)
 

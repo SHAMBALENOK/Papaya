@@ -2,3 +2,8 @@
 .idea/
 __pycache__/
 test.py
+
+# Секреты и локальное окружение
+.env
+.env.*
+!.env.example

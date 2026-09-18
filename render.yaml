@@ -7,32 +7,22 @@ services:
     repo: https://github.com/SHAMBALENOK/Papaya
     branch: main
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /
+    healthCheckPath: /api/v1/health
     # Оптимизация для 512MB RAM: 1 воркер, preload моделей, увеличенный таймаут
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 --graceful-timeout 120 --workers 1 --preload main:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 --graceful-timeout 120 --workers 1 --preload app.main:app
     envVars:
-      - key: FLASK_SECRET_KEY
+      - key: ENVIRONMENT
+        value: "production"
+      - key: JWT_KEY
         generateValue: true
       - key: DATABASE_URL
         fromDatabase:
           name: papaya-db
           property: connectionString
-      - key: JWT_SECRET_KEY
-        generateValue: true
-      - key: INIT_EVENT_ID
-        value: "111"
-      - key: INIT_EVENT_NAME
-        value: "Мероприятие от Papaya"
-      - key: INIT_EVENT_PLACE
-        value: "Онлайн"
-      - key: INIT_EVENT_MIN_GRADE
-        value: "1"
-      - key: INIT_EVENT_MAX_GRADE
-        value: "11"
-      - key: INIT_EVENT_MIN_AGE
-        value: "6"
-      - key: INIT_EVENT_MAX_AGE
-        value: "17"
+      - key: MAX_UPLOAD_MB
+        value: "30"
+      - key: COOKIE_SECURE
+        value: "true"
       - key: HF_TOKEN
         sync: false
       # Ограничение потоков для экономии памяти на CPU

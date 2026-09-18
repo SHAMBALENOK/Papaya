@@ -11,6 +11,10 @@ from alembic import context
 
 from app.database.base import Base
 
+# Важно: импорт моделей регистрирует их таблицы в Base.metadata, иначе
+# autogenerate не увидит ни одной таблицы и сгенерирует пустую миграцию.
+import app.models  # noqa: F401, E402
+
 from dotenv import load_dotenv
 load_dotenv()
 

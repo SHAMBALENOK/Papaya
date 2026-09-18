@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated, List
 
@@ -16,6 +17,7 @@ from app.caching.main import (
     get_cached_users,
     get_redis,
 )
+from app.core.cache_guard import safe_cache_write
 from app.database.database import get_db
 import app.middlewares.tokenz.main as tokenz
 
@@ -24,6 +26,8 @@ admin_page = APIRouter(
     prefix='/admin',
     tags=['administration'],
 )
+
+logger = logging.getLogger('papaya.admin')
 
 
 async def _require_admin(
@@ -131,10 +135,11 @@ async def list_users(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -168,10 +173,11 @@ async def list_events(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -199,14 +205,15 @@ async def ban(
         updated_user = await database.users.edit_user(user_id, {'isActive': False})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -234,14 +241,15 @@ async def unban(
         updated_user = await database.users.edit_user(user_id, {'isActive': True})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -274,14 +282,15 @@ async def archive_event(
             raise HTTPException(status_code=404, detail='Event not found')
         # Обновляет карточку события и меняет поколение всех списков. Поэтому
         # каталог сразу скрывает архивное событие, а админка видит его архивным.
-        await cache_event_after_write(r, updated_event)
+        await safe_cache_write(cache_event_after_write(r, updated_event))
         return updated_event
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -289,10 +298,11 @@ async def archive_event(
     '/grant_admin/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'description': 'Admin role granted'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required or user is already ADMIN'},
-        404: {'description': 'User not found'},
+200: {'description': 'Admin role granted'},
+         401: {'description': 'Access token missing'},
+         403: {'description': 'Admin role required'},
+         404: {'description': 'User not found'},
+         409: {'description': 'User is already ADMIN'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -322,14 +332,15 @@ async def grant_admin(
         updated_user = await database.users.edit_user(user_id, {'role': 'ADMIN'})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )
 
 
@@ -337,10 +348,11 @@ async def grant_admin(
     '/demote_admin/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-        200: {'description': 'Admin role removed'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required or user is already USER'},
-        404: {'description': 'User not found'},
+200: {'description': 'Admin role removed'},
+         401: {'description': 'Access token missing'},
+         403: {'description': 'Admin role required'},
+         404: {'description': 'User not found'},
+         409: {'description': 'User is already USER'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -370,12 +382,13 @@ async def demote_admin(
         updated_user = await database.users.edit_user(user_id, {'role': 'USER'})
         if not updated_user:
             raise HTTPException(status_code=404, detail='User not found')
-        await cache_user_after_write(r, updated_user)
+        await safe_cache_write(cache_user_after_write(r, updated_user))
         return updated_user
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
-            detail=f'Internal server error: {e}',
+            detail='Internal server error',
         )

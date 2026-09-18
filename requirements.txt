@@ -1,23 +1,25 @@
-fastapi
-uvicorn
-werkzeug
-sqlalchemy
-asyncpg
-python-dotenv
+# Закреплённые версии зависимостей: контейнер собирается воспроизводимо,
+# без «плавающих» мажоров поверх свежей версии пакета каждый раз.
+fastapi==0.141.1
+uvicorn==0.52.4
+werkzeug==3.1.8
+sqlalchemy==2.0.52
+asyncpg==0.31.0
+python-dotenv==1.2.3
 gunicorn==21.2.0
-img2table
-openpyxl
-pyjwt
-pydantic[email]
-bcrypt
-pandas
+img2table==2.0.0
+openpyxl==3.1.5
+pyjwt==2.13.0
+pydantic[email]==2.13.5
+bcrypt==5.0.0
+pandas==3.0.5
 numpy==1.26.4
-opencv-python-headless
-python-multipart
-redis
-celery[redis]
-ddgs>=9.14.4,<10
-alembic
+opencv-python-headless==4.11.0.86
+python-multipart==0.0.32
+redis==6.4.0
+celery[redis]==5.6.3
+ddgs==9.16.0
+alembic==1.20.0
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.2.2+cpu
