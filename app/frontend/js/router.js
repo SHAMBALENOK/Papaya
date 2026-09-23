@@ -87,6 +87,8 @@ function router() {
             renderAdmin('users');
         } else if (path === '/admin/events') {
             renderAdmin('events');
+        } else if (path === '/admin/imports') {
+            renderAdmin('imports');
         } else {
             renderNotFound();
         }
