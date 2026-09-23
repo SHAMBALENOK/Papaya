@@ -32,6 +32,16 @@ Papaya is a web service for school students that brings information about nation
 - Added Redis caching and a Celery queue for resource-intensive PDF processing.
 - Added a containerized environment with PostgreSQL, Redis, the web application, Celery, and pgAdmin. `setup.sh` runs automatically inside the containers and verifies Tesseract OCR.
 
+### Branch `patch-0.7`
+
+- Domain entities **Organizations**, **Olympiads** and **Documents** (JSONB relation arrays, no premature tables) plus Alembic migration `0004`.
+- REST `/api/v1/organizations`, `/api/v1/olympiads`, `/api/v1/docs` with per-organization access control and versioned Redis caching.
+- **RSOSH import** (`app/rsosh` + `/api/v1/imports`): upload PDF/XLSX → table extraction (img2table + Tesseract OCR) → name normalization → matching → review queue. Nothing is written to the database until an admin explicitly confirms (`confirm`/`reject`); repeated confirm is idempotent; duplicates are merged and cache is invalidated on confirmation.
+- Import state machine `processing → review → approved|rejected|failed` stored in `docs.metadata['rsosh']`.
+- Frontend pages for organizations, olympiads, documents, import preview and the admin dashboard (`#/admin/imports`).
+- Full test suite: 52 passed (`docker compose --profile testing run --rm test`).
+- Fixed `setup.sh` CRLF newlines that prevented containers from starting after an image rebuild.
+
 ## Coming Soon
 
 - School student, university student, teacher, and educational organization roles with different capabilities.
