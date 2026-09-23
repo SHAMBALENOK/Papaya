@@ -21,6 +21,7 @@ task_queue.conf.update(
     task_soft_time_limit=None,
     imports=(
         'app.middlewares.parse_tables.pdf_processing',
+        'app.rsosh.processor',
     ),
 )
 

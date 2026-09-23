@@ -79,6 +79,7 @@ services:
       - "5000:5000"
     volumes:
       - ./app/tables:/app/app/tables
+      - ./app/documents:/app/app/documents
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
@@ -120,6 +121,7 @@ services:
       TABLES_DIR: "/app/app/tables"
     volumes:
       - ./app/tables:/app/app/tables
+      - ./app/documents:/app/app/documents
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
