@@ -16,7 +16,6 @@ function isJwtAuthError(status, data) {
 function redirectToAuthAfterJwtError() {
     store.clear();
     if (typeof setChrome === 'function') setChrome(false);
-    if (typeof setFab === 'function') setFab(false);
     if (window.location.hash !== '#/auth') window.location.hash = '#/auth';
 }
 
@@ -58,29 +57,17 @@ const api = {
     /* Текущий пользователь: GET /api/v1/ отдаёт полный профиль из JWT */
     getMe()      { return this.get('/'); },
 
-    /* Главный экран: пользователь (с ролью) + все события */
-    getDashboard(options) { return this.get('/events/dashboard', options); },
-    getMyEvents()  { return this.get('/events/dashboard/my_events'); },
-
     /* Пользователи */
     getUsers()       { return this.get('/user/users'); },
     getUser(id)      { return this.get(`/user/${id}`); },
     editUser(id, d)  { return this.post(`/user/${id}/edit_info`, d); },
 
-    /* События — пути совпадают с app/routers/events.py */
-    getEvent(id)     { return this.get(`/events/${id}`); },
-    addEvent(d)      { return this.post('/events/add_event', d); },
-    editEvent(d)     { return this.post(`/events/edit_event/${d.id}`, d); },
-    addEventsPdf(fd) { return this.postForm('/events/add_events_via_tables', fd); },
-
     /* Администрирование (роль ADMIN на бэкенде) */
     adminUsers()     { return this.get('/admin/users'); },
-    adminEvents()    { return this.get('/admin/events'); },
     banUser(id)      { return this.post(`/admin/ban/${id}`); },
     unbanUser(id)    { return this.post(`/admin/unban/${id}`); },
     grantAdmin(id)   { return this.post(`/admin/grant_admin/${id}`); },
     demoteAdmin(id)  { return this.post(`/admin/demote_admin/${id}`); },
-    archiveEvent(id) { return this.post(`/admin/archive_event/${id}`); },
 
     /* Организации (админ создаёт; редактирует админ или своя организация) */
     getOrganizations(params = '')   { return this.get(`/organizations${params}`); },

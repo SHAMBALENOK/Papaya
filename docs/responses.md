@@ -2,18 +2,20 @@
 
 > Branch: `patch-0.7` | Base path: `/api/v1`
 >
-> Разделы ниже описывают исторические (patch 0.5) endpoints auth/user/event.
+> Разделы ниже описывают endpoints auth/user (patch 0.5—0.7).
 > Доменные ресурсы и RSOSH-импорт (patch 0.7) — в конце документа.
+>
+> Живая схема всех маршрутов — Swagger по адресу http://localhost:5000/docs.
 
 ---
 
 ## GET /
 
-**Суть:** Главная страница приложения. Проверяет авторизацию пользователя через JWT-токены (access + refresh в cookies), извлекает профиль из БД и возвращает данные пользователя вместе со списком случайных событий (до 10 записей из таблицы `event`). Служит точкой входа в приложение после авторизации.
+**Суть:** Точка входа для проверки сессии авторизованного пользователя. Валидирует JWT-токены (access + refresh в cookies), извлекает профиль из БД и возвращает полный профиль пользователя. Каталог олимпиад и остальные данные SPA получает отдельными доменными маршрутами.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | OK | `{"user_id": str, "user_name": str, "user_surname": str, "user_email": str, "events": [{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}, ...]}` |
+| 200 | OK | `{"id": str, "email": str, "name": str, "surname": str, "gender": str|null, "bday": str|null, "bio": str|null, "phone": str|null, "country": str|null, "region": str|null, "status": str|null, "role": str, "isActive": bool, "createdAt": str, "updatedAt": str, "organization_id": str|null, "metadata": object|null}` |
 | 401 | Access or refresh token missing | `{"detail": "..."}` |
 | 403 | Invalid refresh or access token | `{"detail": "..."}` |
 | 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
@@ -95,84 +97,10 @@
 
 ---
 
-## GET /event/{event_id}
-
-**Суть:** Получение информации о конкретном событии по его ID. Извлекает запись из таблицы `event` в PostgreSQL. Возвращает название, описание, изображения и статус активности события. Используется для просмотра деталей мероприятия.
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | OK | `EventResponse`: `{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid refresh or access token | `{"detail": "..."}` |
-| 404 | Событие с таким ID не найдено | `{"detail": "Page is missing"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## POST /event/add_event
-
-**Суть:** Создание нового события. Принимает данные пользователя (для проверки прав) и данные события. Проверяет, что запрос делает владелец профиля (сверяет user_id из токена с user_id в теле). Создаёт запись в таблице `event` с привязкой к владельцу. Возвращает созданное событие.
-
-**Request body:** `UserBase` + `EventCreate`
-```json
-{
-  "user": {"id": "str", "name": "str", "surname": "str", "email": "str", "isActive": true},
-  "event": {
-    "id": "str",
-    "name": "str",
-    "disc": "str|null",
-    "preview_picture": "str|null",
-    "picture": "str|null",
-    "isActive": true,
-    "owner": "str",
-    "createdAt": "datetime",
-    "updatedAt": "datetime"
-  }
-}
-```
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Событие создано | `EventResponse`: `{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid token / попытка создать событие от чужого имени | `{"detail": "..."}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## POST /event/edit_event
-
-**Суть:** Редактирование существующего события. Принимает обновлённые данные; поля со значением `"null"` (строка) игнорируются — сохраняется прежнее значение. Проверяет права владельца. Обновляет запись в таблице `event`. Возвращает обновлённое событие.
-
-**Request body:** `UserBase` + `EventCreate` (аналогично add_event)
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Событие обновлено | `EventResponse`: `{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid token / не ваш профиль | `{"detail": "..."}` |
-| 404 | Событие не найдено в БД | `{"detail": "Event not found"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## POST /event/add_events_via_pdf_tables
-
-**Суть:** Массовое добавление событий через загрузку PDF-файла, содержащего таблицы с данными. Парсит PDF, извлекает табличные строки и создаёт события в БД. Проверяет, что загрузку выполняет владелец профиля. Возвращает профиль пользователя после обработки.
-
-**Request body:** `multipart/form-data`
-- `user` — JSON (UserBase)
-- `event` — JSON (EventCreate)
-- `file` — PDF-файл
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | События из PDF добавлены | `UserResponse`: `{"id": str, "name": str, "surname": str, "email": str, "isActive": bool, ...}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Попытка загрузить от чужого профиля | `{"detail": "It looks like you are trying to use not your profile"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
+> Устаревшие endpoints событий (patch 0.5: `/event/{id}`, `/event/add_event`,
+> `/event/edit_event`, `/event/add_events_via_tables`, admin-архивация) удалены в
+> `patch-0.7` вместе с таблицей `events` (миграция `0005`). Их место заняли
+> доменные ресурсы Organizations / Olympiads / Docs (см. ниже).
 
 ## GET /user/{user_id}
 
@@ -238,15 +166,11 @@
 
 | Метод | Путь | Назначение |
 |-------|------|------------|
-| GET | `/` | Главная: профиль + случайные события |
+| GET | `/` | Профиль текущего пользователя (проверка сессии) |
 | GET | `/auth/` | Gate авторизации |
 | POST | `/auth/register` | Регистрация |
 | POST | `/auth/login` | Вход |
 | GET | `/auth/logout` | Выход |
-| GET | `/event/{event_id}` | Просмотр события |
-| POST | `/event/add_event` | Создание события |
-| POST | `/event/edit_event` | Редактирование события |
-| POST | `/event/add_events_via_pdf_tables` | Импорт событий из PDF |
 | GET | `/user/{user_id}` | Просмотр профиля |
 | POST | `/user/{user_id}/edit_info` | Редактирование профиля |
 

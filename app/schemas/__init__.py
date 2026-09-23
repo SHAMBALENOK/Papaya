@@ -1,1 +1,1 @@
-from . import users, events, organizations, olympiads, docs
+from . import users, organizations, olympiads, docs

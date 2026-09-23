@@ -1,1 +1,0 @@
-#file for ai methods to summaraize disc information and name clarification

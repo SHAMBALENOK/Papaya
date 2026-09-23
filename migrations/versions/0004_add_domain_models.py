@@ -8,20 +8,15 @@ Create Date: 2026-09-23
 
 - ``organizations`` — источник истины об организациях (тип из
   UNIVERSITY / ORGANIZER / SCHOOL / OTHER);
-- ``olympiads`` — центральный каталог; данных исторических ``events``
-  переносятся в олимпиады (оригинал остаётся в ``olympiads.metadata.legacy``,
-  таблица ``events`` сохраняется для отката и удаляется отдельным этапом
-  очистки);
+- ``olympiads`` — центральный каталог;
 - ``docs`` — документы-источники (в т.ч. техническое состояние RSOSH-импорта);
 - ``users`` получают ``organization_id`` (максимум одна организация) и
   ``metadata`` (JSONB).
 
-Роли: исторический ``EDITOR`` → ``ORGANIZATION_ADMIN`` (удаляется вне этой
-миграции, а здесь транзитивно конвертируется).
+Роли: исторический ``EDITOR`` → ``ORGANIZATION_ADMIN``.
 
-Миграция безопасна для повторного применения на уже переведённых базах:
-``CREATE TABLE IF NOT EXISTS`` / ``ADD COLUMN IF NOT EXISTS`` и
-``ON CONFLICT DO NOTHING`` при переносе событий.
+Миграция безопасна для повторного применения: ``CREATE TABLE IF NOT EXISTS`` /
+``ADD COLUMN IF NOT EXISTS``.
 """
 
 import sqlalchemy as sa
@@ -35,15 +30,8 @@ branch_labels = None
 depends_on = None
 
 
-def _name_norm_sql(column: str) -> str:
-    """Нормализованное имя для точного поиска дубликатов (lower + слитые пробелы)."""
-    return (
-        f"lower(trim(concat(regexp_replace({column}, '\\s+', ' ', 'g'), '')))"
-    )
-
-
 def upgrade() -> None:
-    """Создать новые таблицы, перенести события и выровнять роли."""
+    """Создать новые таблицы и выровнять роли."""
     op.create_table(
         'organizations',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
@@ -126,56 +114,6 @@ def upgrade() -> None:
     # --- Роли: EDITOR -> ORGANIZATION_ADMIN -------------------------------
     op.execute(
         "UPDATE users SET role = 'ORGANIZATION_ADMIN' WHERE role = 'EDITOR'"
-    )
-
-    # --- Перенос исторических событий в олимпиады -------------------------
-    conn = op.get_bind()
-    has_events = conn.execute(
-        sa.text(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_name = 'events')"
-        )
-    ).scalar()
-    if not has_events:
-        return
-
-    conn.execute(
-        sa.text(
-            """
-            INSERT INTO olympiads (
-                id, name, description, organizer_ids, subjects, levels, years,
-                profiles, bvi_organizations, registration_url, official_url,
-                status, name_norm, metadata, created_at, updated_at
-            )
-            SELECT
-                e.id,
-                e.name,
-                e.disc,
-                '[]'::jsonb,
-                '[]'::jsonb,
-                '[]'::jsonb,
-                '[]'::jsonb,
-                '[]'::jsonb,
-                '[]'::jsonb,
-                NULL,
-                NULL,
-                CASE WHEN e."isActive" = false THEN 'ARCHIVED' ELSE 'PUBLISHED' END,
-                """ + _name_norm_sql('e.name') + """,
-                jsonb_build_object(
-                    'legacy',
-                    jsonb_build_object(
-                        'owner', e.owner,
-                        'preview_picture', e."preview_picture",
-                        'picture', e.picture,
-                        'source', 'events'
-                    )
-                ),
-                e."createdAt",
-                e."updatedAt"
-            FROM events e
-            ON CONFLICT (id) DO NOTHING
-            """
-        )
     )
 
 

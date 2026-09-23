@@ -14,9 +14,6 @@ RUN apt-get update -o Acquire::Retries=10 -o Acquire::http::Timeout="60" -o Acqu
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    torch==2.2.2+cpu torchvision==0.17.2+cpu \
-    --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 RUN apt-get purge -y --auto-remove gcc python3-dev && \

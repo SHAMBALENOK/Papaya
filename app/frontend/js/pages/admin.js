@@ -1,16 +1,15 @@
 /* ==========================================================================
  * pages/admin.js — панель администратора.
  * Страницы: #/admin и #/admin/users → GET /admin/users
- *           #/admin/events          → GET /admin/events
  *           #/admin/imports         → дашборд RSOSH-импортов
- * Действия: ban, unban, grant, demote, archive, imp-confirm, imp-reject.
+ * Действия: ban, unban, grant, demote, imp-confirm, imp-reject.
  * ========================================================================== */
 
 let adminTab = 'users';
 
 function renderAdmin(initialTab) {
     const page = document.getElementById('page');
-    adminTab = initialTab === 'events' ? 'events' : initialTab === 'imports' ? 'imports' : 'users';
+    adminTab = initialTab === 'imports' ? 'imports' : 'users';
 
     if (!store.isAdmin()) {
         page.innerHTML = `
@@ -32,12 +31,11 @@ function renderAdmin(initialTab) {
     <section class="pt-4 pb-16 md:pb-20">
         <p class="${UI.eyebrow}">Администрирование</p>
         <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Панель администратора</h1>
-        <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">Управление пользователями, событиями и подтверждение RSOSH-импортов.</p>
+        <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">Пользователи, организации, олимпиады, документы и RSOSH-импорты.</p>
     </section>
 
     <div class="flex sm:inline-flex flex-wrap gap-2 bg-mist rounded p-2 mb-12" role="tablist" aria-label="Разделы администрирования">
         <a href="#/admin/users" id="admin-tab-users" role="tab" aria-selected="true" class="flex-1 sm:flex-none sm:min-w-[10rem] text-center px-6 py-3 rounded text-sm font-semibold bg-ink text-white shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Пользователи</a>
-        <a href="#/admin/events" id="admin-tab-events" role="tab" aria-selected="false" class="flex-1 sm:flex-none sm:min-w-[10rem] text-center px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">События</a>
         <a href="#/admin/imports" id="admin-tab-imports" role="tab" aria-selected="false" class="flex-1 sm:flex-none sm:min-w-[10rem] text-center px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Импорты</a>
     </div>
 
@@ -76,14 +74,12 @@ function renderAdmin(initialTab) {
             unban: () => api.unbanUser(id),
             grant: () => api.grantAdmin(id),
             demote: () => api.demoteAdmin(id),
-            archive: () => api.archiveEvent(id),
         };
         const messages = {
             ban: 'Пользователь заблокирован',
             unban: 'Пользователь разблокирован',
             grant: 'Назначена роль администратора',
             demote: 'Роль администратора снята',
-            archive: 'Событие перенесено в архив',
         };
         try {
             const res = await calls[act]();
@@ -101,16 +97,13 @@ function renderAdmin(initialTab) {
 
 function paintAdminTabs(tab) {
     const usersBtn = document.getElementById('admin-tab-users');
-    const eventsBtn = document.getElementById('admin-tab-events');
     const importsBtn = document.getElementById('admin-tab-imports');
-    if (!usersBtn || !eventsBtn || !importsBtn) return;
+    if (!usersBtn || !importsBtn) return;
 
     const base = 'flex-1 sm:flex-none sm:min-w-[10rem] text-center px-6 py-3 rounded text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
     usersBtn.className = tab === 'users' ? `${base} bg-ink text-white shadow-elev-1` : `${base} text-ink-soft hover:text-ink`;
-    eventsBtn.className = tab === 'events' ? `${base} bg-ink text-white shadow-elev-1` : `${base} text-ink-soft hover:text-ink`;
     importsBtn.className = tab === 'imports' ? `${base} bg-ink text-white shadow-elev-1` : `${base} text-ink-soft hover:text-ink`;
     usersBtn.setAttribute('aria-selected', String(tab === 'users'));
-    eventsBtn.setAttribute('aria-selected', String(tab === 'events'));
     importsBtn.setAttribute('aria-selected', String(tab === 'imports'));
 }
 
@@ -126,7 +119,7 @@ async function loadAdminTab(tab) {
 
     let res;
     try {
-        res = tab === 'users' ? await api.adminUsers() : await api.adminEvents();
+        res = await api.adminUsers();
     } catch {
         res = { ok: false };
     }
@@ -134,9 +127,7 @@ async function loadAdminTab(tab) {
         box.innerHTML = alertHtml(errorText(res), 'error');
         return;
     }
-    box.innerHTML = tab === 'users'
-        ? usersListHtml(res.data.users || [])
-        : eventsListHtml(res.data.events || []);
+    box.innerHTML = usersListHtml(res.data.users || []);
 }
 
 function importStateBadge(state) {
@@ -292,33 +283,6 @@ function usersListHtml(users) {
                     ${u.isActive
                         ? `<button data-act="ban" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}" ${isSelf ? 'disabled title="Нельзя заблокировать себя"' : ''}>Заблокировать</button>`
                         : `<button data-act="unban" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Разблокировать</button>`}
-                </div>
-            </div>`;
-        }).join('')}
-    </div>`;
-}
-
-function eventsListHtml(events) {
-    if (!events.length) return `<p class="py-24 text-center text-lg text-ink-soft">Событий пока нет</p>`;
-
-    return `<p class="text-sm text-ink-faint mb-6">Всего: ${events.length}</p>
-    <div class="space-y-6">
-        ${events.map(ev => {
-            const active = ev.isActive !== false;
-            const statusBadge = active
-                ? `<span class="${UI.badge} ${UI.badgeSuccess}"><span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>Активно</span>`
-                : `<span class="${UI.badge} ${UI.badgeNeutral}">Архив</span>`;
-
-            return `
-            <div class="${UI.card} px-8 py-7 flex flex-col lg:flex-row lg:items-center gap-6">
-                <div class="flex-1 min-w-0">
-                    <p class="font-bold text-ink truncate">${escHtml(ev.name)}</p>
-                    <p class="mt-2 text-sm text-ink-soft">Создано ${formatDate(ev.createdAt)}</p>
-                </div>
-                <div class="flex items-center gap-3 flex-wrap shrink-0">
-                    ${statusBadge}
-                    <a href="#/event/${ev.id}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть</a>
-                    ${active ? `<button data-act="archive" data-id="${escAttr(ev.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">В архив</button>` : ''}
                 </div>
             </div>`;
         }).join('')}

@@ -58,8 +58,7 @@ async def _db_state() -> tuple[bool, bool]:
     try:
         has_version = await _table_exists(conn, 'alembic_version')
         has_users = await _table_exists(conn, 'users')
-        has_events = await _table_exists(conn, 'events')
-        return has_version, has_users or has_events
+        return has_version, has_users
     finally:
         await conn.close()
 

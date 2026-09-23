@@ -32,7 +32,6 @@ function router() {
         /* Визитка публична, но из авторизованной части на неё не ведём. */
         if (path === '/welcome' || ((path === '/' || path === '') && !store.user)) {
             setChrome(false);
-            setFab(false);
             if (store.user) {
                 navigate('#/');
                 return;
@@ -43,7 +42,6 @@ function router() {
 
         if (path === '/auth') {
             setChrome(false);
-            setFab(false);
             renderAuth();
             highlightNav(path);
             return;
@@ -52,7 +50,6 @@ function router() {
         /* Все маршруты дашборда требуют активной сессии. */
         if (!store.user) {
             setChrome(false);
-            setFab(false);
             navigate('#/auth');
             return;
         }
@@ -60,13 +57,9 @@ function router() {
         setChrome(true);
 
         if (path === '/') {
-            renderDashboard();
-        } else if (path.startsWith('/event/') && path.split('/event/')[1]) {
-            renderEvent(path.split('/event/')[1]);
+            renderOlympiads();
         } else if (path === '/profile') {
             renderProfile();
-        } else if (path === '/my-events') {
-            renderMyEvents();
         } else if (path === '/users') {
             renderUsers();
         } else if (path.startsWith('/users/') && path.split('/users/')[1]) {
@@ -85,8 +78,6 @@ function router() {
             renderImport(path.split('/imports/')[1]);
         } else if (path === '/admin' || path === '/admin/users') {
             renderAdmin('users');
-        } else if (path === '/admin/events') {
-            renderAdmin('events');
         } else if (path === '/admin/imports') {
             renderAdmin('imports');
         } else {
@@ -94,11 +85,8 @@ function router() {
         }
 
         highlightNav(path);
-        /* FAB только там, где есть работа с событиями, и только при роли EDITOR/ADMIN */
-        setFab((path === '/' || path === '/my-events') && store.canManageEvents());
     } catch (err) {
         console.error('[router] ошибка рендера:', err);
-        setFab(false);
         if (page) {
             page.innerHTML = `
             <div class="max-w-narrow mx-auto py-24 text-center">

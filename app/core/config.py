@@ -76,10 +76,7 @@ RSOSH_WORK_DIR = os.getenv(
     os.path.join(DOCS_DIR, '_import_work'),
 )
 
-# --- Опциональные токены внешних сервисов ----------------------------------
-HF_TOKEN = os.getenv('HF_TOKEN') or None
-
-# Значения-заглушки, которые запрещено использовать в production
+# --- Значения-заглушки, которые запрещено использовать в production -------
 _INSECURE_JWT_DEFAULTS = {'change_this_secret_key', 'secret', 'changeme'}
 
 

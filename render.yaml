@@ -8,7 +8,7 @@ services:
     branch: main
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/v1/health
-    # Оптимизация для 512MB RAM: 1 воркер, preload моделей, увеличенный таймаут
+    # Оптимизация для 512MB RAM: 1 воркер, увеличенный таймаут для RSOSH-импорта
     startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 --graceful-timeout 120 --workers 1 --preload app.main:app
     envVars:
       - key: ENVIRONMENT
@@ -23,8 +23,6 @@ services:
         value: "30"
       - key: COOKIE_SECURE
         value: "true"
-      - key: HF_TOKEN
-        sync: false
       # Ограничение потоков для экономии памяти на CPU
       - key: OMP_NUM_THREADS
         value: "1"

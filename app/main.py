@@ -21,7 +21,6 @@ from app.routers import (
     admin,
     auth,
     docs,
-    events,
     health,
     imports,
     olympiads,
@@ -45,7 +44,6 @@ app = FastAPI(lifespan=main_lifespan)
 install_exception_handlers(app)
 
 app.include_router(user.user_page, prefix='/api/v1')
-app.include_router(events.events_page, prefix='/api/v1')
 app.include_router(organizations.organizations_page, prefix='/api/v1')
 app.include_router(olympiads.olympiads_page, prefix='/api/v1')
 app.include_router(docs.docs_page, prefix='/api/v1')

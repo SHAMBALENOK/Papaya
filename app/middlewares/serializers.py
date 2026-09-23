@@ -46,21 +46,6 @@ def user_to_dict(user) -> dict:
     return data
 
 
-def event_to_dict(event) -> dict:
-    """Events (ORM) -> dict для кэша."""
-    return {
-        'id': str(event.id),
-        'owner': str(event.owner) if event.owner else None,
-        'name': event.name,
-        'disc': event.disc,
-        'preview_picture': event.preview_picture,
-        'picture': event.picture,
-        'isActive': event.isActive,
-        'createdAt': _iso(event.createdAt),
-        'updatedAt': _iso(event.updatedAt),
-    }
-
-
 def organization_to_dict(org) -> dict:
     """Organizations (ORM) -> dict для кэша и API."""
     return {

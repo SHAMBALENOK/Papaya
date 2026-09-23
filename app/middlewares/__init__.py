@@ -1,1 +1,1 @@
-from . import parse_tables, tokenz, re_check, tools
+from . import tokenz, re_check, tools

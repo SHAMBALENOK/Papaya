@@ -150,7 +150,6 @@ services:
       CACHE_TTL: "60"
       MAX_UPLOAD_MB: "1"
       TABLES_DIR: "/tmp/papaya-tables-test"
-      TABLE_IMPORT_IMAGES: "false"
     depends_on:
       postgres:
         condition: service_healthy
