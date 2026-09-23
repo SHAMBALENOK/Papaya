@@ -98,6 +98,26 @@ def _connection_pool() -> aioredis.ConnectionPool:
     )
 
 
+def get_standalone_redis() -> aioredis.Redis:
+    """Redis-клиент вне FastAPI-запроса (Celery-воркер, пайплайн, subprocess).
+
+    Пул создаётся на каждый вызов и не переживает цикл событий вызвавшего
+    контекста: в тестах loop создаётся на каждый тест, в API — на запрос.
+    Вызывающий обязан закрыть клиент (``aclose``).
+    """
+    return aioredis.Redis(connection_pool=_connection_pool())
+
+
+async def cache_doc_outside_request(doc: dict) -> None:
+    """Записать документ в кэш вне HTTP-запроса (после пайплайна/воркера)."""
+    client = get_standalone_redis()
+    try:
+        await cache_doc_after_write(client, doc)
+    finally:
+        close = getattr(client, 'aclose', client.close)
+        await close()
+
+
 @asynccontextmanager
 async def redis_lifespan(app: FastAPI):
     app.state.redis_pool = _connection_pool()

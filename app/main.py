@@ -23,6 +23,7 @@ from app.routers import (
     docs,
     events,
     health,
+    imports,
     olympiads,
     organizations,
     user,
@@ -48,6 +49,7 @@ app.include_router(events.events_page, prefix='/api/v1')
 app.include_router(organizations.organizations_page, prefix='/api/v1')
 app.include_router(olympiads.olympiads_page, prefix='/api/v1')
 app.include_router(docs.docs_page, prefix='/api/v1')
+app.include_router(imports.imports_page, prefix='/api/v1')
 app.include_router(auth.auth_page, prefix='/api/v1')
 app.include_router(admin.admin_page, prefix='/api/v1')
 app.include_router(health.health_page)

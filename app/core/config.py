@@ -68,6 +68,14 @@ DOCS_DIR = os.getenv(
 MAX_DOC_MB = _env_int('MAX_DOC_MB', 60)
 ALLOWED_DOC_EXTENSIONS = {'.pdf', '.xlsx', '.docx'}
 
+# --- RSOSH-импорт -------------------------------------------------------------
+# Рабочий каталог промежуточных файлов импорта (XLSX из PDF и пр.). Лежит
+# внутри хранилища документов, чтобы web и celery видели один и тот же путь.
+RSOSH_WORK_DIR = os.getenv(
+    'RSOSH_WORK_DIR',
+    os.path.join(DOCS_DIR, '_import_work'),
+)
+
 # --- Опциональные токены внешних сервисов ----------------------------------
 HF_TOKEN = os.getenv('HF_TOKEN') or None
 
