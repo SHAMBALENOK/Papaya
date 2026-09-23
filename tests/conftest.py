@@ -39,7 +39,6 @@ os.environ['REDIS_URL'] = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
 os.environ['CACHE_TTL'] = os.environ.get('CACHE_TTL', '60')
 os.environ['MAX_UPLOAD_MB'] = os.environ.get('MAX_UPLOAD_MB', '1')
 os.environ['TABLES_DIR'] = os.environ.get('TABLES_DIR', '/tmp/papaya-tables-test')
-os.environ['TABLE_IMPORT_IMAGES'] = 'false'
 os.environ['COOKIE_SECURE'] = 'false'
 
 import pytest  # noqa: E402

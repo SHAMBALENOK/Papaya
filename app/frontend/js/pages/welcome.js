@@ -51,8 +51,8 @@ function renderWelcome() {
                     <div class="flex items-start gap-4">
                         <span class="mt-1 w-3 h-3 rounded bg-sand shrink-0" aria-hidden="true"></span>
                         <div>
-                            <h2 class="font-bold text-lg">Работа с событиями</h2>
-                            <p class="mt-2 text-sm text-ink-soft leading-relaxed">Добавление, изменение и импорт данных из PDF-таблиц.</p>
+                            <h2 class="font-bold text-lg">Импорт РСОШ</h2>
+                            <p class="mt-2 text-sm text-ink-soft leading-relaxed">Автоматическая загрузка перечня олимпиад из PDF и XLSX-таблиц.</p>
                         </div>
                     </div>
                 </div>
@@ -85,9 +85,9 @@ function renderWelcome() {
                 </article>
                 <article class="bg-white shadow-elev-1 p-8 md:p-10">
                     <p class="text-sm font-extrabold text-ember">03</p>
-                    <h3 class="mt-6 text-2xl font-bold tracking-tight">Управление событиями</h3>
+                    <h3 class="mt-6 text-2xl font-bold tracking-tight">Данные и импорт</h3>
                     <p class="mt-4 text-ink-soft leading-relaxed">
-                        Пользователи с соответствующими правами могут добавлять и изменять события, а также импортировать данные из PDF-таблиц.
+                        Организации, олимпиады, документы и автоматический импорт перечня олимпиад из файлов РСОШ.
                     </p>
                 </article>
             </div>

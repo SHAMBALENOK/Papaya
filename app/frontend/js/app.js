@@ -89,6 +89,16 @@ function userFromDashboard(d) {
     };
 }
 
+function userFromProfile(d) {
+    return {
+        id: d.id,
+        name: d.name,
+        surname: d.surname,
+        email: d.email,
+        role: d.role || 'USER',
+    };
+}
+
 function userInitials(user) {
     if (!user) return '?';
     const a = (user.name || '?')[0] || '?';
@@ -181,277 +191,6 @@ function showToast(message, type = 'info', duration = 3500) {
     }, duration);
 }
 
-/* ---------- Модалки событий ---------- */
-
-function openAddEventModal(onDone) {
-    const body = `
-        <div id="modal-alert"></div>
-        <form id="add-event-form">
-            ${inputField({ id: 'ev-name', name: 'name', label: 'Название', required: true })}
-            ${textareaField({ id: 'ev-disc', name: 'disc', label: 'Описание', placeholder: 'Описание олимпиады…' })}
-            ${inputField({ id: 'ev-preview', name: 'preview_picture', label: 'URL превью', type: 'url', placeholder: 'https://…' })}
-            ${inputField({ id: 'ev-picture', name: 'picture', label: 'URL полного фото', type: 'url', placeholder: 'https://…' })}
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
-                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Создать событие</button>
-            </div>
-        </form>`;
-    const { overlay, close } = openModal('Новое событие', body);
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
-
-    overlay.querySelector('#add-event-form').addEventListener('submit', async e => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        const btn = e.target.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        const now = new Date().toISOString();
-        try {
-            const res = await api.addEvent({
-                id: '',
-                owner: store.user.id,
-                name: fd.get('name'),
-                disc: fd.get('disc') || null,
-                preview_picture: fd.get('preview_picture') || null,
-                picture: fd.get('picture') || null,
-                isActive: true,
-                createdAt: now,
-                updatedAt: now,
-            });
-            if (res.ok) {
-                close();
-                showToast('Событие создано', 'success');
-                if (onDone) onDone();
-            } else {
-                showModalError(overlay, res);
-            }
-        } catch {
-            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
-        }
-        btn.disabled = false;
-    });
-}
-
-function openPdfModal(onDone) {
-    const body = `
-        <div id="modal-alert"></div>
-        <form id="pdf-form">
-            <div class="${UI.field}">
-                <label for="pdf-file" class="${UI.label}">Файл таблицы мероприятий <span class="text-crimson" aria-hidden="true">*</span></label>
-                <input id="pdf-file" name="file" type="file" accept=".pdf,.xlsx" required
-                       class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-ink file:text-white hover:file:bg-ink-deep file:transition-colors file:cursor-pointer">
-                <p class="mt-2 text-sm text-ink-soft leading-relaxed">Поддерживаются PDF и XLSX — как принимает маршрут /events/add_events_via_tables.</p>
-            </div>
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
-                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Загрузить</button>
-            </div>
-        </form>`;
-    const { overlay, close } = openModal('Импорт из таблицы', body);
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
-
-    overlay.querySelector('#pdf-form').addEventListener('submit', async e => {
-        e.preventDefault();
-        const btn = e.target.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        btn.textContent = 'Обработка файла…';
-        try {
-            const fd = new FormData(e.target);
-            const res = await api.addEventsPdf(fd);
-            if (res.ok && Array.isArray(res.data)) {
-                close();
-                showToast(`Добавлено событий: ${res.data.length}`, 'success');
-                if (onDone) onDone();
-            } else {
-                showModalError(overlay, res);
-            }
-        } catch {
-            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
-        }
-        btn.disabled = false;
-        btn.textContent = 'Загрузить';
-    });
-}
-
-function openEditEventModal(ev, onDone) {
-    const body = `
-        <div id="modal-alert"></div>
-        <form id="edit-event-form">
-            ${inputField({ id: 'ee-name', name: 'name', label: 'Название', required: true, value: ev.name || '' })}
-            ${textareaField({ id: 'ee-disc', name: 'disc', label: 'Описание', value: ev.disc || '' })}
-            ${inputField({ id: 'ee-preview', name: 'preview_picture', label: 'URL превью', type: 'url', value: ev.preview_picture || '' })}
-            ${inputField({ id: 'ee-picture', name: 'picture', label: 'URL полного фото', type: 'url', value: ev.picture || '' })}
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
-                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Сохранить</button>
-            </div>
-        </form>`;
-    const { overlay, close } = openModal('Редактирование события', body);
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
-
-    overlay.querySelector('#edit-event-form').addEventListener('submit', async e => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        const btn = e.target.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        try {
-            const res = await api.editEvent({
-                id: ev.id,
-                owner: ev.owner || store.user.id,
-                name: fd.get('name'),
-                disc: fd.get('disc') || null,
-                preview_picture: fd.get('preview_picture') || null,
-                picture: fd.get('picture') || null,
-                isActive: ev.isActive !== false,
-                createdAt: ev.createdAt || new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            });
-            if (res.ok) {
-                close();
-                showToast('Событие обновлено', 'success');
-                if (onDone) onDone();
-            } else {
-                showModalError(overlay, res);
-            }
-        } catch {
-            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
-        }
-        btn.disabled = false;
-    });
-}
-
-async function openUpdateEventModal(onDone) {
-    if (!store.myEvents.length) {
-        try {
-            const res = await api.getMyEvents();
-            if (res.ok && res.data) store.setMyEvents(res.data.events);
-        } catch (err) {
-            console.error('[update-event] ошибка загрузки:', err);
-        }
-    }
-    const events = store.myEvents;
-
-    if (!events.length) {
-        const { overlay } = openModal('Обновить событие', `
-            <p class="text-ink-soft leading-relaxed">У вас пока нет собственных событий — обновлять нечего.</p>
-            <div class="flex justify-end mt-10">
-                <button type="button" data-cancel class="${UI.btn} ${UI.btnPrimary}">Понятно</button>
-            </div>`);
-        overlay.querySelector('[data-cancel]').addEventListener('click', () => overlay.remove());
-        return;
-    }
-
-    const listHtml = `
-        <p class="text-sm text-ink-soft leading-relaxed mb-6">Выберите событие, данные которого нужно обновить.</p>
-        <div class="space-y-3">
-            ${events.map(ev => `
-            <button type="button" data-pick="${escAttr(ev.id)}"
-                    class="w-full text-left bg-mist/60 hover:bg-mist rounded px-6 py-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                <span class="block font-semibold text-ink truncate">${escHtml(ev.name)}</span>
-                <span class="block mt-1 text-sm text-ink-soft">Обновлено ${formatDate(ev.updatedAt)}</span>
-            </button>`).join('')}
-        </div>`;
-
-    const { overlay, close } = openModal('Обновить событие', listHtml);
-    overlay.querySelectorAll('[data-pick]').forEach(btn =>
-        btn.addEventListener('click', () => {
-            const ev = events.find(e => e.id === btn.dataset.pick);
-            if (ev) { close(); openEditEventModal(ev, onDone); }
-        }));
-}
-
-/* ---------- FAB ---------- */
-
-function setFab(visible) {
-    const existing = document.getElementById('fab');
-    if (visible) {
-        if (!existing) mountFab();
-        else existing.classList.remove('hidden');
-    } else if (existing) {
-        closeFabMenu();
-        existing.classList.add('hidden');
-    }
-}
-
-function mountFab() {
-    const wrap = document.createElement('div');
-    wrap.id = 'fab';
-    wrap.className = 'fixed bottom-6 right-6 md:bottom-10 md:right-10 z-40 flex flex-col items-end gap-4';
-    wrap.innerHTML = `
-        <div id="fab-menu" role="menu" aria-label="Действия со событиями"
-             class="flex flex-col items-stretch gap-3 opacity-0 translate-y-2 pointer-events-none transition-all duration-200">
-            <button type="button" role="menuitem" data-fab="pdf"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                Импорт из таблицы
-            </button>
-            <button type="button" role="menuitem" data-fab="add"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                Добавить событие
-            </button>
-            <button type="button" role="menuitem" data-fab="edit"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                Обновить событие
-            </button>
-        </div>
-        <button type="button" id="fab-toggle" aria-expanded="false" aria-controls="fab-menu" aria-label="Действия со событиями"
-                class="w-14 h-14 rounded bg-ember text-ink shadow-elev-2 hover:brightness-95 hover:shadow-elev-3 hover:-translate-y-0.5 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60 focus-visible:ring-offset-2">
-            <svg id="fab-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="transition-transform duration-200" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
-        </button>`;
-    document.body.appendChild(wrap);
-
-    wrap.querySelector('#fab-toggle').addEventListener('click', () => {
-        fabIsOpen() ? closeFabMenu() : openFabMenu();
-    });
-
-    wrap.querySelectorAll('[data-fab]').forEach(btn =>
-        btn.addEventListener('click', () => {
-            closeFabMenu();
-            if (btn.dataset.fab === 'pdf') openPdfModal(fabRefresh);
-            else if (btn.dataset.fab === 'add') openAddEventModal(fabRefresh);
-            else openUpdateEventModal(fabRefresh);
-        }));
-
-    document.addEventListener('click', e => { if (!wrap.contains(e.target)) closeFabMenu(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFabMenu(); });
-}
-
-function fabIsOpen() {
-    const t = document.getElementById('fab-toggle');
-    return !!t && t.getAttribute('aria-expanded') === 'true';
-}
-
-function openFabMenu() {
-    const menu = document.getElementById('fab-menu');
-    const toggle = document.getElementById('fab-toggle');
-    const icon = document.getElementById('fab-icon');
-    if (!menu || !toggle) return;
-    menu.classList.remove('opacity-0', 'translate-y-2', 'pointer-events-none');
-    menu.classList.add('opacity-100', 'translate-y-0', 'pointer-events-auto');
-    toggle.setAttribute('aria-expanded', 'true');
-    if (icon) icon.classList.add('rotate-45');
-    const first = menu.querySelector('[data-fab]');
-    if (first) first.focus();
-}
-
-function closeFabMenu() {
-    const menu = document.getElementById('fab-menu');
-    const toggle = document.getElementById('fab-toggle');
-    const icon = document.getElementById('fab-icon');
-    if (!menu || !toggle) return;
-    menu.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
-    menu.classList.add('opacity-0', 'translate-y-2', 'pointer-events-none');
-    toggle.setAttribute('aria-expanded', 'false');
-    if (icon) icon.classList.remove('rotate-45');
-}
-
-function fabRefresh() {
-    if (getRoute() === '/my-events') { renderMyEvents(); return; }
-    (async () => {
-        try { await loadDashboardData(); }
-        catch (err) { console.error('[fab] ошибка обновления:', err); }
-        drawDashboard();
-    })();
-}
-
 /* ---------- Chrome: сайдбар дашборда ---------- */
 
 function setChrome(visible) {
@@ -519,13 +258,11 @@ function renderHeader() {
         { href: '#/olympiads', route: '/olympiads', label: 'Олимпиады' },
         { href: '#/organizations', route: '/organizations', label: 'Организации' },
         { href: '#/docs', route: '/docs', label: 'Документы' },
-        { href: '#/my-events', route: '/my-events', label: 'Мои события' },
         { href: '#/users', route: '/users', label: 'Пользователи' },
         { href: '#/profile', route: '/profile', label: 'Профиль' },
     ];
     if (store.isAdmin()) {
         links.push({ href: '#/admin/users', route: '/admin', label: 'Админ' });
-        links.push({ href: '#/admin/imports', route: '/admin', label: 'Импорты' });
     }
 
     nav.innerHTML = links.map(l =>
@@ -553,8 +290,7 @@ function renderHeader() {
 
 function highlightNav(path) {
     let current = path || '/';
-    if (path.startsWith('/event/')) current = '/';
-    else if (path.startsWith('/users/')) current = '/users';
+    if (path.startsWith('/users/')) current = '/users';
     else if (path.startsWith('/organizations/')) current = '/organizations';
     else if (path.startsWith('/olympiads/')) current = '/olympiads';
     else if (path.startsWith('/imports/')) current = '/docs';
@@ -574,10 +310,9 @@ async function bootstrap() {
 
     try {
         /* На публичных страницах отсутствие JWT не должно уводить с визитки. */
-        const res = await api.getDashboard({ skipAuthRedirect: isPublicRoute });
-        if (res.ok && res.data && res.data.user_id) {
-            store.setUser(userFromDashboard(res.data));
-            store.setEvents(res.data.events);
+        const res = await api.getMe({ skipAuthRedirect: isPublicRoute });
+        if (res.ok && res.data && res.data.id) {
+            store.setUser(userFromProfile(res.data));
         } else if (!isPublicRoute) {
             navigate('#/auth');
         }
@@ -592,7 +327,6 @@ async function logout() {
     try { await api.logout(); } catch { /* сессия истечёт сама */ }
     store.clear();
     setChrome(false);
-    setFab(false);
     navigate('#/auth');
 }
 

@@ -17,18 +17,31 @@ function splitList(text) {
 }
 
 function olympiadCard(oly) {
-    const subjects = (Array.isArray(oly.subjects) ? oly.subjects : []).slice(0, 4).join(', ');
-    const levels = Array.isArray(oly.levels) ? oly.levels.join('‑') : '';
+    const subjects = (Array.isArray(oly.subjects) ? oly.subjects : []).slice(0, 3);
+    const levels = (Array.isArray(oly.levels) ? oly.levels : []).join('‑');
+    const years = (Array.isArray(oly.years) ? oly.years : []).slice(0, 3).join(', ');
+    const accent = oly.status === 'ARCHIVED' ? 'bg-crimson'
+        : oly.status === 'DRAFT' ? 'bg-sand'
+        : 'bg-sage';
     return `
-    <a href="#/olympiads/${oly.id}" class="${UI.card} block hover:shadow-elev2 transition-shadow">
-        <div class="flex items-start justify-between gap-3">
-            <p class="font-semibold min-w-0 truncate">${escHtml(oly.name)}</p>
-            ${statusBadge(oly.status)}
-        </div>
-        ${subjects ? `<p class="mt-2 text-sm text-ink-soft truncate">${escHtml(subjects)}</p>` : ''}
-        <div class="mt-3 flex items-center gap-2">
-            ${levels ? `<span class="${UI.badge} ${UI.badgeNeutral}">уровень ${escHtml(levels)}</span>` : ''}
-            ${oly.years && oly.years.length ? `<span class="text-xs text-ink-soft">${escHtml(oly.years.join(', '))}</span>` : ''}
+    <a href="#/olympiads/${oly.id}"
+       class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60 flex flex-col">
+        <div class="h-1.5 ${accent}" aria-hidden="true"></div>
+        <div class="p-7 flex flex-col grow">
+            <div class="flex items-start justify-between gap-3">
+                <h2 class="font-bold text-ink leading-snug">${escHtml(oly.name)}</h2>
+                ${statusBadge(oly.status)}
+            </div>
+            ${oly.description ? `<p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(oly.description)}</p>` : ''}
+            ${subjects.length ? `
+            <div class="mt-4 flex flex-wrap gap-2">
+                ${subjects.map(s => `<span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(s)}</span>`).join('')}
+            </div>` : ''}
+            <div class="mt-auto pt-6 flex items-center justify-between gap-3 text-xs">
+                ${levels ? `<span class="font-semibold text-ink">уровень ${escHtml(levels)}</span>` : '<span></span>'}
+                ${years ? `<span class="text-ink-soft">${escHtml(years)}</span>` : ''}
+            </div>
+            <p class="mt-4 text-sm font-semibold text-ink group-hover:text-black transition-colors">Подробнее →</p>
         </div>
     </a>`;
 }
@@ -116,17 +129,18 @@ async function renderOlympiads() {
     const canManage = store.isAdmin() || store.user.role === 'ORGANIZATION_ADMIN';
 
     page.innerHTML = `
-    <section class="max-w-5xl mx-auto px-4 py-8">
-        <header class="flex items-center justify-between gap-4 mb-6">
-            <div>
-                <h1 class="text-2xl font-bold">Олимпиады</h1>
-                <p class="text-sm text-ink-soft">Каталог перечня РСОШ</p>
+    <section class="pt-4 pb-16 md:pb-20">
+        <div class="flex flex-wrap items-end justify-between gap-6">
+            <div class="max-w-2xl">
+                <p class="${UI.eyebrow}">Каталог</p>
+                <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Олимпиады</h1>
+                <p class="mt-6 text-lg text-ink-soft leading-relaxed">Перечень РСОШ и другие олимпиады для школьников. Откройте карточку, чтобы узнать подробности.</p>
             </div>
             ${canManage ? `<button id="oly-create" class="${UI.btn} ${UI.btnPrimary}">Создать</button>` : ''}
-        </header>
+        </div>
         ${olympiads.length === 0
-            ? alertHtml('Олимпиад пока нет', 'error')
-            : `<div class="grid gap-4 sm:grid-cols-2">${olympiads.map(olympiadCard).join('')}</div>`}
+            ? `<div class="mt-16">${alertHtml('Олимпиад пока нет', 'error')}</div>`
+            : `<div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">${olympiads.map(olympiadCard).join('')}</div>`}
     </section>`;
 
     const createBtn = page.querySelector('#oly-create');

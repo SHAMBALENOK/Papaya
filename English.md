@@ -17,39 +17,39 @@
 - [Local Setup](#local-setup)
 - [API and Routes](#api-and-routes)
 
-Papaya is a web service for school students that brings information about nationwide and regional academic competitions together in one place. Users can register, manage their profiles, and browse educational events.
+Papaya is a web service for school students that brings information about nationwide and regional academic competitions together in one place. Users can register, manage their profiles, and browse the olympiad catalog.
 
 ## Changelog
 
 ### Current version
 
 - Authentication now uses access and refresh JWT cookies; registration and login include password hashing and data validation.
-- Added the active olympiad catalog, event pages, a user's own event list, list of users and profile editing.
-- Users with the `EDITOR` or `ADMIN` role can create and update events through the application interface.
-- Added olympiad imports from PDF and XLSX tables. PDFs are processed with Tesseract OCR in the Celery queue, and extra table columns are preserved in the event description.
-- Added the `USER`, `EDITOR`, and `ADMIN` roles, together with a dedicated administration panel for users and events.
+- Added the olympiad catalog, olympiad pages, the list of users and profile editing.
+- Added olympiad imports from PDF and XLSX tables (RSOSH list). PDFs are processed with Tesseract OCR in the Celery queue.
+- Added the `USER`, `ORGANIZATION_ADMIN`, and `ADMIN` roles, together with a dedicated administration panel for users and RSOSH imports.
 - The welcome, login, and registration pages are available without authentication.
-- Added Redis caching and a Celery queue for resource-intensive PDF processing.
+- Added Redis caching and a Celery queue for resource-intensive processing.
 - Added a containerized environment with PostgreSQL, Redis, the web application, Celery, and pgAdmin. `setup.sh` runs automatically inside the containers and verifies Tesseract OCR.
 
 ### Branch `patch-0.7`
 
+- Completely removed the legacy "events" subsystem: table, router, schemas, model, cache and frontend were deleted; migration `0005` drops the `events` table on existing databases; PyTorch and ddgs dependencies were removed from `requirements.txt` and the `Dockerfile`.
+- The SPA home screen now renders the olympiad catalog (cards, 3–4 per row); sidebar navigation no longer has "My events" and the duplicated "Imports" item, and "Admin" is highlighted only once.
 - Domain entities **Organizations**, **Olympiads** and **Documents** (JSONB relation arrays, no premature tables) plus Alembic migration `0004`.
 - REST `/api/v1/organizations`, `/api/v1/olympiads`, `/api/v1/docs` with per-organization access control and versioned Redis caching.
 - **RSOSH import** (`app/rsosh` + `/api/v1/imports`): upload PDF/XLSX → table extraction (img2table + Tesseract OCR) → name normalization → matching → review queue. Nothing is written to the database until an admin explicitly confirms (`confirm`/`reject`); repeated confirm is idempotent; duplicates are merged and cache is invalidated on confirmation.
 - Import state machine `processing → review → approved|rejected|failed` stored in `docs.metadata['rsosh']`.
 - Frontend pages for organizations, olympiads, documents, import preview and the admin dashboard (`#/admin/imports`).
-- Full test suite: 52 passed (`docker compose --profile testing run --rm test`).
+- Full test suite: 36 passed (`docker compose --profile testing run --rm test`).
 - Fixed `setup.sh` CRLF newlines that prevented containers from starting after an image rebuild.
 
 ## Coming Soon
 
 - School student, university student, teacher, and educational organization roles with different capabilities.
-- Categorized olympiad tabs and improved event grouping.
+- Categorized olympiad tabs and improved olympiad grouping.
 - Direct import of tables from photos in addition to PDF and XLSX.
 - More pages available without authentication.
-- A dedicated, improved workflow for adding and editing events.
-- Automated tests.
+- A dedicated, improved workflow for adding and editing olympiads.
 - Tabs for Olympiads that provide admission rights (BVI) for a specific educational institution.
 - Search.
 - Olympiad tags by category.
@@ -107,9 +107,7 @@ Main variables:
   cookie flag and rejects placeholder secrets);
 - `DATABASE_URL` — PostgreSQL connection (the schema is managed by Alembic
   migrations, applied automatically when the container starts);
-- `MAX_UPLOAD_MB` — maximum size of an uploaded table, `30` by default;
-- `HF_TOKEN` — optional read-access Hugging Face token for model downloads,
-  available from the [token settings page](https://huggingface.co/settings/tokens).
+- `MAX_UPLOAD_MB` — maximum size of an uploaded document, `30` by default;
 
 Do not publish real tokens or commit them to a public repository.
 
@@ -168,19 +166,27 @@ Every API route uses the `/api/v1` prefix. The complete interactive schema is av
 
 | Method | Path | Description | Access |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/welcome` | Check the session for the public page | Public |
 | `GET` | `/api/v1/auth/` | Authentication page state | Public |
 | `POST` | `/api/v1/auth/register` | Register a user | Public |
 | `POST` | `/api/v1/auth/login` | Log in and set JWT cookies | Public |
 | `GET` | `/api/v1/auth/logout` | Log out and remove JWT cookies | Authenticated |
-| `GET` | `/api/v1/events/dashboard` | Active olympiad catalog | Authenticated |
-| `GET` | `/api/v1/events/dashboard/my_events` | Current user's events | Authenticated |
-| `GET` | `/api/v1/events/<event_id>` | Event details | Authenticated |
-| `POST` | `/api/v1/events/add_event` | Create an event | `EDITOR` or `ADMIN` |
-| `POST` | `/api/v1/events/edit_event/<event_id>` | Update an event | `EDITOR` or `ADMIN` |
-| `POST` | `/api/v1/events/add_events_via_tables` | Import events from PDF or XLSX | `EDITOR` or `ADMIN` |
+| `GET` | `/api/v1/` | Current user profile from the JWT | Authenticated |
+| `GET` | `/api/v1/olympiads` | Olympiad catalog | Authenticated |
+| `POST` | `/api/v1/olympiads` | Create an olympiad | `ORGANIZATION_ADMIN` or `ADMIN` |
+| `GET` | `/api/v1/olympiads/<olympiad_id>` | Olympiad details | Authenticated |
+| `GET` | `/api/v1/organizations` | Organization list | Authenticated |
+| `GET` | `/api/v1/docs` | Document list | Authenticated |
+| `POST` | `/api/v1/docs` | Upload a document | `ORGANIZATION_ADMIN` or `ADMIN` |
+| `POST` | `/api/v1/imports/rsosh` | Start an RSOSH import | `ADMIN` |
+| `GET` | `/api/v1/imports` | Import list | `ADMIN` |
+| `GET` | `/api/v1/imports/<import_id>` / `/preview` | Import details / preview | `ADMIN` |
+| `POST` | `/api/v1/imports/<import_id>/confirm` | Approve an import | `ADMIN` |
+| `POST` | `/api/v1/imports/<import_id>/reject` | Reject an import | `ADMIN` |
 | `GET` | `/api/v1/user/users` | List active users | Authenticated |
 | `GET` | `/api/v1/user/<user_id>` | User profile | Authenticated |
 | `POST` | `/api/v1/user/<user_id>/edit_info` | Update the current user's profile | Profile owner |
 | `GET` | `/api/v1/admin/users` | Manage users | `ADMIN` |
-| `GET` | `/api/v1/admin/events` | Manage events and the archive | `ADMIN` |
+| `POST` | `/api/v1/admin/ban/<user_id>` | Ban a user | `ADMIN` |
+| `POST` | `/api/v1/admin/unban/<user_id>` | Unban a user | `ADMIN` |
+| `POST` | `/api/v1/admin/grant_admin/<user_id>` | Grant the `ADMIN` role | `ADMIN` |
+| `POST` | `/api/v1/admin/demote_admin/<user_id>` | Remove the `ADMIN` role | `ADMIN` |

@@ -1,10 +1,10 @@
-"""Initial schema: users and events tables.
+"""Initial schema: users table.
 
 Revision ID: 0001
 Revises:
 Create Date: 2026-09-17
 
-Базовые таблицы текущей модели данных (Users, Events). Индексы вынесены в
+Базовые таблицы текущей модели данных (Users). Индексы вынесены в
 отдельную миграцию 0002, чтобы существующие базы, созданные через
 Base.metadata.create_all, можно было сначала «заклеймить» на revision 0001,
 а затем применить 0002 и получить недостающие индексы без пересоздания схемы.
@@ -22,7 +22,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """Создать таблицы users и events."""
+    """Создать таблицу users."""
     op.create_table(
         'users',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
@@ -44,21 +44,7 @@ def upgrade() -> None:
         sa.UniqueConstraint('email', name='uq_users_email'),
     )
 
-    op.create_table(
-        'events',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column('owner', postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column('name', sa.String(), nullable=True),
-        sa.Column('disc', sa.String(), nullable=True),
-        sa.Column('preview_picture', sa.String(), nullable=True),
-        sa.Column('picture', sa.String(), nullable=True),
-        sa.Column('isActive', sa.Boolean(), nullable=True),
-        sa.Column('createdAt', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('updatedAt', sa.DateTime(timezone=True), nullable=True),
-    )
-
 
 def downgrade() -> None:
-    """Удалить таблицы в обратном порядке."""
-    op.drop_table('events')
+    """Удалить таблицу users."""
     op.drop_table('users')

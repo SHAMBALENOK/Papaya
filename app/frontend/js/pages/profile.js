@@ -91,7 +91,6 @@ function userProfileHtml(u, { editable = false } = {}) {
             </div>
             ${editable ? `
             <div class="flex flex-wrap gap-3 shrink-0">
-                <a href="#/my-events" class="${UI.btn} ${UI.btnSecondary}">Мои события</a>
                 <button id="btn-edit-profile" class="${UI.btn} ${UI.btnPrimary}">Редактировать</button>
             </div>` : ''}
         </header>

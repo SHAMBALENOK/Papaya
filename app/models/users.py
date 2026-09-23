@@ -41,8 +41,8 @@ class Users(Base):
     metadata_ = Column('metadata', JSONB, nullable=True)
     isActive = Column(Boolean, default=True)
     # Индекс помогает сортировке списков пользователей по дате создания.
-    # Timezone-aware, как и в events, чтобы обе таблицы имели общий контракт
-    # времени (миграция 0003 выровняла legacy-колонки).
+    # Timezone-aware, как и остальные доменные модели, чтобы контракт времени
+    # был общим (миграция 0003 выровняла legacy-колонки).
     createdAt = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
