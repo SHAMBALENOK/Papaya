@@ -104,6 +104,7 @@ const api = {
     deleteDoc(id)                   { return this.delete(`/docs/${id}`); },
 
     /* RSOSH-импорт */
+    getImports(params = '')          { return this.get(`/imports${params}`); },
     startRsoshImport(docId)         { return this.post('/imports/rsosh', { doc_id: docId }); },
     getImportStatus(id)             { return this.get(`/imports/${id}`); },
     getImportPreview(id)            { return this.get(`/imports/${id}/preview`); },

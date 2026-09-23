@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -131,6 +131,64 @@ async def start_rsosh_import(
                 'status': states.STATE_PROCESSING,
             },
         )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.get(
+    '',
+    responses={
+        200: {'description': 'List of RSOSH imports'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Permission denied'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def list_imports(
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: dict = Depends(require_org_admin_or_admin),
+):
+    """Список импортов: админ видит все, орг-админ — только своей организации."""
+    try:
+        organization_id = None
+        if current_user.get('role') != 'ADMIN':
+            organization_id = current_user.get('organization_id')
+
+        docs = await database.docs.list_docs(
+            doc_type='RSOSH_LIST',
+            organization_id=organization_id,
+        )
+        items = []
+        for doc in docs:
+            section = rsosh_section(doc)
+            if not section.get('state'):
+                continue
+            summary = section.get('summary') or {}
+            items.append({
+                'import_id': str(doc['id']),
+                'doc_name': doc.get('name'),
+                'doc_status': doc.get('status'),
+                'organization_id': doc.get('organization_id'),
+                'state': section.get('state'),
+                'started_at': section.get('started_at'),
+                'finished_at': section.get('finished_at'),
+                'error': section.get('error'),
+                'summary': {
+                    'total': summary.get('total') or 0,
+                    'new': summary.get('new') or 0,
+                    'merge': summary.get('merge') or 0,
+                    'duplicate': summary.get('duplicate') or 0,
+                    'review': summary.get('review') or 0,
+                },
+            })
+        items.sort(
+            key=lambda item: item.get('finished_at') or item.get('started_at') or '',
+            reverse=True,
+        )
+        return items[:limit]
     except HTTPException:
         raise
     except Exception:

@@ -525,6 +525,7 @@ function renderHeader() {
     ];
     if (store.isAdmin()) {
         links.push({ href: '#/admin/users', route: '/admin', label: 'Админ' });
+        links.push({ href: '#/admin/imports', route: '/admin', label: 'Импорты' });
     }
 
     nav.innerHTML = links.map(l =>

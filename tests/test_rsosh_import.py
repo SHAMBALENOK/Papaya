@@ -214,3 +214,64 @@ async def test_import_state_machine_via_http(client):
 
     preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
     assert preview.status_code == 409  # ещё processing (worker отсутствует)
+
+
+async def test_import_list_for_admin(client):
+    """GET /imports возвращает сводку по RSOSH-импортам загруженных списков."""
+    org = await _setup_admin_and_org(client)
+    first = await _upload_list(
+        client,
+        org,
+        _make_xlsx([('1', 'Олимпиада Йота', 'математика', '1')]),
+        name='first.xlsx',
+    )
+    second = await _upload_list(
+        client,
+        org,
+        _make_xlsx([('1', 'Олимпиада Каппа', 'физика', '3')]),
+        name='second.xlsx',
+    )
+    other_org = (
+        await client.post(
+            '/api/v1/organizations',
+            json={'name': 'Другой оргкомитет', 'type': 'ORGANIZER'},
+        )
+    ).json()
+    other = await _upload_list(
+        client,
+        other_org,
+        _make_xlsx([('1', 'Олимпиада Лямбда', 'химия', '2')]),
+        name='other.xlsx',
+    )
+
+    from app.rsosh.processor import run_import
+
+    await run_import(str(first.json()['id']))
+    await run_import(str(second.json()['id']))
+    await run_import(str(other.json()['id']))
+
+    listed = await client.get('/api/v1/imports')
+    assert listed.status_code == 200, listed.text
+    imports = listed.json()
+    ids = {item['import_id'] for item in imports}
+    # В тестовой БД остаются импорты других тестов сессии — проверяем
+    # наличие своих (подмножество), а не точное равенство.
+    assert {first.json()['id'], second.json()['id'], other.json()['id']} <= ids
+
+    by_id = {item['import_id']: item for item in imports}
+    item = by_id[first.json()['id']]
+    assert item['state'] == 'review'
+    assert item['summary']['new'] == 1
+    assert item['doc_name'] == 'first.xlsx'
+
+    # Орг-админ видит только импорты своей организации.
+    member = await register_user(client)
+    from tests.test_domain_api import _bind_org_admin
+
+    await _bind_org_admin(client, member['id'], org['id'])
+    listed2 = await client.get('/api/v1/imports')
+    assert listed2.status_code == 200, listed2.text
+    assert {item['import_id'] for item in listed2.json()} == {
+        first.json()['id'],
+        second.json()['id'],
+    }
