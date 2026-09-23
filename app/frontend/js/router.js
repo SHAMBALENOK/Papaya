@@ -59,7 +59,7 @@ function router() {
 
         setChrome(true);
 
-        if (path === '/' || path === '') {
+        if (path === '/') {
             renderDashboard();
         } else if (path.startsWith('/event/') && path.split('/event/')[1]) {
             renderEvent(path.split('/event/')[1]);
@@ -71,6 +71,18 @@ function router() {
             renderUsers();
         } else if (path.startsWith('/users/') && path.split('/users/')[1]) {
             renderUserPublic(path.split('/users/')[1]);
+        } else if (path === '/organizations') {
+            renderOrganizations();
+        } else if (path.startsWith('/organizations/') && path.split('/organizations/')[1]) {
+            renderOrganization(path.split('/organizations/')[1]);
+        } else if (path === '/olympiads') {
+            renderOlympiads();
+        } else if (path.startsWith('/olympiads/') && path.split('/olympiads/')[1]) {
+            renderOlympiad(path.split('/olympiads/')[1]);
+        } else if (path === '/docs') {
+            renderDocs();
+        } else if (path.startsWith('/imports/') && path.split('/imports/')[1]) {
+            renderImport(path.split('/imports/')[1]);
         } else if (path === '/admin' || path === '/admin/users') {
             renderAdmin('users');
         } else if (path === '/admin/events') {

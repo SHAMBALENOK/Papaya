@@ -46,6 +46,8 @@ const api = {
     get(path, options) { return this.request('GET', path, null, false, options); },
     post(path, body, options) { return this.request('POST', path, body, false, options); },
     postForm(path, formData, options) { return this.request('POST', path, formData, true, options); },
+    patch(path, body, options) { return this.request('PATCH', path, body, false, options); },
+    delete(path, options) { return this.request('DELETE', path, null, false, options); },
 
     /* Аутентификация */
     checkAuth()  { return this.get('/auth/'); },
@@ -79,4 +81,32 @@ const api = {
     grantAdmin(id)   { return this.post(`/admin/grant_admin/${id}`); },
     demoteAdmin(id)  { return this.post(`/admin/demote_admin/${id}`); },
     archiveEvent(id) { return this.post(`/admin/archive_event/${id}`); },
+
+    /* Организации (админ создаёт; редактирует админ или своя организация) */
+    getOrganizations(params = '')   { return this.get(`/organizations${params}`); },
+    getOrganization(id)             { return this.get(`/organizations/${id}`); },
+    createOrganization(d)           { return this.post('/organizations', d); },
+    updateOrganization(id, d)       { return this.patch(`/organizations/${id}`, d); },
+    deleteOrganization(id)          { return this.delete(`/organizations/${id}`); },
+
+    /* Олимпиады (создаёт орг-админ или админ) */
+    getOlympiads(params = '')       { return this.get(`/olympiads${params}`); },
+    getOlympiad(id)                 { return this.get(`/olympiads/${id}`); },
+    createOlympiad(d)               { return this.post('/olympiads', d); },
+    updateOlympiad(id, d)           { return this.patch(`/olympiads/${id}`, d); },
+    deleteOlympiad(id)              { return this.delete(`/olympiads/${id}`); },
+
+    /* Документы */
+    getDocs(params = '')            { return this.get(`/docs${params}`); },
+    getDoc(id)                      { return this.get(`/docs/${id}`); },
+    uploadDoc(fd, params = '')      { return this.postForm(`/docs${params}`, fd); },
+    updateDoc(id, d)                { return this.patch(`/docs/${id}`, d); },
+    deleteDoc(id)                   { return this.delete(`/docs/${id}`); },
+
+    /* RSOSH-импорт */
+    startRsoshImport(docId)         { return this.post('/imports/rsosh', { doc_id: docId }); },
+    getImportStatus(id)             { return this.get(`/imports/${id}`); },
+    getImportPreview(id)            { return this.get(`/imports/${id}/preview`); },
+    confirmImport(id)               { return this.post(`/imports/${id}/confirm`); },
+    rejectImport(id)                { return this.post(`/imports/${id}/reject`); },
 };
