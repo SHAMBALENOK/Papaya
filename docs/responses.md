@@ -1,6 +1,9 @@
 # Papaya API — Responses Reference
 
-> Branch: `patch0.5` | Base path: `/api/v1`
+> Branch: `patch-0.7` | Base path: `/api/v1`
+>
+> Разделы ниже описывают исторические (patch 0.5) endpoints auth/user/event.
+> Доменные ресурсы и RSOSH-импорт (patch 0.7) — в конце документа.
 
 ---
 
@@ -246,3 +249,65 @@
 | POST | `/event/add_events_via_pdf_tables` | Импорт событий из PDF |
 | GET | `/user/{user_id}` | Просмотр профиля |
 | POST | `/user/{user_id}/edit_info` | Редактирование профиля |
+
+---
+
+# Доменные ресурсы (`patch-0.7`)
+
+Все маршруты требуют авторизации (JWT в cookies). Создание/изменение — ADMIN или ORGANIZATION_ADMIN своей организации; списки для ORGANIZATION_ADMIN фильтруются на сервере.
+
+## Organizations
+
+| Метод | Путь | Доступ | Успешно | Назначение |
+|-------|------|--------|---------|------------|
+| GET | `/organizations` | авторизован | 200 | Список (`?type=&limit=`) |
+| POST | `/organizations` | ADMIN | 201 | Создать организацию |
+| GET | `/organizations/{id}` | авторизован | 200 | Детали организации |
+| PATCH | `/organizations/{id}` | ADMIN / своя | 200 | Обновить |
+| DELETE | `/organizations/{id}` | ADMIN / своя | 204 | Удалить |
+
+**Organization:** `{"id", "name", "short_name", "type": "UNIVERSITY|ORGANIZER|SCHOOL|OTHER", "website", "description", "contact_email", "contact_phone", "metadata": {}, "createdAt", "updatedAt"}`
+
+## Olympiads
+
+| Метод | Путь | Доступ | Успешно | Назначение |
+|-------|------|--------|---------|------------|
+| GET | `/olympiads` | авторизован | 200 | Список (`?status=&organizer_id=&limit=`) |
+| POST | `/olympiads` | ADMIN / орг-админ | 201 | Создать олимпиаду |
+| GET | `/olympiads/{id}` | авторизован | 200 | Детали олимпиады |
+| PATCH | `/olympiads/{id}` | ADMIN / своя | 200 | Обновить |
+| DELETE | `/olympiads/{id}` | ADMIN / своя | 204 | Удалить |
+
+**Olympiad:** `{"id", "name", "description", "status": "REGISTRATION_OPEN|...", "subjects": [...], "levels": [...], "years": [...], "grades": [...], "profiles": [...], "organizer_ids": [...], "bvi_organizations": [...], "official_url", "registration_url", "region", "metadata": {}, ...}` — связи хранятся в JSONB-массивах.
+
+## Docs
+
+| Метод | Путь | Доступ | Успешно | Назначение |
+|-------|------|--------|---------|------------|
+| GET | `/docs` | авторизован | 200 | Список (`?type=&status=&organization_id=&olympiad_id=`) |
+| POST | `/docs` | ADMIN / орг-админ | 201 | Загрузка файла (`multipart`: `file` + query `type`, `organization_id`) |
+| GET | `/docs/{id}` | авторизован (object-level) | 200 | Детали документа |
+| GET | `/docs/{id}/file` | авторизован (object-level) | 200 | Скачивание файла |
+| PATCH | `/docs/{id}` | ADMIN / своя | 200 | Обновить метаданные |
+| DELETE | `/docs/{id}` | ADMIN / своя | 204 | Удалить запись |
+
+**Errors:** 400 неподдерживаемый формат файла, 403 чужая организация, 413 больше `MAX_UPLOAD_MB`. **Doc:** `{"id", "name", "type": "RSOSH_LIST|OLYMPIAD_REGULATION|UNIVERSITY_DOCUMENT|OTHER", "status": "UPLOADED|PROCESSING|NEEDS_REVIEW|PROCESSED|FAILED", "organization_id", "olympiad_id", "uploaded_by", "checksum", "metadata": {}, ...}`
+
+---
+
+# RSOSH-импорт (`patch-0.7`)
+
+Пайплайн: загрузить документ типа `RSOSH_LIST` → `POST /imports/rsosh` → Celery извлекает таблицы (PDF → OCR, XLSX напрямую), нормализует и сопоставляет олимпиады → админ подтверждает. **В БД олимпиады не пишутся до `confirm`.**
+
+Состояния (`docs.metadata["rsosh"].state`): `processing → review → approved|rejected|failed`.
+
+| Метод | Путь | Доступ | Успешно | Назначение |
+|-------|------|--------|---------|------------|
+| GET | `/imports` | ADMIN / орг-админ (свои) | 200 | Список импортов (state, error, summary) |
+| POST | `/imports/rsosh` | ADMIN / орг-админ | 202 | Старт импорта, `{"doc_id"}` |
+| GET | `/imports/{id}` | ADMIN / орг-админ | 200 | `{"import_id", "status", "doc_status", "error", "summary"}` |
+| GET | `/imports/{id}/preview` | ADMIN / орг-админ | 200 | `{"candidates": [{name, name_norm, subjects, levels, years, action: "create|merge|skip", confidence, reviews}]}` |
+| POST | `/imports/{id}/confirm` | ADMIN / орг-админ | 200 | Применить: создать/объединить олимпиады, кэш инвалидирован; идемпотентно |
+| POST | `/imports/{id}/reject` | ADMIN / орг-админ | 200 | Отклонить, ничего не пишется |
+
+**Errors:** 400 не `RSOSH_LIST` / недопустимый статус старта, 409 документ/импорт не в подходящем состоянии (`preview` ещё `processing`), 404 нет документа, 403 чужая организация, 503 очередь недоступна (импорт откатывается).
