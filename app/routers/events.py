@@ -48,9 +48,13 @@ async def _get_cached_user(sub: str, r: aioredis.Redis) -> dict:
 
 
 async def _get_authorized_user(sub: str, r: aioredis.Redis) -> dict:
-    """Проверить права на создание и изменение событий."""
+    """Проверить права на создание и изменение событий.
+
+    Исторический EDITOR конвертирован в ORGANIZATION_ADMIN (миграция 0004),
+    поэтому оба допускаются к старому API до этапа очистки.
+    """
     user_obj = await _get_cached_user(sub, r)
-    if user_obj.get('role') not in ('EDITOR', 'ADMIN'):
+    if user_obj.get('role') not in ('EDITOR', 'ORGANIZATION_ADMIN', 'ADMIN'):
         raise HTTPException(status_code=403, detail='Permission denied')
     return user_obj
 
@@ -141,10 +145,11 @@ async def event_edit_details(
         if not db_event:
             raise HTTPException(status_code=404, detail='Event not found')
 
-        # Object-level проверка: EDITOR редактирует только свои события,
-        # ADMIN — любые.
-        if editor.get('role') == 'EDITOR' and str(db_event['owner']) != str(
-            jwt_data.get('sub')
+        # Object-level проверка: EDITOR / ORGANIZATION_ADMIN редактируют
+        # только свои события, ADMIN — любые.
+        if (
+            editor.get('role') in ('EDITOR', 'ORGANIZATION_ADMIN')
+            and str(db_event['owner']) != str(jwt_data.get('sub'))
         ):
             raise HTTPException(
                 status_code=403,

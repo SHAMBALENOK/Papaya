@@ -53,6 +53,8 @@ class UserResponse(UserBase):
     region: Optional[str] = None
     status: Optional[str] = None
     role: str = 'USER'
+    organization_id: Optional[UUID] = None
+    metadata: Optional[dict] = None
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 

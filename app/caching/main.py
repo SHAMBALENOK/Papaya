@@ -23,6 +23,9 @@ _MISSING = object()
 
 _USERS_VERSION_KEY = 'papaya:cache:users:version'
 _EVENTS_VERSION_KEY = 'papaya:cache:events:version'
+_OLYMPIADS_VERSION_KEY = 'papaya:cache:olympiads:version'
+_ORGANIZATIONS_VERSION_KEY = 'papaya:cache:organizations:version'
+_DOCS_VERSION_KEY = 'papaya:cache:docs:version'
 
 
 def _user_version_key(user_id: str) -> str:
@@ -41,6 +44,30 @@ def _event_data_key(event_id: str, version: int) -> str:
     return f'papaya:cache:event:{event_id}:v:{version}'
 
 
+def _olympiad_version_key(olympiad_id: str) -> str:
+    return f'papaya:cache:olympiad:{olympiad_id}:version'
+
+
+def _olympiad_data_key(olympiad_id: str, version: int) -> str:
+    return f'papaya:cache:olympiad:{olympiad_id}:v:{version}'
+
+
+def _doc_version_key(doc_id: str) -> str:
+    return f'papaya:cache:doc:{doc_id}:version'
+
+
+def _doc_data_key(doc_id: str, version: int) -> str:
+    return f'papaya:cache:doc:{doc_id}:v:{version}'
+
+
+def _organization_version_key(org_id: str) -> str:
+    return f'papaya:cache:organization:{org_id}:version'
+
+
+def _organization_data_key(org_id: str, version: int) -> str:
+    return f'papaya:cache:organization:{org_id}:v:{version}'
+
+
 def _users_data_key(include_inactive: bool, version: int) -> str:
     scope = 'all' if include_inactive else 'active'
     return f'papaya:cache:users:{scope}:v:{version}'
@@ -48,6 +75,18 @@ def _users_data_key(include_inactive: bool, version: int) -> str:
 
 def _events_data_key(scope: str, version: int) -> str:
     return f'papaya:cache:events:{scope}:v:{version}'
+
+
+def _olympiads_data_key(scope: str, version: int) -> str:
+    return f'papaya:cache:olympiads:{scope}:v:{version}'
+
+
+def _organizations_data_key(scope: str, version: int) -> str:
+    return f'papaya:cache:organizations:{scope}:v:{version}'
+
+
+def _docs_data_key(scope: str, version: int) -> str:
+    return f'papaya:cache:docs:{scope}:v:{version}'
 
 
 def _connection_pool() -> aioredis.ConnectionPool:
@@ -224,3 +263,182 @@ async def cache_events_after_write(
             ex=CACHE_TTL,
         )
     await pipe.execute()
+
+
+async def get_cached_olympiad(
+    r: aioredis.Redis,
+    olympiad_id: str,
+    loader: Callable[[], Awaitable[dict | None]],
+) -> dict | None:
+    olympiad_id = str(olympiad_id)
+    return await _get_versioned(
+        r,
+        _olympiad_version_key(olympiad_id),
+        lambda version: _olympiad_data_key(olympiad_id, version),
+        loader,
+    )
+
+
+async def get_cached_olympiads(
+    r: aioredis.Redis,
+    scope: str,
+    loader: Callable[[], Awaitable[list[dict]]],
+) -> list[dict]:
+    return await _get_versioned(
+        r,
+        _OLYMPIADS_VERSION_KEY,
+        lambda version: _olympiads_data_key(scope, version),
+        loader,
+    )
+
+
+async def cache_olympiad_after_write(r: aioredis.Redis, olympiad: dict) -> None:
+    """Publish an olympiad write and invalidate every olympiad-list scope."""
+    olympiad_id = str(olympiad['id'])
+    pipe = r.pipeline(transaction=True)
+    pipe.incr(_olympiad_version_key(olympiad_id))
+    pipe.incr(_OLYMPIADS_VERSION_KEY)
+    olympiad_version, _ = await pipe.execute()
+    await _write_json(
+        r,
+        _olympiad_data_key(olympiad_id, int(olympiad_version)),
+        olympiad,
+    )
+
+
+async def cache_olympiads_after_write(
+    r: aioredis.Redis,
+    olympiads: list[dict],
+) -> None:
+    """Publish an olympiad bulk import with one generation change."""
+    if not olympiads:
+        return
+
+    olympiad_ids = [str(olympiad['id']) for olympiad in olympiads]
+    pipe = r.pipeline(transaction=True)
+    pipe.incr(_OLYMPIADS_VERSION_KEY)
+    for olympiad_id in olympiad_ids:
+        pipe.incr(_olympiad_version_key(olympiad_id))
+    versions = await pipe.execute()
+
+    pipe = r.pipeline(transaction=True)
+    for olympiad, olympiad_id, version in zip(olympiads, olympiad_ids, versions[1:]):
+        payload = json.dumps(olympiad, ensure_ascii=False, separators=(',', ':'))
+        pipe.set(
+            _olympiad_data_key(olympiad_id, int(version)),
+            payload,
+            ex=CACHE_TTL,
+        )
+    await pipe.execute()
+
+
+async def get_cached_organization(
+    r: aioredis.Redis,
+    org_id: str,
+    loader: Callable[[], Awaitable[dict | None]],
+) -> dict | None:
+    org_id = str(org_id)
+    return await _get_versioned(
+        r,
+        _organization_version_key(org_id),
+        lambda version: _organization_data_key(org_id, version),
+        loader,
+    )
+
+
+async def get_cached_organizations(
+    r: aioredis.Redis,
+    scope: str,
+    loader: Callable[[], Awaitable[list[dict]]],
+) -> list[dict]:
+    return await _get_versioned(
+        r,
+        _ORGANIZATIONS_VERSION_KEY,
+        lambda version: _organizations_data_key(scope, version),
+        loader,
+    )
+
+
+async def cache_organization_after_write(
+    r: aioredis.Redis,
+    org: dict,
+) -> None:
+    """Publish an organization write and invalidate organization-list scopes."""
+    org_id = str(org['id'])
+    pipe = r.pipeline(transaction=True)
+    pipe.incr(_organization_version_key(org_id))
+    pipe.incr(_ORGANIZATIONS_VERSION_KEY)
+    org_version, _ = await pipe.execute()
+    await _write_json(
+        r,
+        _organization_data_key(org_id, int(org_version)),
+        org,
+    )
+
+
+async def invalidate_organization(r: aioredis.Redis, org_id: str) -> None:
+    """Пометить карточку и списки организаций устаревшими после удаления."""
+    org_id = str(org_id)
+    pipe = r.pipeline(transaction=True)
+    pipe.incr(_organization_version_key(org_id))
+    pipe.incr(_ORGANIZATIONS_VERSION_KEY)
+    await pipe.execute()
+
+
+async def invalidate_olympiad(r: aioredis.Redis, olympiad_id: str) -> None:
+    """Пометить карточку и списки олимпиад устаревшими после удаления."""
+    olympiad_id = str(olympiad_id)
+    pipe = r.pipeline(transaction=True)
+    pipe.incr(_olympiad_version_key(olympiad_id))
+    pipe.incr(_OLYMPIADS_VERSION_KEY)
+    await pipe.execute()
+
+
+async def invalidate_doc(r: aioredis.Redis, doc_id: str) -> None:
+    """Пометить карточку и списки документов устаревшими после удаления."""
+    doc_id = str(doc_id)
+    pipe = r.pipeline(transaction=True)
+    pipe.incr(_doc_version_key(doc_id))
+    pipe.incr(_DOCS_VERSION_KEY)
+    await pipe.execute()
+
+
+async def get_cached_doc(
+    r: aioredis.Redis,
+    doc_id: str,
+    loader: Callable[[], Awaitable[dict | None]],
+) -> dict | None:
+    doc_id = str(doc_id)
+    return await _get_versioned(
+        r,
+        _doc_version_key(doc_id),
+        lambda version: _doc_data_key(doc_id, version),
+        loader,
+    )
+
+
+async def get_cached_docs(
+    r: aioredis.Redis,
+    scope: str,
+    loader: Callable[[], Awaitable[list[dict]]],
+) -> list[dict]:
+    return await _get_versioned(
+        r,
+        _DOCS_VERSION_KEY,
+        lambda version: _docs_data_key(scope, version),
+        loader,
+    )
+
+
+async def cache_doc_after_write(r: aioredis.Redis, doc: dict) -> None:
+    """Publish a doc write and invalidate doc-list scopes."""
+    doc_id = str(doc['id'])
+    pipe = r.pipeline(transaction=True)
+    pipe.incr(_doc_version_key(doc_id))
+    pipe.incr(_DOCS_VERSION_KEY)
+    doc_version, _ = await pipe.execute()
+    await _write_json(
+        r,
+        _doc_data_key(doc_id, int(doc_version)),
+        doc,
+    )

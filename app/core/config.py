@@ -58,6 +58,16 @@ TABLES_DIR = os.getenv(
 )
 ALLOWED_TABLE_EXTENSIONS = {'.pdf', '.xlsx'}
 
+# --- Документы-источники -----------------------------------------------------
+# Каталог для оригиналов загруженных документов. Приложение пишет сюда
+# безопасными именами (storage_key), исходное имя клиента не используется.
+DOCS_DIR = os.getenv(
+    'DOCS_DIR',
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'documents')),
+)
+MAX_DOC_MB = _env_int('MAX_DOC_MB', 60)
+ALLOWED_DOC_EXTENSIONS = {'.pdf', '.xlsx', '.docx'}
+
 # --- Опциональные токены внешних сервисов ----------------------------------
 HF_TOKEN = os.getenv('HF_TOKEN') or None
 

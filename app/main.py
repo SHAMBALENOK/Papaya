@@ -17,7 +17,16 @@ from app import database, schemas
 from app.caching.main import get_cached_user, get_redis, redis_lifespan
 from app.database.database import db_lifespan, get_db
 import app.middlewares.tokenz.main as tokenz
-from app.routers import admin, auth, events, health, user
+from app.routers import (
+    admin,
+    auth,
+    docs,
+    events,
+    health,
+    olympiads,
+    organizations,
+    user,
+)
 
 
 logger = logging.getLogger('papaya.main')
@@ -36,6 +45,9 @@ install_exception_handlers(app)
 
 app.include_router(user.user_page, prefix='/api/v1')
 app.include_router(events.events_page, prefix='/api/v1')
+app.include_router(organizations.organizations_page, prefix='/api/v1')
+app.include_router(olympiads.olympiads_page, prefix='/api/v1')
+app.include_router(docs.docs_page, prefix='/api/v1')
 app.include_router(auth.auth_page, prefix='/api/v1')
 app.include_router(admin.admin_page, prefix='/api/v1')
 app.include_router(health.health_page)
