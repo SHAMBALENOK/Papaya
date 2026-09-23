@@ -7,3 +7,7 @@ test.py
 .env
 .env.*
 !.env.example
+
+# Runtime-хранилище документов (storage_key/исходники загрузок)
+app/documents/
+app/tables/

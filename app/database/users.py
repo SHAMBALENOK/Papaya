@@ -69,10 +69,13 @@ async def find_user_by_id(user_id: str):
 
 # Поля, которые разрешено менять через edit_user. Пароль сознательно не входит:
 # смена пароля должна проходить отдельный путь с хешированием, а не setattr.
-# id, createdAt и updatedAt задаёт сервер.
+# id, createdAt и updatedAt задаёт сервер. organization_id — максимум одна
+# организация, владелец которой может быть привязан через отдельный сервисный
+# путь (например, promotion), поэтому поле по умолчанию доступно админу.
 _USER_EDITABLE_FIELDS = frozenset({
     'name', 'surname', 'email', 'gender', 'bday', 'bio', 'phone',
     'country', 'region', 'status', 'role', 'isActive',
+    'organization_id', 'metadata',
 })
 
 
@@ -94,7 +97,14 @@ async def edit_user(user_id: str, ins: dict):
             return None
         for key, value in ins.items():
             if key in _USER_EDITABLE_FIELDS:
-                setattr(user, key, value)
+                if key in ('metadata',):
+                    user.metadata_ = value
+                elif key in ('organization_id',):
+                    user.organization_id = (
+                        uuid_mod.UUID(value) if value else None
+                    )
+                else:
+                    setattr(user, key, value)
         user.updatedAt = now
         try:
             await session.commit()
