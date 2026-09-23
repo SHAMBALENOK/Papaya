@@ -516,7 +516,9 @@ function renderHeader() {
     }
 
     const links = [
-        { href: '#/', route: '/', label: 'Олимпиады' },
+        { href: '#/olympiads', route: '/olympiads', label: 'Олимпиады' },
+        { href: '#/organizations', route: '/organizations', label: 'Организации' },
+        { href: '#/docs', route: '/docs', label: 'Документы' },
         { href: '#/my-events', route: '/my-events', label: 'Мои события' },
         { href: '#/users', route: '/users', label: 'Пользователи' },
         { href: '#/profile', route: '/profile', label: 'Профиль' },
@@ -552,6 +554,9 @@ function highlightNav(path) {
     let current = path || '/';
     if (path.startsWith('/event/')) current = '/';
     else if (path.startsWith('/users/')) current = '/users';
+    else if (path.startsWith('/organizations/')) current = '/organizations';
+    else if (path.startsWith('/olympiads/')) current = '/olympiads';
+    else if (path.startsWith('/imports/')) current = '/docs';
     else if (path.startsWith('/admin')) current = '/admin';
     document.querySelectorAll('#nav a[data-route]').forEach(a => {
         const active = a.dataset.route === current;
