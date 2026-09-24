@@ -43,6 +43,8 @@ async def _require_admin(
     )
     if not admin_obj or admin_obj.get('role') != 'ADMIN':
         raise HTTPException(status_code=403, detail='permission denied')
+    if admin_obj.get('isActive') is False:
+        raise tokenz.account_disabled_error()
     return admin_obj
 
 

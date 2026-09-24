@@ -69,6 +69,8 @@ function alertHtml(msg, kind = 'error') {
 function errorText(res) {
     const d = res && res.data ? res.data.detail : null;
     if (Array.isArray(d)) return d.map(x => (x && x.msg) ? x.msg : String(x)).join('; ');
+    /* Авторизационные ошибки приходят объектом: {code, message}. */
+    if (d && typeof d === 'object') return d.message || d.code || 'Произошла ошибка. Попробуйте ещё раз.';
     return d || 'Произошла ошибка. Попробуйте ещё раз.';
 }
 

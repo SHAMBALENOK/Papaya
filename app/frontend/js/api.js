@@ -1,16 +1,49 @@
 /* ==========================================================================
  * api.js — клиент API. Все запросы уходят с cookie (JWT: access/refresh).
  * Пути совпадают с роутерами FastAPI под префиксом /api/v1.
+ *
+ * Flow обновления сессии:
+ *   1. Сервер на истёкший access отвечает 401 с detail.code=ACCESS_TOKEN_EXPIRED.
+ *   2. request() в таком случае вызывает refreshSession() (POST /auth/refresh)
+ *      и ПОВТОРЯЕТ исходный запрос ровно один раз (_retried=true).
+ *   3. refreshSession() опирается на единый refreshPromise — параллельные
+ *      запросы ждут один и тот же refresh, а не дергают его 5 раз подряд.
+ *   4. POST /auth/refresh сам через request() не ходит (иначе получит 401 от
+ *      невалидного refresh и запустит рекурсию refresh → refresh → …).
+ *   5. Если refresh не удался — сессия считается мёртвой: store.clear() и уход
+ *      на #/auth (кроме публичных страниц, где сбрасывать состояние не нужно).
  * ========================================================================== */
 const API_BASE = '/api/v1';
 
+/* Единый промис активного refresh: параллельные 401-ы делят один вызов. */
+let refreshPromise = null;
+
+function authErrorCode(data) {
+    const detail = data && data.detail;
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+        return typeof detail.code === 'string' ? detail.code : '';
+    }
+    return '';
+}
+
+/* Ошибка, связанная с JWT в целом (для принудительного выхода из состояния). */
 function isJwtAuthError(status, data) {
     if (status !== 401 && status !== 403) return false;
+    const code = authErrorCode(data);
+    if (code) {
+        return code.startsWith('ACCESS_TOKEN_')
+            || code.startsWith('REFRESH_TOKEN_');
+    }
     const detail = data && typeof data.detail === 'string' ? data.detail.toLowerCase() : '';
     return detail.includes('access token')
         || detail.includes('refresh token')
         || detail.includes('token expired')
         || detail.includes('expired token');
+}
+
+/* Именно этот случай подлежит восстановлению через /auth/refresh. */
+function isAccessExpiredError(status, data) {
+    return status === 401 && authErrorCode(data) === 'ACCESS_TOKEN_EXPIRED';
 }
 
 function redirectToAuthAfterJwtError() {
@@ -19,8 +52,33 @@ function redirectToAuthAfterJwtError() {
     if (window.location.hash !== '#/auth') window.location.hash = '#/auth';
 }
 
+/* POST /auth/refresh через raw fetch — без интерцептора request(). */
+async function refreshSession() {
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = (async () => {
+        try {
+            const res = await fetch(`${API_BASE}/auth/refresh`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {},
+            });
+            if (res.status !== 204 && res.headers.get('content-length') !== '0') {
+                const data = await res.json().catch(() => null);
+                if (!res.ok) console.error('[API] /auth/refresh →', res.status, data);
+            }
+            return res.ok;
+        } catch (err) {
+            console.error('[API] /auth/refresh → network error:', err);
+            return false;
+        } finally {
+            refreshPromise = null;
+        }
+    })();
+    return refreshPromise;
+}
+
 const api = {
-    async request(method, path, body = null, isFormData = false, { skipAuthRedirect = false } = {}) {
+    async request(method, path, body = null, isFormData = false, { skipAuthRedirect = false, _retried = false } = {}) {
         const opts = { method, credentials: 'include', headers: {} };
         if (body && !isFormData) {
             opts.headers['Content-Type'] = 'application/json';
@@ -35,6 +93,18 @@ const api = {
         const data = await res.json().catch(() => null);
         if (!res.ok) {
             console.error(`[API] ${method} ${path} → ${res.status}`, data);
+            if (!_retried && isAccessExpiredError(res.status, data)) {
+                const refreshed = await refreshSession();
+                if (refreshed) {
+                    /* Один повтор — не больше: при повторной ошибке выходим. */
+                    return this.request(method, path, body, isFormData, {
+                        skipAuthRedirect,
+                        _retried: true,
+                    });
+                }
+                if (!skipAuthRedirect) redirectToAuthAfterJwtError();
+                return { ok: false, status: res.status, data };
+            }
             if (!skipAuthRedirect && isJwtAuthError(res.status, data)) {
                 redirectToAuthAfterJwtError();
             }
@@ -53,6 +123,8 @@ const api = {
     register(d)  { return this.post('/auth/register', d); },
     login(d)     { return this.post('/auth/login', d); },
     logout()     { return this.post('/auth/logout'); },
+    /* Продление сессии доступно и напрямую (bootstrap), через raw fetch. */
+    refresh()    { return refreshSession(); },
 
     /* Текущий пользователь: GET /api/v1/ отдаёт полный профиль из JWT */
     getMe()      { return this.get('/'); },

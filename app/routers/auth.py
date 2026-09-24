@@ -83,18 +83,26 @@ def _clear_auth_cookies(response: Response) -> None:
 )
 async def auth(
     db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
     refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     try:
-        token = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if token:
-            raise HTTPException(status_code=403, detail='Already signed in')
-        return JSONResponse(status_code=200, content=None)
-    except HTTPException as e:
-        if e.status_code == 401:
+        try:
+            await tokenz.decode_access_token(access_jwt)
+            # Access валиден — активная сессия, бутстрап по нему идёт сразу.
+            return JSONResponse(status_code=403, content=None)
+        except HTTPException as e:
+            if e.status_code != 401:
+                # Access не подписан/чужого типа — это уже не сессия клиента.
+                return JSONResponse(status_code=200, content=None)
+        # Access отсутствует или истёк — сессия жива, пока жив refresh;
+        # новый access выдаст POST /auth/refresh по запросу.
+        try:
+            await tokenz.decode_refresh_token(refresh_jwt)
+        except HTTPException:
             return JSONResponse(status_code=200, content=None)
-        raise
+        return JSONResponse(status_code=403, content=None)
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(
@@ -142,10 +150,11 @@ async def register(
 
         _set_auth_cookies(
             response,
-            access_jwt=await tokenz.create_jwt(ins={'sub': user_data['id']}),
-            refresh_jwt=await tokenz.create_jwt(
+            access_jwt=await tokenz.create_access_token(
                 ins={'sub': user_data['id']},
-                is_refresh=True,
+            ),
+            refresh_jwt=await tokenz.create_refresh_token(
+                ins={'sub': user_data['id']},
             ),
         )
         return user_data
@@ -190,10 +199,11 @@ async def login(
 
         _set_auth_cookies(
             response,
-            access_jwt=await tokenz.create_jwt(ins={'sub': db_user['id']}),
-            refresh_jwt=await tokenz.create_jwt(
+            access_jwt=await tokenz.create_access_token(
                 ins={'sub': db_user['id']},
-                is_refresh=True,
+            ),
+            refresh_jwt=await tokenz.create_refresh_token(
+                ins={'sub': db_user['id']},
             ),
         )
 
@@ -221,19 +231,76 @@ async def login(
     '/logout',
     responses={
         200: {'description': 'Logged out successfully'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Invalid token'},
         500: {'description': 'Internal server error'},
     },
 )
-async def logout(
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
+async def logout():
+    """Выход: снимаем HttpOnly-куки.
+
+    JWT намеренно не валидируем: пользователь должен иметь возможность выйти,
+    даже когда access и refresh уже истекли/невалидны (иначе сломанная сессия
+    навсегда запирает в состоянии «залогинен» на фронтенде).
+    """
     try:
-        await tokenz.jwt_check(access_jwt, refresh_jwt)
         response = JSONResponse(status_code=200, content=None)
         _clear_auth_cookies(response)
+        return response
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(
+            status_code=500,
+            detail='Internal server error',
+        )
+
+
+@auth_page.post(
+    '/refresh',
+    responses={
+        200: {'description': 'New access token issued'},
+        401: {'description': 'Refresh token missing or expired'},
+        403: {'description': 'Invalid refresh token or account disabled'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def refresh(
+    db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
+):
+    """Продление сессии: выдаёт новый access-токен по живому refresh.
+
+    Refresh-токен НЕ ротируется (сохраняется прежним 14-дневный срок).
+    Забаненный или удалённый пользователь access не получает.
+    """
+    try:
+        claims = await tokenz.decode_refresh_token(refresh_jwt)
+        user_id = claims.get('sub')
+        user = await get_cached_user(
+            r,
+            str(user_id),
+            lambda: database.users.find_user_by_id(str(user_id)),
+        )
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    'code': tokenz.REFRESH_TOKEN_INVALID,
+                    'message': 'User not found',
+                },
+            )
+        if user.get('isActive') is not True:
+            raise tokenz.account_disabled_error()
+
+        response = JSONResponse(status_code=200, content=None)
+        response.set_cookie(
+            key='access_jwt',
+            value=await tokenz.create_access_token(ins={'sub': user_id}),
+            max_age=600,
+            httponly=True,
+            samesite='lax',
+            secure=COOKIE_SECURE,
+            path='/',
+        )
         return response
     except HTTPException:
         raise

@@ -35,6 +35,8 @@ async def get_current_user(
     )
     if not user_obj:
         raise HTTPException(status_code=404, detail='User not found')
+    if user_obj.get('isActive') is False:
+        raise tokenz.account_disabled_error()
     return user_obj
 
 

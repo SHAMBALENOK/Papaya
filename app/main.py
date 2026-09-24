@@ -92,6 +92,8 @@ async def main(
         )
         if not user_dict:
             raise HTTPException(status_code=404, detail='User not found')
+        if user_dict.get('isActive') is False:
+            raise tokenz.account_disabled_error()
         return JSONResponse(status_code=200, content=user_dict)
     except HTTPException:
         raise

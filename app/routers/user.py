@@ -83,6 +83,8 @@ async def users(
         )
         if not user_obj:
             raise HTTPException(status_code=404, detail='User not found')
+        if user_obj.get('isActive') is False:
+            raise tokenz.account_disabled_error()
 
         users_list = await get_cached_users(
             r,
