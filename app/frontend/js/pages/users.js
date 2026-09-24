@@ -14,7 +14,16 @@ async function renderUsers() {
 
     if (!res.ok || !res.data || !res.data.user_id) { navigate('#/auth'); return; }
 
-    store.setUser(userFromDashboard(res.data));
+    /* Список не содержит организацию — сохраняем её из текущей сессии,
+       обновляя только те поля, что есть в ответе. */
+    store.setUser({
+        ...store.user,
+        id: res.data.user_id,
+        name: res.data.user_name,
+        surname: res.data.user_surname,
+        email: res.data.user_email,
+        role: res.data.user_role || 'USER',
+    });
     renderHeader();
     drawUsers(res.data.users || []);
 }

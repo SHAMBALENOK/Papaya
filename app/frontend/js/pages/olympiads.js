@@ -25,23 +25,24 @@ function olympiadCard(oly) {
         : 'bg-sage';
     return `
     <a href="#/olympiads/${oly.id}"
-       class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60 flex flex-col">
-        <div class="h-1.5 ${accent}" aria-hidden="true"></div>
-        <div class="p-7 flex flex-col grow">
-            <div class="flex items-start justify-between gap-3">
-                <h2 class="font-bold text-ink leading-snug">${escHtml(oly.name)}</h2>
+       title="${escAttr(oly.name)}"
+       class="group flex flex-col bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        <div class="h-1 ${accent}" aria-hidden="true"></div>
+        <div class="p-5 flex flex-col grow">
+            <div class="flex items-start justify-between gap-2">
+                <h2 class="font-bold text-ink leading-snug line-clamp-2">${escHtml(oly.name)}</h2>
                 ${statusBadge(oly.status)}
             </div>
-            ${oly.description ? `<p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(oly.description)}</p>` : ''}
+            ${oly.description ? `<p class="mt-2 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(oly.description)}</p>` : ''}
             ${subjects.length ? `
-            <div class="mt-4 flex flex-wrap gap-2">
+            <div class="mt-3 flex flex-wrap gap-1.5">
                 ${subjects.map(s => `<span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(s)}</span>`).join('')}
             </div>` : ''}
-            <div class="mt-auto pt-6 flex items-center justify-between gap-3 text-xs">
+            <div class="mt-auto pt-4 flex items-center justify-between gap-3 text-xs">
                 ${levels ? `<span class="font-semibold text-ink">уровень ${escHtml(levels)}</span>` : '<span></span>'}
                 ${years ? `<span class="text-ink-soft">${escHtml(years)}</span>` : ''}
             </div>
-            <p class="mt-4 text-sm font-semibold text-ink group-hover:text-black transition-colors">Подробнее →</p>
+            <p class="mt-3 text-sm font-semibold text-ink group-hover:text-black transition-colors">Подробнее →</p>
         </div>
     </a>`;
 }
@@ -63,14 +64,14 @@ function openOlympiadModal(onDone, oly = null, orgs = []) {
         ${inputField({ id: 'oly-levels', name: 'levels', label: 'Уровни РСОШ (1, 2, 3)', value: (data.levels || []).join(', ') })}
         ${inputField({ id: 'oly-years', name: 'years', label: 'Годы (2000, 2001…)', value: (data.years || []).join(', ') })}
         ${textareaField({ id: 'oly-desc', name: 'description', label: 'Описание', value: data.description || '' })}
-        ${selectField({
+        ${oly ? selectField({
             id: 'oly-status', name: 'status', label: 'Статус', value: data.status || 'DRAFT',
             options: [
                 { value: 'DRAFT', label: 'Черновик' },
                 { value: 'PUBLISHED', label: 'Опубликована' },
                 { value: 'ARCHIVED', label: 'Архив' },
             ],
-        })}
+        }) : ''}
         <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full">${oly ? 'Сохранить' : 'Создать'}</button>
     </form>`;
     const { overlay, close } = openModal(oly ? 'Редактирование олимпиады' : 'Новая олимпиада', body, { wide: true });
@@ -86,9 +87,9 @@ function openOlympiadModal(onDone, oly = null, orgs = []) {
             levels: splitList(overlay.querySelector('#oly-levels').value),
             years: splitList(overlay.querySelector('#oly-years').value),
             description: overlay.querySelector('#oly-desc').value.trim() || null,
-            status: overlay.querySelector('#oly-status').value,
             organizer_ids: orgId ? [orgId] : (data.organizer_ids || []),
         };
+        if (oly) payload.status = overlay.querySelector('#oly-status').value;
         try {
             const res = oly
                 ? await api.updateOlympiad(oly.id, payload)
@@ -140,7 +141,7 @@ async function renderOlympiads() {
         </div>
         ${olympiads.length === 0
             ? `<div class="mt-16">${alertHtml('Олимпиад пока нет', 'error')}</div>`
-            : `<div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">${olympiads.map(olympiadCard).join('')}</div>`}
+            : `<div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">${olympiads.map(olympiadCard).join('')}</div>`}
     </section>`;
 
     const createBtn = page.querySelector('#oly-create');

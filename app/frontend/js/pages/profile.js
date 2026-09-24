@@ -48,6 +48,7 @@ async function renderProfile() {
         surname: res.data.surname,
         email: res.data.email,
         role: res.data.role || 'USER',
+        organization_id: res.data.organization_id || null,
     });
     renderHeader();
 

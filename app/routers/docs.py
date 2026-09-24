@@ -217,6 +217,11 @@ async def upload_doc(
             if os.path.exists(storage_path):
                 os.remove(storage_path)
             raise
+        except Exception:
+            # Сбой БД/кэша после записи файла: не оставляем сироту на диске.
+            if os.path.exists(storage_path):
+                os.remove(storage_path)
+            raise
         finally:
             await file.close()
     except HTTPException:

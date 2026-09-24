@@ -12,7 +12,7 @@ function orgTypeBadge(type) {
 
 function orgCard(org) {
     return `
-    <a href="#/organizations/${org.id}" class="${UI.card} block hover:shadow-elev2 transition-shadow">
+    <a href="#/organizations/${org.id}" class="${UI.card} block hover:shadow-elev-2 transition-shadow">
         <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <p class="font-semibold truncate">${escHtml(org.name)}</p>

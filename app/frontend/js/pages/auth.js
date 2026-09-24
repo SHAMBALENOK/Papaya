@@ -81,6 +81,7 @@ function renderAuth() {
             surname: userData && userData.surname,
             email: userData && userData.email,
             role: (userData && userData.role) || 'USER',
+            organization_id: (userData && userData.organization_id) || null,
         });
         renderHeader();
         navigate('#/');
