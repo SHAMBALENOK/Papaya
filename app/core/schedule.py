@@ -11,9 +11,14 @@
   ``_STATUS_PRIORITY`` (FINAL > QUALIFICATION > RESULTS > REGISTRATION);
   при равенстве — первый в исходном порядке массива ``stages``;
 - олимпиадный ``current_status`` маппится из типа выбранного этапа
-  (REGISTRATION → REGISTRATION_OPEN и т.д.); если активных этапов нет —
-  ``REGISTRATION_CLOSED`` (регистрация завершена, остальное ещё впереди),
-  ``FINISHED`` (все этапы завершены) или ``None``.
+  (REGISTRATION → REGISTRATION_OPEN и т.д.); активных этапов нет:
+  - все этапы ещё впереди → ``UPCOMING`` (олимпиада/регистрация ещё не началась);
+  - все этапы завершены → ``FINISHED``;
+  - «между этапами» (регистрация закрылась, следующий этап ещё впереди) →
+    ``REGISTRATION_CLOSED``;
+- этап RESULTS без ``end_at`` трактуется как событие публикации результатов:
+  длится до конца суток ``start_at`` (активен — статус RESULTS), после чего
+  олимпиада завершается (FINISHED).
 """
 
 from datetime import datetime, timezone
@@ -29,6 +34,7 @@ STAGE_STATUS_ACTIVE = 'ACTIVE'
 STAGE_STATUS_FINISHED = 'FINISHED'
 
 # Олимпиадные статусы (см. docs/TODO.md, Фаза 2).
+STATUS_UPCOMING = 'UPCOMING'
 STATUS_REGISTRATION_OPEN = 'REGISTRATION_OPEN'
 STATUS_REGISTRATION_CLOSED = 'REGISTRATION_CLOSED'
 STATUS_QUALIFICATION = 'QUALIFICATION'
@@ -69,13 +75,36 @@ def parse_iso(value: Any) -> Optional[datetime]:
     return dt if dt.tzinfo is not None else None
 
 
+def _end_of_day(dt: datetime) -> datetime:
+    """Последняя секунда того же календарного дня (в tz исходной даты)."""
+    return datetime(dt.year, dt.month, dt.day, 23, 59, 59, tzinfo=dt.tzinfo)
+
+
+def _effective_end(stage: dict) -> Optional[datetime]:
+    """Фактический конец этапа.
+
+    Явный ``end_at`` — источник истины. Без ``end_at``:
+
+    - RESULTS трактуется как событие «публикация результатов»: длится до конца
+      суток ``start_at`` (в этот день пользователь видит статус RESULTS), после
+      чего олимпиада завершается FINISHED;
+    - прочие типы без конца считаются длящимися (ACTIVE до конца).
+    """
+    end = parse_iso(stage.get('end_at'))
+    if end is not None:
+        return end
+    start = parse_iso(stage.get('start_at'))
+    if start is not None and (stage.get('type') or '').upper() == 'RESULTS':
+        return _end_of_day(start)
+    return None
+
+
 def stage_status(stage: dict, now: datetime) -> Optional[str]:
     """Вычислить статус одного этапа из его дат.
 
     - start_at в будущем → UPCOMING;
-    - иначе, если end_at в прошлом → FINISHED;
-    - этап RESULTS без end_at «публикуется» один момент: как только наступил
-      start_at, он считается завершённым (иначе олимпиада никогда не закончится);
+    - иначе, когда фактический конец (end_at или конец суток публикации
+      результатов) в прошлом → FINISHED;
     - в остальных случаях этап идёт сейчас → ACTIVE.
     """
     start = parse_iso(stage.get('start_at'))
@@ -84,10 +113,8 @@ def stage_status(stage: dict, now: datetime) -> Optional[str]:
     if start > now:
         return STAGE_STATUS_UPCOMING
 
-    end = parse_iso(stage.get('end_at'))
+    end = _effective_end(stage)
     if end is not None and end < now:
-        return STAGE_STATUS_FINISHED
-    if end is None and (stage.get('type') or '').upper() == 'RESULTS':
         return STAGE_STATUS_FINISHED
     return STAGE_STATUS_ACTIVE
 
@@ -150,11 +177,14 @@ def compute_schedule_state(schedule: dict, now: Optional[datetime] = None) -> di
     elif enriched:
         statuses = {item.get('status') for item in enriched}
         if statuses == {STAGE_STATUS_FINISHED}:
+            # Всё завершено — олимпиада закончена.
             current_status = STATUS_FINISHED
+        elif statuses == {STAGE_STATUS_UPCOMING}:
+            # Ни один этап ещё не начался: «регистрация ещё не открыта».
+            current_status = STATUS_UPCOMING
         else:
-            # Активного этапа нет: регистрация либо ещё не открылась, либо уже
-            # закрылась — в обоих случаях она не открыта. Фактический старт
-            # показывает next_deadline.
+            # Активного этапа нет, но что-то уже прошло, а что-то ещё впереди:
+            # регистрация закрылась, следующий этап стартует позже (next_deadline).
             current_status = STATUS_REGISTRATION_CLOSED
     else:
         current_status = None

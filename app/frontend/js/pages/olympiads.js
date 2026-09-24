@@ -27,6 +27,7 @@ function statusBadge(status) {
 
 function phaseStatusBadge(status) {
     const map = {
+        UPCOMING: [UI.badgeNeutral, 'Ещё не началась'],
         REGISTRATION_OPEN: [UI.badgeSuccess, 'Регистрация открыта'],
         REGISTRATION_CLOSED: [UI.badgeNeutral, 'Регистрация закрыта'],
         QUALIFICATION: [UI.badgeSuccess, 'Отборочный этап'],
