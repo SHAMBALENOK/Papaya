@@ -1,9 +1,13 @@
 # Papaya API — Responses Reference
 
-> Branch: `patch-0.7` | Base path: `/api/v1`
+> Branch: `patch-0.8` | Base path: `/api/v1`
 >
-> Разделы ниже описывают endpoints auth/user (patch 0.5—0.7).
-> Доменные ресурсы и RSOSH-импорт (patch 0.7) — в конце документа.
+> Разделы ниже описывают endpoints auth/user (patch 0.5—0.8).
+> Доменные ресурсы и RSOSH-импорт (patch 0.7—0.8) — в конце документа.
+>
+> Ошибки авторизации отдают JSON-объект `{"detail": {"code": str, "message": str}}`
+> (коды `ACCESS_TOKEN_MISSING|INVALID|EXPIRED`, `REFRESH_TOKEN_MISSING|INVALID|EXPIRED`,
+> `ACCOUNT_DISABLED`). Прочие ошибки — прежний строковый `{"detail": str}`.
 >
 > Живая схема всех маршрутов — Swagger по адресу http://localhost:5000/docs.
 
@@ -11,26 +15,25 @@
 
 ## GET /
 
-**Суть:** Точка входа для проверки сессии авторизованного пользователя. Валидирует JWT-токены (access + refresh в cookies), извлекает профиль из БД и возвращает полный профиль пользователя. Каталог олимпиад и остальные данные SPA получает отдельными доменными маршрутами.
+**Суть:** Точка входа для проверки сессии авторизованного пользователя. Валидирует access-cookie (`access_jwt`); при его отсутствии/невалидности отдаёт 401. Извлекает профиль из БД и возвращает полный профиль. Каталог олимпиад и остальные данные SPA получает отдельными доменными маршрутами.
 
 | Code | Description | Body |
 |------|-------------|------|
 | 200 | OK | `{"id": str, "email": str, "name": str, "surname": str, "gender": str|null, "bday": str|null, "bio": str|null, "phone": str|null, "country": str|null, "region": str|null, "status": str|null, "role": str, "isActive": bool, "createdAt": str, "updatedAt": str, "organization_id": str|null, "metadata": object|null}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid refresh or access token | `{"detail": "..."}` |
+| 401 | Access token missing/expired | `{"detail": {"code": "ACCESS_TOKEN_MISSING\|ACCESS_TOKEN_EXPIRED", "message": str}}` |
+| 403 | Invalid access token / deactivated account | `{"detail": {"code": "ACCESS_TOKEN_INVALID\|ACCOUNT_DISABLED", "message": str}}` |
 | 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
 
 ---
 
 ## GET /auth/
 
-**Суть:** Страница авторизации/регистрации. Проверяет, есть ли у пользователя валидные JWT-токены. Если пользователь уже авторизован — возвращает 403 (повторный вход не требуется). Если токены отсутствуют или невалидны — страница доступна для ввода данных. По сути это gate-маршрут, определяющий, показывать ли форму входа или редиректить в приложение.
+**Суть:** Gate-маршрут для определения, показывать ли форму входа или редиректить в приложение. Возвращает 403, если валиден access **или** refresh-cookie (пользователь уже «внутри»), иначе 200 — страница авторизации доступна. Refresh-токен сам по себе не даёт доступа к API, но подтверждает наличие живой сессии.
 
 | Code | Description | Body |
 |------|-------------|------|
 | 200 | OK (пользователь не авторизован — страница доступна) | `null` |
-| 403 | Already signed in | `{"detail": "Already signed in"}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
+| 403 | Already signed in (валиден access или refresh) | `{"detail": "Already signed in"}` |
 | 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
 
 ---
@@ -84,15 +87,26 @@
 
 ---
 
-## GET /auth/logout
+## POST /auth/logout
 
-**Суть:** Выход из системы. Валидирует текущие JWT-токены, после чего удаляет cookies `access_jwt` и `refresh_jwt`, завершая сессию. Не инвалидирует токены на стороне сервера (stateless JWT) — просто убирает их из браузера.
+**Суть:** Выход из системы. Не валидирует JWT — толерантен к любым (в т.ч. истёкшим и битым) токенам. Удаляет cookies `access_jwt` и `refresh_jwt` (Set-Cookie с `Max-Age=0`), завершая сессию. Токены на сервере не инвалидируются (stateless JWT) — просто убираются из браузера. Всегда отвечает 200.
 
 | Code | Description | Body |
 |------|-------------|------|
 | 200 | Успешный выход, cookies удалены | `null` |
-| 403 | Invalid refresh or access token | `{"detail": "..."}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
+| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
+
+---
+
+## POST /auth/refresh
+
+**Суть:** Продление сессии по refresh-cookie. Декодирует refresh_jwt (тип `refresh`), находит пользователя по `sub`; выдаёт новый access_jwt (10 минут) и возвращает 200. SPA вызывает этот маршрут один раз при `ACCESS_TOKEN_EXPIRED` и повторяет исходный запрос. Деактивированный аккаунт (`isActive = false`) дальше не пускается.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Новый access установлен cookie | `null` (кука `access_jwt` обновлена на ответе) |
+| 401 | Refresh token missing/expired | `{"detail": {"code": "REFRESH_TOKEN_MISSING\|REFRESH_TOKEN_EXPIRED", "message": str}}` |
+| 403 | Invalid signature / пользователь не найден / аккаунт деактивирован | `{"detail": {"code": "REFRESH_TOKEN_INVALID\|ACCOUNT_DISABLED", "message": str}}` |
 | 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
 
 ---
@@ -154,8 +168,8 @@
 |------|----------|
 | 200 | Успех |
 | 400 | Неверный формат данных (валидация пароля) |
-| 401 | Отсутствует access/refresh токен в cookies |
-| 403 | Невалидный токен / чужой профиль / уже авторизован |
+| 401 | Токен отсутствует или истёк (`ACCESS_*`, `REFRESH_*` EXPIRED/MISSING) |
+| 403 | Невалидный токен / деактивированный аккаунт / чужой профиль / уже авторизован |
 | 404 | Ресурс не найден в БД |
 | 409 | Конфликт (аккаунт с таким email уже существует) |
 | 500 | Внутренняя ошибка сервера |
@@ -170,7 +184,8 @@
 | GET | `/auth/` | Gate авторизации |
 | POST | `/auth/register` | Регистрация |
 | POST | `/auth/login` | Вход |
-| GET | `/auth/logout` | Выход |
+| POST | `/auth/logout` | Выход (толерантный, всегда 200) |
+| POST | `/auth/refresh` | Продление сессии по refresh-cookie |
 | GET | `/user/{user_id}` | Просмотр профиля |
 | POST | `/user/{user_id}/edit_info` | Редактирование профиля |
 
@@ -202,7 +217,25 @@
 | PATCH | `/olympiads/{id}` | ADMIN / своя | 200 | Обновить |
 | DELETE | `/olympiads/{id}` | ADMIN / своя | 200 | Удалить |
 
-**Olympiad:** `{"id", "name", "description", "status": "DRAFT|PUBLISHED|ARCHIVED", "subjects": [...], "levels": [...], "years": [...], "grades": [...], "profiles": [...], "organizer_ids": [...], "bvi_organizations": [...], "official_url", "registration_url", "region", "metadata": {}, ...}` — связи хранятся в JSONB-массивах; статус задаётся при обновлении, создание всегда приводит к `PUBLISHED`.
+**Olympiad:** `{"id", "name", "description", "status": "DRAFT|PUBLISHED|ARCHIVED", "subjects": [...], "levels": [...], "years": [...], "grades": [...], "profiles": [...], "organizer_ids": [...], "bvi_organizations": [...], "official_url", "registration_url", "region", "metadata": {}, "schedule": {...}|null, "current_status": "...|null", "current_stage": {...}|null, "next_deadline": "...|null", ...}` — связи хранятся в JSONB-массивах; статус задаётся при обновлении, создание всегда приводит к `PUBLISHED`.
+
+`schedule` (JSONB, этапы/сезон) не хранит готовых статусов — они вычисляются при выдаче и никогда не пишутся в БД/кэш:
+
+```json
+{
+  "season": "2026/27",
+  "stages": [
+    {"id": "registration_1", "name": "Регистрация", "type": "REGISTRATION",
+     "start_at": "2026-10-01T00:00:00+03:00", "end_at": "2026-10-15T23:59:59+03:00"},
+    {"id": "qualification_1", "name": "Отборочный этап", "type": "QUALIFICATION",
+     "start_at": "2026-10-20T00:00:00+03:00", "end_at": "2026-11-05T23:59:59+03:00"}
+  ]
+}
+```
+
+- типы этапов: `REGISTRATION | QUALIFICATION | FINAL | RESULTS`; даты только ISO 8601 с таймзоной, `start_at <= end_at`; идентификаторы этапов уникальны;
+- `current_stage` — активный или ближайший этап; если активного нет, `current_status = REGISTRATION_CLOSED`, если все этапы завершены — `FINISHED`, если `schedule = null` — `current_status/current_stage/next_deadline = null` («Даты пока не указаны»);
+- `current_status` может быть одним из `REGISTRATION_OPEN | REGISTRATION_CLOSED | QUALIFICATION | FINAL | RESULTS | FINISHED`.
 
 ## Docs
 

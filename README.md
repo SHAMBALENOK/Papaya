@@ -40,6 +40,7 @@ Papaya — веб-сервис, который собирает в одном м
 Реализовано в текущей ветке:
 
 - регистрация, вход и выход (JWT в HttpOnly-cookies: `access_jwt` 10 минут, `refresh_jwt` 14 дней);
+- продление сессии «на лету»: `POST /api/v1/auth/refresh` выдаёт новый access по живому refresh-cookie, SPA автоматически повторяет запрос один раз (`ACCESS_TOKEN_EXPIRED` больше не разлогинивает);
 - профили пользователей и их редактирование (только владелец профиля);
 - роли `USER`, `ORGANIZATION_ADMIN`, `ADMIN` (legacy `EDITOR` мигрируется в `ORGANIZATION_ADMIN`);
 - каталог олимпиад и страница конкретной олимпиады (список — компактными карточками: 4/3/2/1 в ряд);
@@ -61,6 +62,11 @@ Papaya — веб-сервис, который собирает в одном м
 - при подтверждении новые олимпиады создаются, совпадающие по нормализованному названию — объединяются (предметы/уровни/годы сливаются), кэш инвалидируется;
 - панель администратора с дашбордом импортов (`#/admin/imports`): статистика, список импортов, быстрые подтверждение/отклонение;
 - страницы SPA: каталог организаций и олимпиад, документы с загрузкой/запуском импорта, страница предпросмотра импорта с подтверждением.
+
+Фаза 2 (ветка `patch-0.8`) поверх доменного слоя:
+
+- этапы/даты олимпиад (`schedule` как JSONB, без отдельных таблиц): сезон + стадии `REGISTRATION/QUALIFICATION/FINAL/RESULTS` с ISO 8601 датами и таймзоной;
+- вычисляемые при выдаче `current_status`, `current_stage`, `next_deadline` (не хранятся в БД/кэше); timeline и конструктор этапов в SPA.
 
 Среда не запускается без Docker: PostgreSQL, Redis, веб-приложение, Celery и pgAdmin поднимаются контейнерами (`docker compose`).
 
@@ -202,6 +208,17 @@ docker compose --profile testing run --rm test sh -c \
 Полный поэтапный план (стабилизация → доменная модель олимпиад → каталог → поиск → личный кабинет → университеты и БВИ → рекомендации → наполнение базы → организаторы → навигатор поступления) ведётся в [docs/TODO.md](docs/TODO.md). README намеренно не содержит его копии, чтобы план не устаревал в двух местах.
 
 ## История изменений
+
+**`patch-0.8`**
+
+- **Фаза 2 — этапы и даты олимпиад:** JSONB-поле `schedule` у олимпиад (миграция `0006`, идемпотентная); Pydantic-схемы `OlympiadStage`/`OlympiadSchedule` (ISO 8601 с таймзоной, `start_at <= end_at`, типы `REGISTRATION|QUALIFICATION|FINAL|RESULTS`, уникальные id);
+- вычисление статусов в `app/core/schedule.py`: `current_status` олимпиады (`REGISTRATION_OPEN/REGISTRATION_CLOSED/QUALIFICATION/FINAL/RESULTS/FINISHED`), `current_stage` и `next_deadline` — статусы никогда не пишутся в БД/кэш, enrich выполняется при выдаче;
+- фронтенд: timeline этапов и бейджи статусов на странице олимпиады, визуальный конструктор этапов в модалке создания/редактирования (пустой список = «Даты пока не указаны»);
+- **автопродление сессии:** типизированные JWT (claim `type: access|refresh`), `POST /api/v1/auth/refresh` выдаёт новый access по живому refresh-cookie; SPA перехватывает `ACCESS_TOKEN_EXPIRED`, один раз обновляет токен и повторяет запрос — случайные «разлогинивания» каждые 10 минут устранены; `/auth/logout` стал толерантным (всегда 200);
+- ошибки авторизации отдают `{"code", "message"}`: `ACCESS_TOKEN_MISSING|INVALID|EXPIRED`, `REFRESH_TOKEN_MISSING|INVALID|EXPIRED`, `ACCOUNT_DISABLED`;
+- деактивированные аккаунты (`Users.isActive`) отсекаются на всех защищённых маршрутах и при refresh (403 `ACCOUNT_DISABLED`);
+- тесты: `tests/test_schedule.py` (статусы/валидация/backward-compat) и `tests/test_auth_refresh.py` (типы токенов, expiry, refresh-цикл, leave-status, disabled); полный прогон — **87 passed**;
+- обновлены README, `docs/TODO.md` (Фаза 2 отмечена выполненной) и `docs/responses.md`.
 
 **`patch-0.7`**
 
