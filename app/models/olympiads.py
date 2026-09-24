@@ -41,6 +41,11 @@ class Olympiads(Base):
     registration_url = Column(String, nullable=True)
     official_url = Column(String, nullable=True)
     status = Column(String, nullable=False, default='PUBLISHED')
+    # Временная структура олимпиады (Фаза 2): JSONB {"season", "stages": [...]}.
+    # Источник истины расписания; статусы этапов/олимпиады вычисляются при
+    # выдаче, в БД не хранятся. Старые олимпиады имеют NULL — это валидное
+    # состояние («даты пока не указаны»).
+    schedule = Column(JSONB, nullable=True)
     # Индекс по названию ускоряет точный/фильтрованный поиск дубликатов.
     name_norm = Column(String, nullable=True, index=True)
     metadata_ = Column('metadata', JSONB, nullable=True)

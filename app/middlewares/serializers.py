@@ -78,6 +78,7 @@ def olympiad_to_dict(olympiad) -> dict:
         'registration_url': olympiad.registration_url,
         'official_url': olympiad.official_url,
         'status': olympiad.status,
+        'schedule': olympiad.schedule or None,
         'metadata': olympiad.metadata_ or {},
         'created_at': _iso(olympiad.created_at),
         'updated_at': _iso(olympiad.updated_at),

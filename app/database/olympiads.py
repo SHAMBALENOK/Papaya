@@ -77,7 +77,7 @@ async def find_olympiad_by_name_norm(name_norm: str) -> dict | None:
 _OLYMPIAD_EDITABLE_FIELDS = frozenset({
     'name', 'organizer_ids', 'description', 'subjects', 'levels', 'years',
     'profiles', 'bvi_organizations', 'registration_url', 'official_url',
-    'status', 'metadata',
+    'status', 'metadata', 'schedule',
 })
 
 
@@ -95,6 +95,7 @@ async def add_olympiad(ins: dict) -> dict:
         registration_url=ins.get('registration_url'),
         official_url=ins.get('official_url'),
         status=ins.get('status', 'PUBLISHED'),
+        schedule=ins.get('schedule'),
         name_norm=normalize_name(ins.get('name') or ''),
         metadata_=ins.get('metadata'),
     )

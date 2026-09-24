@@ -1,7 +1,16 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+import re
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    field_validator,
+    model_validator,
+)
 from typing import Optional, List, Any
 from datetime import datetime
 from uuid import UUID
+
+from app.core.schedule import STAGE_TYPES
 
 
 def _validate_str_list(value):
@@ -52,6 +61,103 @@ class OlympiadBase(BaseModel):
         return v
 
 
+class OlympiadStage(BaseModel):
+    """Этап олимпиады.
+
+    Контракт: ``status`` этапа в API всегда вычисляется сервером
+    (app/core/schedule.py) и в запросе/БД не передаётся. Даты принимаются
+    только в формате ISO 8601 с таймзоной (naive значения отклоняются 422 —
+    это исключает неоднозначность «в каком поясе начало этапа»).
+    """
+    id: str
+    name: str
+    type: str
+    start_at: str
+    end_at: Optional[str] = None
+    timezone: Optional[str] = None
+
+    @field_validator('id')
+    @classmethod
+    def _check_id(cls, v):
+        v = (v or '').strip()
+        if not v:
+            raise ValueError('stage id is required')
+        if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_-]{0,63}', v):
+            raise ValueError('stage id may contain only letters, digits, "_", "-"')
+        return v
+
+    @field_validator('name')
+    @classmethod
+    def _check_name(cls, v):
+        v = (v or '').strip()
+        if not v:
+            raise ValueError('stage name is required')
+        return v
+
+    @field_validator('type')
+    @classmethod
+    def _check_type(cls, v):
+        v = (v or '').strip().upper()
+        if v not in STAGE_TYPES:
+            raise ValueError(f"stage type must be one of {STAGE_TYPES}")
+        return v
+
+    @field_validator('start_at', 'end_at')
+    @classmethod
+    def _check_datetime(cls, v):
+        if v is None or v == '':
+            return None
+        try:
+            dt = datetime.fromisoformat(str(v))
+        except (TypeError, ValueError):
+            raise ValueError(
+                'must be an ISO 8601 datetime, e.g. "2026-09-01T00:00:00+03:00"'
+            )
+        if dt.tzinfo is None:
+            raise ValueError('must include a timezone offset (e.g. +03:00 or Z)')
+        return dt.isoformat()
+
+    @model_validator(mode='after')
+    def _check_range(self):
+        start = self.start_at
+        end = self.end_at
+        if end is not None and datetime.fromisoformat(start) > datetime.fromisoformat(end):
+            raise ValueError('start_at must not be later than end_at')
+        return self
+
+
+class OlympiadSchedule(BaseModel):
+    """Временная структура олимпиады: сезон + упорядоченные этапы.
+
+    ``stages`` должен быть упорядочен по времени старта — это влияет на
+    выбор «текущего» этапа при пересечении дат (при прочих равных побеждает
+    этап раньше в массиве).
+    """
+    season: Optional[str] = None
+    stages: List[OlympiadStage] = []
+
+    @field_validator('season')
+    @classmethod
+    def _check_season(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip()
+        if not v:
+            return None
+        if len(v) > 32:
+            raise ValueError('season is too long (max 32 chars)')
+        return v
+
+    @model_validator(mode='after')
+    def _check_duplicate_ids(self):
+        seen = set()
+        for stage in self.stages:
+            if stage.id in seen:
+                raise ValueError(f'duplicate stage id: {stage.id!r}')
+            seen.add(stage.id)
+        return self
+
+
 class OlympiadCreate(BaseModel):
     """Создание олимпиады.
 
@@ -69,6 +175,7 @@ class OlympiadCreate(BaseModel):
     registration_url: Optional[str] = None
     official_url: Optional[str] = None
     metadata: Optional[dict] = None
+    schedule: Optional[OlympiadSchedule] = None
 
     @field_validator('organizer_ids', 'subjects', 'levels', 'years',
                      'bvi_organizations', mode='before')
@@ -91,6 +198,7 @@ class OlympiadUpdate(BaseModel):
     official_url: Optional[str] = None
     status: Optional[str] = None
     metadata: Optional[dict] = None
+    schedule: Optional[OlympiadSchedule] = None
 
     @field_validator('organizer_ids', 'subjects', 'levels', 'years',
                      'bvi_organizations', mode='before')
@@ -110,6 +218,14 @@ class OlympiadUpdate(BaseModel):
 
 class OlympiadResponse(OlympiadBase):
     metadata: Optional[dict] = None
+    # Расписание (Фаза 2): источник данных plus вычисляемые поля.
+    # ``schedule.stages[].status``, ``current_status``, ``current_stage`` и
+    # ``next_deadline`` заполняются сервером динамически и в БД не хранятся;
+    # для старых олимпиад без расписания всё равно NULL.
+    schedule: Optional[dict] = None
+    current_status: Optional[str] = None
+    current_stage: Optional[dict] = None
+    next_deadline: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

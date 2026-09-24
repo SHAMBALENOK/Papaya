@@ -15,6 +15,7 @@ from app.caching.main import (
 )
 from app.core.cache_guard import safe_cache_write
 from app.core.deps import get_current_user, require_org_admin_or_admin
+from app.core.schedule import enrich_olympiad
 
 
 olympiads_page = APIRouter(
@@ -72,7 +73,8 @@ async def list_olympiads(
                 limit=limit,
             ),
         )
-        return olympiads
+        # Вычисляемые статусы не кэшируются: они добавляются только в ответ.
+        return [enrich_olympiad(dict(item)) for item in olympiads]
     except HTTPException:
         raise
     except Exception:
@@ -104,7 +106,7 @@ async def get_olympiad(
         )
         if not olympiad:
             raise HTTPException(status_code=404, detail='Olympiad not found')
-        return olympiad
+        return enrich_olympiad(dict(olympiad))
     except HTTPException:
         raise
     except Exception:
@@ -136,7 +138,7 @@ async def create_olympiad(
             create_data['organizer_ids'] = [str(current_user['organization_id'])]
         created = await database.olympiads.add_olympiad(create_data)
         await safe_cache_write(cache_olympiad_after_write(r, created))
-        return created
+        return enrich_olympiad(dict(created))
     except HTTPException:
         raise
     except Exception:
@@ -184,7 +186,7 @@ async def update_olympiad(
         if not updated_olympiad:
             raise HTTPException(status_code=404, detail='Olympiad not found')
         await safe_cache_write(cache_olympiad_after_write(r, updated_olympiad))
-        return updated_olympiad
+        return enrich_olympiad(dict(updated_olympiad))
     except HTTPException:
         raise
     except Exception:
