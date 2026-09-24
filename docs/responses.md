@@ -178,7 +178,7 @@
 
 # Доменные ресурсы (`patch-0.7`)
 
-Все маршруты требуют авторизации (JWT в cookies). Создание/изменение — ADMIN или ORGANIZATION_ADMIN своей организации; списки для ORGANIZATION_ADMIN фильтруются на сервере.
+Все маршруты требуют авторизации (JWT в cookies). Создание/изменение — ADMIN или ORGANIZATION_ADMIN своей организации; список `/organizations` для ORGANIZATION_ADMIN фильтруется на сервере до своей организации.
 
 ## Organizations
 
@@ -188,9 +188,9 @@
 | POST | `/organizations` | ADMIN | 201 | Создать организацию |
 | GET | `/organizations/{id}` | авторизован | 200 | Детали организации |
 | PATCH | `/organizations/{id}` | ADMIN / своя | 200 | Обновить |
-| DELETE | `/organizations/{id}` | ADMIN / своя | 204 | Удалить |
+| DELETE | `/organizations/{id}` | ADMIN / своя | 200 | Удалить |
 
-**Organization:** `{"id", "name", "short_name", "type": "UNIVERSITY|ORGANIZER|SCHOOL|OTHER", "website", "description", "contact_email", "contact_phone", "metadata": {}, "createdAt", "updatedAt"}`
+**Organization:** `{"id", "name", "short_name", "type": "UNIVERSITY|ORGANIZER|SCHOOL|OTHER", "website", "description", "contacts": {"email": ..., "phone": ..., ...}, "metadata": {}, "createdAt", "updatedAt"}` — `contacts` — JSONB-объект контактов.
 
 ## Olympiads
 
@@ -200,9 +200,9 @@
 | POST | `/olympiads` | ADMIN / орг-админ | 201 | Создать олимпиаду |
 | GET | `/olympiads/{id}` | авторизован | 200 | Детали олимпиады |
 | PATCH | `/olympiads/{id}` | ADMIN / своя | 200 | Обновить |
-| DELETE | `/olympiads/{id}` | ADMIN / своя | 204 | Удалить |
+| DELETE | `/olympiads/{id}` | ADMIN / своя | 200 | Удалить |
 
-**Olympiad:** `{"id", "name", "description", "status": "REGISTRATION_OPEN|...", "subjects": [...], "levels": [...], "years": [...], "grades": [...], "profiles": [...], "organizer_ids": [...], "bvi_organizations": [...], "official_url", "registration_url", "region", "metadata": {}, ...}` — связи хранятся в JSONB-массивах.
+**Olympiad:** `{"id", "name", "description", "status": "DRAFT|PUBLISHED|ARCHIVED", "subjects": [...], "levels": [...], "years": [...], "grades": [...], "profiles": [...], "organizer_ids": [...], "bvi_organizations": [...], "official_url", "registration_url", "region", "metadata": {}, ...}` — связи хранятся в JSONB-массивах; статус задаётся при обновлении, создание всегда приводит к `PUBLISHED`.
 
 ## Docs
 
@@ -213,7 +213,7 @@
 | GET | `/docs/{id}` | авторизован (object-level) | 200 | Детали документа |
 | GET | `/docs/{id}/file` | авторизован (object-level) | 200 | Скачивание файла |
 | PATCH | `/docs/{id}` | ADMIN / своя | 200 | Обновить метаданные |
-| DELETE | `/docs/{id}` | ADMIN / своя | 204 | Удалить запись |
+| DELETE | `/docs/{id}` | ADMIN / своя | 200 | Удалить запись |
 
 **Errors:** 400 неподдерживаемый формат файла, 403 чужая организация, 413 больше `MAX_UPLOAD_MB`. **Doc:** `{"id", "name", "type": "RSOSH_LIST|OLYMPIAD_REGULATION|UNIVERSITY_DOCUMENT|OTHER", "status": "UPLOADED|PROCESSING|NEEDS_REVIEW|PROCESSED|FAILED", "organization_id", "olympiad_id", "uploaded_by", "checksum", "metadata": {}, ...}`
 

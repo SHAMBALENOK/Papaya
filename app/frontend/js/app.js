@@ -79,16 +79,6 @@ function formatDate(iso) {
     return d.toLocaleDateString('ru-RU');
 }
 
-function userFromDashboard(d) {
-    return {
-        id: d.user_id,
-        name: d.user_name,
-        surname: d.user_surname,
-        email: d.user_email,
-        role: d.user_role || 'USER',
-    };
-}
-
 function userFromProfile(d) {
     return {
         id: d.id,
@@ -96,6 +86,7 @@ function userFromProfile(d) {
         surname: d.surname,
         email: d.email,
         role: d.role || 'USER',
+        organization_id: d.organization_id || null,
     };
 }
 

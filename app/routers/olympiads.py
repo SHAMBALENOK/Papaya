@@ -25,6 +25,25 @@ olympiads_page = APIRouter(
 logger = logging.getLogger('papaya.olympiads')
 
 
+def _check_own_olympiad(current_user: dict, olympiad: dict) -> None:
+    """Object-level: орг-админ правит только олимпиады своей организации.
+
+    Совпадение проверяется по вхождению ``organization_id`` текущего
+    пользователя в ``organizer_ids`` олимпиады (JSONB-массив).
+    """
+    if current_user.get('role') == 'ADMIN':
+        return
+    own_org = current_user.get('organization_id')
+    organizer_ids = olympiad.get('organizer_ids') or []
+    if not own_org or not any(
+        str(org_id) == str(own_org) for org_id in organizer_ids
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail='You can only manage olympiads of your own organization',
+        )
+
+
 @olympiads_page.get(
     '',
     response_model=list[schemas.olympiads.OlympiadResponse],
@@ -43,7 +62,7 @@ async def list_olympiads(
     _: dict = Depends(get_current_user),
 ):
     try:
-        scope = f'status:{status or ""};organizer:{organizer_id or ""}'
+        scope = f'status:{status or ""};organizer:{organizer_id or ""};limit:{limit or ""}'
         olympiads = await get_cached_olympiads(
             r,
             scope,
@@ -108,10 +127,14 @@ async def get_olympiad(
 async def create_olympiad(
     olympiad: schemas.olympiads.OlympiadCreate,
     r: aioredis.Redis = Depends(get_redis),
-    _: dict = Depends(require_org_admin_or_admin),
+    current_user: dict = Depends(require_org_admin_or_admin),
 ):
     try:
-        created = await database.olympiads.add_olympiad(olympiad.model_dump())
+        create_data = olympiad.model_dump()
+        if current_user.get('role') != 'ADMIN':
+            # Орг-админ может привязать только свою организацию.
+            create_data['organizer_ids'] = [str(current_user['organization_id'])]
+        created = await database.olympiads.add_olympiad(create_data)
         await safe_cache_write(cache_olympiad_after_write(r, created))
         return created
     except HTTPException:
@@ -137,7 +160,7 @@ async def update_olympiad(
     olympiad_id: uuid_mod.UUID,
     update: schemas.olympiads.OlympiadUpdate,
     r: aioredis.Redis = Depends(get_redis),
-    _: dict = Depends(require_org_admin_or_admin),
+    current_user: dict = Depends(require_org_admin_or_admin),
 ):
     try:
         existing = await get_cached_olympiad(
@@ -147,6 +170,8 @@ async def update_olympiad(
         )
         if not existing:
             raise HTTPException(status_code=404, detail='Olympiad not found')
+
+        _check_own_olympiad(current_user, existing)
 
         update_data = update.model_dump(exclude_unset=True)
         if not update_data:
@@ -180,7 +205,7 @@ async def update_olympiad(
 async def delete_olympiad(
     olympiad_id: uuid_mod.UUID,
     r: aioredis.Redis = Depends(get_redis),
-    _: dict = Depends(require_org_admin_or_admin),
+    current_user: dict = Depends(require_org_admin_or_admin),
 ):
     try:
         existing = await get_cached_olympiad(
@@ -190,6 +215,8 @@ async def delete_olympiad(
         )
         if not existing:
             raise HTTPException(status_code=404, detail='Olympiad not found')
+
+        _check_own_olympiad(current_user, existing)
 
         deleted = await database.olympiads.delete_olympiad(str(olympiad_id))
         if not deleted:

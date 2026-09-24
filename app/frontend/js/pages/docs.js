@@ -126,13 +126,17 @@ async function renderDocs() {
         </header>
         ${docs.length === 0
             ? alertHtml('Документов пока нет', 'error')
-            : `<div class="space-y-4">${docs.map(docRow).join('')}</div>`}
+            : `<div id="docs-list" class="space-y-4">${docs.map(docRow).join('')}</div>`}
     </section>`;
 
     const uploadBtn = page.querySelector('#doc-upload');
     if (uploadBtn) uploadBtn.addEventListener('click', () => openUploadModal(renderDocs, orgs));
 
-    page.addEventListener('click', async (e) => {
+    /* Делегирование вешается на свежий контейнер списка, а не на #page:
+       иначе после каждого ре-рендера накапливались бы дублирующие обработчики. */
+    const list = page.querySelector('#docs-list');
+    if (!list) return;
+    list.addEventListener('click', async (e) => {
         const target = e.target.closest('[data-act]');
         if (!target) return;
         const id = target.dataset.id;

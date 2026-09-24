@@ -39,10 +39,14 @@ async def list_organizations(
     org_type: str | None = Query(default=None, alias='type'),
     limit: int | None = Query(default=None, ge=1, le=500),
     r: aioredis.Redis = Depends(get_redis),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     try:
-        scope = f'all:{org_type or ""}'
+        own_org = None
+        if current_user.get('role') == 'ORGANIZATION_ADMIN':
+            # Представитель организации видит в списке только свою.
+            own_org = str(current_user.get('organization_id') or '')
+        scope = f'all:{org_type or ""};limit:{limit or ""};org:{own_org or ""}'
         orgs = await get_cached_organizations(
             r,
             scope,
@@ -51,6 +55,8 @@ async def list_organizations(
                 limit=limit,
             ),
         )
+        if own_org:
+            orgs = [org for org in orgs if org.get('id') == own_org]
         return orgs
     except HTTPException:
         raise
