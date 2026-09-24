@@ -2,7 +2,20 @@
  * pages/olympiads.js — каталог и детальная карточка олимпиад.
  * Создаёт/правит орг-админ своей организации или ADMIN.
  * Бэкенд: app/routers/olympiads.py (#/olympiads, #/olympiads/{id}).
+ *
+ * Фаза 2 «Этапы и даты»:
+ *   — в карточке: вычисленный статус олимпиады + ближайший дедлайн;
+ *   — на странице: timeline этапов (season, даты, статус каждого этапа);
+ *   — в модалке: визуальный конструктор одного или нескольких этапов.
+ *   Расписание хранится в JSONB-поле schedule; статусы считает сервер.
  * ========================================================================== */
+
+const STAGE_TYPE_LABELS = {
+    REGISTRATION: 'Регистрация',
+    QUALIFICATION: 'Отборочный этап',
+    FINAL: 'Заключительный этап',
+    RESULTS: 'Результаты',
+};
 
 function statusBadge(status) {
     const map = { PUBLISHED: [UI.badgeSuccess, 'Опубликована'],
@@ -10,6 +23,93 @@ function statusBadge(status) {
                   ARCHIVED: [UI.badgeDanger, 'Архив'] };
     const [cls, label] = map[status] || [UI.badgeNeutral, status || '—'];
     return `<span class="${UI.badge} ${cls}">${escHtml(label)}</span>`;
+}
+
+function phaseStatusBadge(status) {
+    const map = {
+        REGISTRATION_OPEN: [UI.badgeSuccess, 'Регистрация открыта'],
+        REGISTRATION_CLOSED: [UI.badgeNeutral, 'Регистрация закрыта'],
+        QUALIFICATION: [UI.badgeSuccess, 'Отборочный этап'],
+        FINAL: [UI.badgeSuccess, 'Заключительный этап'],
+        RESULTS: [UI.badgeSuccess, 'Результаты'],
+        FINISHED: [UI.badgeDanger, 'Завершена'],
+    };
+    const [cls, label] = map[status] || [UI.badgeNeutral, status || '—'];
+    return `<span class="${UI.badge} ${cls}">${escHtml(label)}</span>`;
+}
+
+function stageStatusBadge(status) {
+    const map = {
+        UPCOMING: [UI.badgeNeutral, 'Предстоит'],
+        ACTIVE: [UI.badgeSuccess, 'Идёт сейчас'],
+        FINISHED: [UI.badgeDanger, 'Завершён'],
+    };
+    const [cls, label] = map[status] || [UI.badgeNeutral, status || '—'];
+    return `<span class="${UI.badge} ${cls}">${escHtml(label)}</span>`;
+}
+
+function formatDateTime(iso) {
+    if (!iso) return 'Н/Д';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return 'Н/Д';
+    return d.toLocaleString('ru-RU', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    });
+}
+
+/* datetime-local ("YYYY-MM-DDTHH:MM", локальное время) → ISO с таймзоной. */
+function toLocalIso(inputValue) {
+    if (!inputValue) return null;
+    const d = new Date(inputValue);
+    if (isNaN(d.getTime())) return null;
+    const offset = -d.getTimezoneOffset();
+    const sign = offset >= 0 ? '+' : '-';
+    const pad = n => String(Math.abs(n)).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+        + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes())
+        + ':00' + sign + pad(Math.floor(Math.abs(offset) / 60)) + ':' + pad(Math.abs(offset) % 60);
+}
+
+/* ISO с таймзоной → значение для input[type="datetime-local"]. */
+function toLocalInput(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+        + 'T' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function scheduleTimelineHtml(oly) {
+    const sch = oly.schedule;
+    if (!sch || !Array.isArray(sch.stages) || sch.stages.length === 0) {
+        return `<div class="${UI.card} p-8 mt-6"><p class="text-sm text-ink-soft">Даты пока не указаны.</p></div>`;
+    }
+    const items = sch.stages.map(stage => {
+        const label = STAGE_TYPE_LABELS[stage.type] || stage.type;
+        const start = formatDateTime(stage.start_at);
+        const end = stage.end_at ? ' — ' + formatDateTime(stage.end_at) : '';
+        const dot = stage.status === 'ACTIVE'
+            ? 'bg-sage border-ink'
+            : stage.status === 'FINISHED'
+                ? 'bg-mist border-ink/40'
+                : 'bg-white border-ink/40';
+        return `
+        <li class="relative pl-9 pb-6 last:pb-0">
+            <span class="absolute left-0 top-1 w-4 h-4 rounded-full border-2 ${dot}" aria-hidden="true"></span>
+            <div class="flex flex-wrap items-center gap-2">
+                <h3 class="font-semibold text-ink">${escHtml(stage.name)}</h3>
+                <span class="text-xs font-semibold text-ink-soft">${escHtml(label)}</span>
+                ${stageStatusBadge(stage.status)}
+            </div>
+            <p class="mt-1 text-sm text-ink-soft">${escHtml(start)}${escHtml(end)}</p>
+        </li>`;
+    }).join('');
+    return `
+    <div class="${UI.card} p-8 mt-6">
+        ${sch.season ? `<p class="${UI.eyebrow} mb-6">Сезон ${escHtml(sch.season)}</p>` : ''}
+        <ol class="list-none">${items}</ol>
+    </div>`;
 }
 
 function splitList(text) {
@@ -23,6 +123,12 @@ function olympiadCard(oly) {
     const accent = oly.status === 'ARCHIVED' ? 'bg-crimson'
         : oly.status === 'DRAFT' ? 'bg-sand'
         : 'bg-sage';
+    const phaseInfo = (oly.current_status || oly.next_deadline)
+        ? `<div class="mt-3 flex flex-wrap items-center gap-2">
+            ${oly.current_status ? phaseStatusBadge(oly.current_status) : ''}
+            ${oly.next_deadline ? `<span class="text-xs font-semibold text-ink">Дедлайн ${escHtml(formatDateTime(oly.next_deadline))}</span>` : ''}
+        </div>`
+        : '';
     return `
     <a href="#/olympiads/${oly.id}"
        title="${escAttr(oly.name)}"
@@ -34,6 +140,7 @@ function olympiadCard(oly) {
                 ${statusBadge(oly.status)}
             </div>
             ${oly.description ? `<p class="mt-2 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(oly.description)}</p>` : ''}
+            ${phaseInfo}
             ${subjects.length ? `
             <div class="mt-3 flex flex-wrap gap-1.5">
                 ${subjects.map(s => `<span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(s)}</span>`).join('')}
@@ -45,6 +152,66 @@ function olympiadCard(oly) {
             <p class="mt-3 text-sm font-semibold text-ink group-hover:text-black transition-colors">Подробнее →</p>
         </div>
     </a>`;
+}
+
+function stagesEditorHtml(stages, season, error) {
+    const rows = (stages || []).map((s, i) => `
+        <div class="grid gap-3 bg-mist/60 rounded p-3" data-stage-row="${i}">
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-bold text-ink-soft uppercase tracking-wide">Этап ${i + 1}</span>
+                <button type="button" data-stage-remove="${i}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} text-crimson hover:text-crimson">Удалить</button>
+            </div>
+            <input class="${UI.input}" data-stage-field="name" value="${escAttr(s.name || '')}" placeholder="Название, напр. «Отборочный тур»">
+            <select class="${UI.input}" data-stage-field="type">
+                ${Object.entries(STAGE_TYPE_LABELS).map(([val, lab]) => `<option value="${val}" ${s.type === val ? 'selected' : ''}>${escHtml(lab)}</option>`).join('')}
+            </select>
+            <div class="grid grid-cols-2 gap-3">
+                <label class="block">
+                    <span class="text-xs font-semibold text-ink-soft">Начало</span>
+                    <input type="datetime-local" class="${UI.input} mt-1" data-stage-field="start_at" value="${escAttr(toLocalInput(s.start_at || ''))}">
+                </label>
+                <label class="block">
+                    <span class="text-xs font-semibold text-ink-soft">Конец (необязательно)</span>
+                    <input type="datetime-local" class="${UI.input} mt-1" data-stage-field="end_at" value="${escAttr(toLocalInput(s.end_at || ''))}">
+                </label>
+            </div>
+        </div>`).join('');
+    return `
+    <div class="rounded border border-mist p-4">
+        <div class="flex items-center justify-between mb-3">
+            <p class="text-sm font-semibold text-ink">Этапы и даты</p>
+            <button type="button" id="stage-add" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">+ Добавить этап</button>
+        </div>
+        <input id="oly-season" class="${UI.input} mb-3" placeholder="Сезон, напр. 2026/27" value="${escAttr(season || '')}">
+        <p class="text-xs text-ink-faint mb-3">Даты появятся на странице олимпиады (timeline). Оставьте поле пустым, если даты пока неизвестны.</p>
+        <div class="space-y-3">${rows || '<p class="text-sm text-ink-faint">Этапов пока нет.</p>'}</div>
+        ${error ? `<p class="mt-3 text-sm text-crimson">${escHtml(error)}</p>` : ''}
+    </div>`;
+}
+
+/* Собрать этапы из DOM редактора и провалидировать их клиентски. */
+function collectStagesFromEditor(overlay) {
+    const out = [];
+    overlay.querySelectorAll('.stage-row').forEach((row, i) => {
+        const name = row.querySelector('[data-stage-field="name"]').value.trim();
+        const type = row.querySelector('[data-stage-field="type"]').value;
+        const start = toLocalIso(row.querySelector('[data-stage-field="start_at"]').value);
+        const end = toLocalIso(row.querySelector('[data-stage-field="end_at"]').value);
+        if (!name && !start && !end) return;
+        if (!name) throw new Error('У одного из этапов не указано название');
+        if (!start) throw new Error(`У этапа «${name}» не указано время начала`);
+        if (end && new Date(end) < new Date(start)) throw new Error(`У этапа «${name}» начало позже конца`);
+        out.push({
+            /* Сервер требует уникальный id; генерируем по типу + номеру. */
+            id: `${type.toLowerCase()}_${i + 1}`,
+            name,
+            type,
+            start_at: start,
+            end_at: end || null,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+        });
+    });
+    return out;
 }
 
 function openOlympiadModal(onDone, oly = null, orgs = []) {
@@ -72,9 +239,57 @@ function openOlympiadModal(onDone, oly = null, orgs = []) {
                 { value: 'ARCHIVED', label: 'Архив' },
             ],
         }) : ''}
+        <div id="stage-editor-root" class="${UI.field} mt-8"></div>
         <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full">${oly ? 'Сохранить' : 'Создать'}</button>
     </form>`;
     const { overlay, close } = openModal(oly ? 'Редактирование олимпиады' : 'Новая олимпиада', body, { wide: true });
+
+    /* ----- Конструктор этапов ----- */
+    const stages = (data.schedule && Array.isArray(data.schedule.stages))
+        ? data.schedule.stages.map(s => ({
+            id: s.id || '',
+            name: s.name || '',
+            type: s.type || 'QUALIFICATION',
+            start_at: s.start_at || '',
+            end_at: s.end_at || '',
+        }))
+        : [];
+    let seasonValue = data.schedule && data.schedule.season ? data.schedule.season : '';
+    let stageError = '';
+
+    function renderStageEditor() {
+        const root = overlay.querySelector('#stage-editor-root');
+        if (!root) return;
+        root.innerHTML = stagesEditorHtml(stages, seasonValue, stageError);
+        const addBtn = root.querySelector('#stage-add');
+        if (addBtn) addBtn.addEventListener('click', () => {
+            stages.push({ id: '', name: '', type: 'QUALIFICATION', start_at: '', end_at: '' });
+            stageError = '';
+            renderStageEditor();
+        });
+        root.querySelectorAll('.stage-remove').forEach(btn => {
+            btn.addEventListener('click', () => {
+                stages.splice(Number(btn.dataset.stageRemove), 1);
+                stageError = '';
+                renderStageEditor();
+            });
+        });
+        const season = root.querySelector('#oly-season');
+        if (season) season.addEventListener('input', e => { seasonValue = e.target.value; });
+        /* Держим in-memory массив в синхроне с DOM для перерисовки. */
+        root.querySelectorAll('.stage-row').forEach(row => {
+            const idx = Number(row.dataset.stageRow);
+            row.querySelectorAll('[data-stage-field]').forEach(field => {
+                field.addEventListener('input', () => {
+                    stages[idx][field.dataset.stageField] =
+                        (field.dataset.stageField === 'start_at' || field.dataset.stageField === 'end_at')
+                            ? toLocalIso(field.value)
+                            : field.value;
+                });
+            });
+        });
+    }
+    renderStageEditor();
 
     overlay.querySelector('#oly-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -90,6 +305,21 @@ function openOlympiadModal(onDone, oly = null, orgs = []) {
             organizer_ids: orgId ? [orgId] : (data.organizer_ids || []),
         };
         if (oly) payload.status = overlay.querySelector('#oly-status').value;
+
+        /* Этапы: валидация до запроса; пустой список = «даты пока не указаны». */
+        try {
+            const collected = collectStagesFromEditor(overlay);
+            const season = seasonValue.trim() || null;
+            if (season && !collected.length) throw new Error('Указан сезон, но нет ни одного этапа');
+            payload.schedule = collected.length
+                ? { season: season, stages: collected }
+                : null;
+        } catch (err) {
+            showModalError(overlay, { data: { detail: err.message || 'Ошибка в расписании' } });
+            btn.disabled = false;
+            return;
+        }
+
         try {
             const res = oly
                 ? await api.updateOlympiad(oly.id, payload)
@@ -178,6 +408,8 @@ async function renderOlympiad(olyId) {
         ['Регистрация', oly.registration_url ? `<a class="text-ember" href="${escAttr(oly.registration_url)}" target="_blank" rel="noopener">${escHtml(oly.registration_url)}</a>` : null],
         ['Официальный сайт', oly.official_url ? `<a class="text-ember" href="${escAttr(oly.official_url)}" target="_blank" rel="noopener">${escHtml(oly.official_url)}</a>` : null],
     ];
+    if (oly.current_status) rows.push(['Текущий статус', phaseStatusBadge(oly.current_status)]);
+    if (oly.next_deadline) rows.push(['Ближайший дедлайн', formatDateTime(oly.next_deadline)]);
 
     page.innerHTML = `
     <section class="max-w-3xl mx-auto px-4 py-8">
@@ -197,6 +429,7 @@ async function renderOlympiad(olyId) {
                     <dd class="text-sm text-right">${value}</dd>
                 </div>`).join('')}
         </div>
+        ${scheduleTimelineHtml(oly)}
     </section>`;
 
     const editBtn = page.querySelector('#oly-edit');
