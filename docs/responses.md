@@ -28,7 +28,7 @@
 
 ## GET /auth/
 
-**Суть:** Gate-маршрут для определения, показывать ли форму входа или редиректить в приложение. Возвращает 403, если валиден access **или** refresh-cookie (пользователь уже «внутри»), иначе 200 — страница авторизации доступна. Refresh-токен сам по себе не даёт доступа к API, но подтверждает наличие живой сессии.
+**Суть:** Gate-маршрут для определения, показывать ли форму входа или редиректить в приложение. Возвращает 403, если валиден access-токен, либо если access отсутствует/истёк, но валиден refresh‑cookie (у пользователя живая сессия — новый access выдаст `POST /auth/refresh`). Невалидный (неподписанный) access вместе с валидным refresh трактуется как «нет сессии» (200): такие токены несовместимы, клиенту проще показать форму входа, чем зациклиться. Refresh-токен сам по себе не даёт доступа к API, но подтверждает наличие живой сессии.
 
 | Code | Description | Body |
 |------|-------------|------|
@@ -234,8 +234,10 @@
 ```
 
 - типы этапов: `REGISTRATION | QUALIFICATION | FINAL | RESULTS`; даты только ISO 8601 с таймзоной, `start_at <= end_at`; идентификаторы этапов уникальны;
-- `current_stage` — активный или ближайший этап; если активного нет, `current_status = REGISTRATION_CLOSED`, если все этапы завершены — `FINISHED`, если `schedule = null` — `current_status/current_stage/next_deadline = null` («Даты пока не указаны»);
-- `current_status` может быть одним из `REGISTRATION_OPEN | REGISTRATION_CLOSED | QUALIFICATION | FINAL | RESULTS | FINISHED`.
+- `current_stage` — активный или ближайший этап; при пересечении активных этапов побеждает «более продвинутый» тип (`FINAL > QUALIFICATION > RESULTS > REGISTRATION`), при равенстве — этап раньше в массиве;
+- `current_status` без активного этапа: все этапы ещё впереди → `UPCOMING` («ещё не началась»), все завершены → `FINISHED`, иначе (`между этапами` — регистрация закрылась, следующий этап впереди) → `REGISTRATION_CLOSED`;
+- `RESULTS` без `end_at` — событие публикации результатов: активен до конца суток `start_at` (в этот день статус `RESULTS`), затем олимпиада завершается `FINISHED`;
+- `current_status` может быть одним из `UPCOMING | REGISTRATION_OPEN | REGISTRATION_CLOSED | QUALIFICATION | FINAL | RESULTS | FINISHED`.
 
 ## Docs
 

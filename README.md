@@ -211,13 +211,16 @@ docker compose --profile testing run --rm test sh -c \
 
 **`patch-0.8`**
 
+- **аудит Фазы 2 (`0.8-1.1.x.x`):** исправлен stage-редактор — разметка редактора теперь содержит классы `stage-row`/`stage-remove`, которые используют JS-селекторы (ранее этапы из модалки молча «терялись», уходя как `schedule=null`);
+- логика статусов уточнена: добавлен статус `UPCOMING` («ещё не началась» вместо ошибочного «регистрация закрыта» до старта регистрации); `REGISTRATION_CLOSED` — только «между этапами»; `RESULTS` без `end_at` держится до конца суток `start_at` (статус `RESULTS` виден в день публикации) и затем `FINISHED`;
+- добавлены регрессионные тесты статусов (CASE 1–8), `next_deadline` и персистентности этапов; полный прогон — **105 passed**;
 - **Фаза 2 — этапы и даты олимпиад:** JSONB-поле `schedule` у олимпиад (миграция `0006`, идемпотентная); Pydantic-схемы `OlympiadStage`/`OlympiadSchedule` (ISO 8601 с таймзоной, `start_at <= end_at`, типы `REGISTRATION|QUALIFICATION|FINAL|RESULTS`, уникальные id);
-- вычисление статусов в `app/core/schedule.py`: `current_status` олимпиады (`REGISTRATION_OPEN/REGISTRATION_CLOSED/QUALIFICATION/FINAL/RESULTS/FINISHED`), `current_stage` и `next_deadline` — статусы никогда не пишутся в БД/кэш, enrich выполняется при выдаче;
+- вычисление статусов в `app/core/schedule.py`: `current_status` олимпиады, `current_stage` и `next_deadline` — статусы никогда не пишутся в БД/кэш, enrich выполняется при выдаче;
 - фронтенд: timeline этапов и бейджи статусов на странице олимпиады, визуальный конструктор этапов в модалке создания/редактирования (пустой список = «Даты пока не указаны»);
 - **автопродление сессии:** типизированные JWT (claim `type: access|refresh`), `POST /api/v1/auth/refresh` выдаёт новый access по живому refresh-cookie; SPA перехватывает `ACCESS_TOKEN_EXPIRED`, один раз обновляет токен и повторяет запрос — случайные «разлогинивания» каждые 10 минут устранены; `/auth/logout` стал толерантным (всегда 200);
 - ошибки авторизации отдают `{"code", "message"}`: `ACCESS_TOKEN_MISSING|INVALID|EXPIRED`, `REFRESH_TOKEN_MISSING|INVALID|EXPIRED`, `ACCOUNT_DISABLED`;
 - деактивированные аккаунты (`Users.isActive`) отсекаются на всех защищённых маршрутах и при refresh (403 `ACCOUNT_DISABLED`);
-- тесты: `tests/test_schedule.py` (статусы/валидация/backward-compat) и `tests/test_auth_refresh.py` (типы токенов, expiry, refresh-цикл, leave-status, disabled); полный прогон — **87 passed**;
+- тесты: `tests/test_schedule.py` (статусы/валидация/backward-compat) и `tests/test_auth_refresh.py` (типы токенов, expiry, refresh-цикл, leave-status, disabled);
 - обновлены README, `docs/TODO.md` (Фаза 2 отмечена выполненной) и `docs/responses.md`.
 
 **`patch-0.7`**

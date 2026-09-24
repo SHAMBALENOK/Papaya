@@ -148,8 +148,9 @@ Olympiad
 ## Возможные статусы
 
 ```text
+UPCOMING            — олимпиада/регистрация ещё не началась
 REGISTRATION_OPEN
-REGISTRATION_CLOSED
+REGISTRATION_CLOSED — регистрация закрыта, следующий этап ещё впереди
 QUALIFICATION
 FINAL
 RESULTS
