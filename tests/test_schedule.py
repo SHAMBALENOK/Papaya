@@ -52,14 +52,29 @@ class TestStageStatus:
         stage = _stage('QUALIFICATION', _iso(-20), _iso(-10))
         assert stage_status(stage, NOW) == 'FINISHED'
 
-    def test_results_without_end_finished_after_start(self):
-        """Этап «Результаты» без end_at завершается сразу после start_at."""
+    def test_results_without_end_active_on_publication_day(self):
+        """«Результаты» без end_at активны в день публикации (до конца суток)."""
+        stage = _stage('RESULTS', _iso(0))
+        assert stage_status(stage, NOW) == 'ACTIVE'
+
+    def test_results_without_end_finished_after_publication_day(self):
+        """После дня публикации результатов этап без end_at завершён."""
         stage = _stage('RESULTS', _iso(-1))
         assert stage_status(stage, NOW) == 'FINISHED'
 
     def test_results_without_end_upcoming(self):
         stage = _stage('RESULTS', _iso(5))
         assert stage_status(stage, NOW) == 'UPCOMING'
+
+    def test_results_with_end_finished(self):
+        """Результаты с явным end_at подчиняются обычным правилам интервала."""
+        stage = _stage('RESULTS', _iso(-4), _iso(-1))
+        assert stage_status(stage, NOW) == 'FINISHED'
+
+    def test_open_ended_stage_without_end_is_active(self):
+        """Этап без end_at (кроме RESULTS) считается длящимся, пока не конец."""
+        stage = _stage('QUALIFICATION', _iso(-1))
+        assert stage_status(stage, NOW) == 'ACTIVE'
 
     def test_naive_datetime_is_invalid(self):
         stage = {'start_at': '2026-09-01T00:00:00'}
@@ -111,8 +126,22 @@ class TestComputeScheduleState:
         assert state['current_status'] == 'FINAL'
         assert state['current_stage']['id'] == 'final'
 
-    def test_all_upcoming_is_registration_closed(self):
-        """Ничего не идёт, но этапы есть — регистрация ещё не открыта."""
+    def test_gap_after_registration_is_registration_closed(self):
+        """«Между этапами»: регистрация кончилась, следующий этап ещё впереди."""
+        schedule = {
+            'stages': [
+                _stage('REGISTRATION', _iso(-30), _iso(-20)),
+                _stage('QUALIFICATION', _iso(10)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'REGISTRATION_CLOSED'
+        assert state['current_stage'] is None
+        # Ближайшая релевантная дата — старт следующего этапа.
+        assert state['next_deadline'] == _iso(10)
+
+    def test_all_upcoming_is_upcoming(self):
+        """Ничего ещё не началось — регистрация «ещё не открыта», а не закрыта."""
         schedule = {
             'stages': [
                 _stage('REGISTRATION', _iso(10), _iso(20)),
@@ -120,9 +149,58 @@ class TestComputeScheduleState:
             ],
         }
         state = compute_schedule_state(schedule, NOW)
-        assert state['current_status'] == 'REGISTRATION_CLOSED'
+        assert state['current_status'] == 'UPCOMING'
         assert state['current_stage'] is None
         assert state['next_deadline'] == _iso(10)
+
+    def test_single_upcoming_registration(self):
+        """CASE 1: сейчас до регистрации → регистрация ещё не началась."""
+        schedule = {
+            'stages': [_stage('REGISTRATION', _iso(10), _iso(20))],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'UPCOMING'
+        assert state['current_stage'] is None
+
+    def test_final_active(self):
+        """CASE 5: финал идёт → FINAL."""
+        schedule = {
+            'stages': [
+                _stage('REGISTRATION', _iso(-40), _iso(-30)),
+                _stage('QUALIFICATION', _iso(-20), _iso(-5)),
+                _stage('FINAL', _iso(-1), _iso(3)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'FINAL'
+        assert state['current_stage']['id'] == 'final'
+        assert state['next_deadline'] == _iso(3)
+
+    def test_results_publication_day_active(self):
+        """CASE 6: день публикации результатов (без end_at) → RESULTS."""
+        schedule = {
+            'stages': [
+                _stage('REGISTRATION', _iso(-40), _iso(-30)),
+                _stage('QUALIFICATION', _iso(-20), _iso(-10)),
+                _stage('FINAL', _iso(-8), _iso(-3)),
+                _stage('RESULTS', _iso(0)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'RESULTS'
+        assert state['current_stage']['id'] == 'results'
+
+    def test_overlap_same_type_first_in_array_wins(self):
+        """Два активных этапа одного типа — побеждает первый в массиве."""
+        schedule = {
+            'stages': [
+                _stage('QUALIFICATION', _iso(-2), _iso(2)),
+                _stage('QUALIFICATION', _iso(-1), _iso(1)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_stage']['id'] == 'qualification'
+        assert state['current_status'] == 'QUALIFICATION'
 
     def test_all_finished(self):
         schedule = {
@@ -156,6 +234,62 @@ class TestComputeScheduleState:
         assert state['current_status'] == 'RESULTS'
 
 
+class TestNextDeadline:
+    """next_deadline — ближайшая РЕЛЕВАНТНАЯ будущая дата, без прошедших."""
+
+    def test_before_first_stage_returns_stage_start(self):
+        schedule = {
+            'stages': [
+                _stage('REGISTRATION', _iso(10), _iso(20)),
+                _stage('QUALIFICATION', _iso(25), _iso(35)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['next_deadline'] == _iso(10)
+
+    def test_during_stage_returns_stage_end(self):
+        schedule = {
+            'stages': [
+                _stage('REGISTRATION', _iso(-40), _iso(-30)),
+                _stage('QUALIFICATION', _iso(-2), _iso(3)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['next_deadline'] == _iso(3)
+
+    def test_between_stages_returns_next_start(self):
+        schedule = {
+            'stages': [
+                _stage('REGISTRATION', _iso(-30), _iso(-20)),
+                _stage('RESULTS', _iso(10)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['next_deadline'] == _iso(10)
+
+    def test_all_finished_returns_none(self):
+        schedule = {
+            'stages': [
+                _stage('QUALIFICATION', _iso(-20), _iso(-10)),
+                _stage('RESULTS', _iso(-2)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        assert state['next_deadline'] is None
+
+    def test_upcoming_only_never_past_dates(self):
+        """Из all-upcoming берётся старт первого этапа, а не его конец."""
+        schedule = {
+            'stages': [
+                _stage('REGISTRATION', _iso(10), _iso(20)),
+                _stage('QUALIFICATION', _iso(25), _iso(35)),
+            ],
+        }
+        state = compute_schedule_state(schedule, NOW)
+        deadline = state['next_deadline']
+        assert deadline == _iso(10)
+
+
 class TestEnrichOlympiad:
     def test_enriches_with_schedule(self):
         oly = {
@@ -170,6 +304,29 @@ class TestEnrichOlympiad:
         assert out['current_stage']['id'] == 'registration'
         assert out['next_deadline'] == _iso(5)
         assert out['schedule']['stages'][0]['status'] == 'ACTIVE'
+
+    def test_upcoming_schedule_enriched(self):
+        oly = {
+            'id': '5',
+            'schedule': {
+                'season': '2026/27',
+                'stages': [_stage('REGISTRATION', _iso(10), _iso(20))],
+            },
+        }
+        out = enrich_olympiad(oly, NOW)
+        assert out['current_status'] == 'UPCOMING'
+        assert out['current_stage'] is None
+        assert out['next_deadline'] == _iso(10)
+
+    def test_results_publication_day_enriched(self):
+        oly = {
+            'id': '6',
+            'schedule': {
+                'stages': [_stage('RESULTS', _iso(0))],
+            },
+        }
+        out = enrich_olympiad(oly, NOW)
+        assert out['current_status'] == 'RESULTS'
 
     def test_backward_compat_null_schedule(self):
         oly = {'id': '2', 'schedule': None}
@@ -333,3 +490,121 @@ class TestScheduleApi:
         assert listed.status_code == 200
         match = [o for o in listed.json() if o['id'] == data['id']]
         assert match
+
+    async def test_all_upcoming_schedule_status_via_api(self, client):
+        """CASE 1 через API: регистрация в будущем → UPCOMING, не CLOSED."""
+        await self._create_admin(client, 'sched_pre@example.com')
+        schedule = {
+            'season': '2026/27',
+            'stages': [
+                {
+                    'id': 'registration_1',
+                    'name': 'Регистрация',
+                    'type': 'REGISTRATION',
+                    'start_at': _rel(10),
+                    'end_at': _rel(20),
+                },
+                {
+                    'id': 'qualification_2',
+                    'name': 'Отборочный этап',
+                    'type': 'QUALIFICATION',
+                    'start_at': _rel(25),
+                    'end_at': _rel(35),
+                },
+            ],
+        }
+        created = await client.post(
+            '/api/v1/olympiads',
+            json={'name': 'До регистрации', 'schedule': schedule},
+        )
+        assert created.status_code == 201
+        data = created.json()
+        assert data['current_status'] == 'UPCOMING'
+        assert data['current_stage'] is None
+        # Повторный GET после записи (кэш/PATCH-цикл) отдаёт тот же статус.
+        again = await client.get(f"/api/v1/olympiads/{data['id']}")
+        assert again.status_code == 200
+        assert again.json()['current_status'] == 'UPCOMING'
+
+    async def test_results_publication_day_via_api(self, client):
+        """CASE 6 через API: «Результаты» без end_at в день публикации → RESULTS."""
+        await self._create_admin(client, 'sched_res@example.com')
+        schedule = {
+            'stages': [
+                {
+                    'id': 'results_1',
+                    'name': 'Результаты',
+                    'type': 'RESULTS',
+                    # Старт сегодня (текущий момент) — день публикации ещё идёт.
+                    'start_at': datetime.now(timezone.utc).isoformat(),
+                },
+            ],
+        }
+        created = await client.post(
+            '/api/v1/olympiads',
+            json={'name': 'Результаты опубликованы', 'schedule': schedule},
+        )
+        assert created.status_code == 201
+        data = created.json()
+        assert data['current_status'] == 'RESULTS'
+        assert data['current_stage']['id'] == 'results_1'
+        assert data['schedule']['stages'][0]['status'] == 'ACTIVE'
+
+    async def test_patch_schedule_persists_and_reload_keeps_dates(self, client):
+        """Правится дата этапа → данные сохраняются между GET-запросами."""
+        await self._create_admin(client, 'sched_persist@example.com')
+        schedule = {
+            'season': '2026/27',
+            'stages': [
+                {
+                    'id': 'registration_1',
+                    'name': 'Регистрация',
+                    'type': 'REGISTRATION',
+                    'start_at': _rel(10),
+                    'end_at': _rel(20),
+                },
+                {
+                    'id': 'qualification_2',
+                    'name': 'Отборочный этап',
+                    'type': 'QUALIFICATION',
+                    'start_at': _rel(25),
+                    'end_at': _rel(35),
+                },
+            ],
+        }
+        created = await client.post(
+            '/api/v1/olympiads',
+            json={'name': 'Персистентность', 'schedule': schedule},
+        )
+        oly_id = created.json()['id']
+
+        # Меняем даты и удаляем первый этап (как в frontend-редакторе).
+        updated_schedule = {
+            'season': '2026/27',
+            'stages': [
+                {
+                    'id': 'qualification_2',
+                    'name': 'Отборочный этап',
+                    'type': 'QUALIFICATION',
+                    'start_at': _rel(30),
+                    'end_at': _rel(40),
+                },
+            ],
+        }
+        patched = await client.patch(
+            f'/api/v1/olympiads/{oly_id}',
+            json={'schedule': updated_schedule},
+        )
+        assert patched.status_code == 200
+        patched_stages = patched.json()['schedule']['stages']
+        assert len(patched_stages) == 1
+        # Дата сдвинулась на 30 дней вперёд (сверка по дню, без дрейфа микросекунд).
+        assert patched_stages[0]['start_at'].startswith(_rel(30)[:10])
+
+        # «Перезагрузка»: свежий GET отдаёт сохранённые даты (без дрейфа секунд).
+        reloaded = await client.get(f'/api/v1/olympiads/{oly_id}')
+        assert reloaded.status_code == 200
+        stages = reloaded.json()['schedule']['stages']
+        assert len(stages) == 1
+        assert stages[0]['start_at'] == patched_stages[0]['start_at']
+        assert stages[0]['end_at'] == patched_stages[0]['end_at']
