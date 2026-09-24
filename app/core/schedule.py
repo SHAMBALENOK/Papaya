@@ -133,8 +133,9 @@ def _choose_current_stage(stages: list[dict], now: datetime) -> Optional[dict]:
 
 
 def _next_deadline(stages: list[dict], now: datetime) -> Optional[str]:
-    """Ближайшая будущая дата: конец активного/предстоящего этапа или
-    начало следующего этапа. Возвращает ISO-строку или None."""
+    """Ближайшая будущая дата: эффективный конец активного этапа
+    (``_effective_end``: ``end_at`` либо конец суток для RESULTS без конца)
+    или начало следующего этапа. Возвращает ISO-строку или None."""
     candidates = []
     for stage in stages:
         status = stage_status(stage, now)
@@ -143,7 +144,7 @@ def _next_deadline(stages: list[dict], now: datetime) -> Optional[str]:
             if start is not None and start > now:
                 candidates.append(start)
         elif status == STAGE_STATUS_ACTIVE:
-            end = parse_iso(stage.get('end_at'))
+            end = _effective_end(stage)
             if end is not None and end > now:
                 candidates.append(end)
     if not candidates:

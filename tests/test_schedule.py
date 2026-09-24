@@ -289,6 +289,39 @@ class TestNextDeadline:
         deadline = state['next_deadline']
         assert deadline == _iso(10)
 
+    def test_results_publication_day_deadline_is_end_of_day(self):
+        """RESULTS без end_at в день публикации: дедлайн — конец суток start_at."""
+        schedule = {'stages': [_stage('RESULTS', _iso(0))]}
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'RESULTS'
+        assert state['current_stage']['id'] == 'results'
+        end_of_day = datetime(NOW.year, NOW.month, NOW.day, 23, 59, 59, tzinfo=NOW.tzinfo)
+        assert state['next_deadline'] == end_of_day.isoformat()
+
+    def test_results_without_end_after_publication_day_no_deadline(self):
+        """После дня публикации RESULTS без end_at завершён — дедлайна нет."""
+        schedule = {'stages': [_stage('RESULTS', _iso(-1))]}
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'FINISHED'
+        assert state['current_stage'] is None
+        assert state['next_deadline'] is None
+
+    def test_results_with_end_still_uses_explicit_end(self):
+        """RESULTS с явным end_at продолжает использовать явный конец."""
+        schedule = {'stages': [_stage('RESULTS', _iso(-1), _iso(2))]}
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'RESULTS'
+        assert state['current_stage']['id'] == 'results'
+        assert state['next_deadline'] == _iso(2)
+
+    def test_open_ended_active_stage_has_no_deadline(self):
+        """Активный этап без известного конца (не RESULTS) — дедлайна нет."""
+        schedule = {'stages': [_stage('QUALIFICATION', _iso(-2))]}
+        state = compute_schedule_state(schedule, NOW)
+        assert state['current_status'] == 'QUALIFICATION'
+        assert state['current_stage']['id'] == 'qualification'
+        assert state['next_deadline'] is None
+
 
 class TestEnrichOlympiad:
     def test_enriches_with_schedule(self):
