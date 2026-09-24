@@ -80,6 +80,7 @@ services:
     volumes:
       - ./app/tables:/app/app/tables
       - ./app/documents:/app/app/documents
+      - ./app/frontend:/app/app/frontend
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
