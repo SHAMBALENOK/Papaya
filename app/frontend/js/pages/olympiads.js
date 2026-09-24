@@ -157,7 +157,7 @@ function olympiadCard(oly) {
 
 function stagesEditorHtml(stages, season, error) {
     const rows = (stages || []).map((s, i) => `
-        <div class="grid gap-3 bg-mist/60 rounded p-3 stage-row" data-stage-row="${i}">
+        <div class="grid gap-3 bg-mist/60 rounded p-3 stage-row" data-stage-row="${i}" data-stage-id="${escAttr(s.id || '')}">
             <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-bold text-ink-soft uppercase tracking-wide">Этап ${i + 1}</span>
                 <button type="button" data-stage-remove="${i}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} text-crimson hover:text-crimson stage-remove">Удалить</button>
@@ -190,10 +190,51 @@ function stagesEditorHtml(stages, season, error) {
     </div>`;
 }
 
+/* Идентификаторы этапов. Backend-контракт (app/schemas/olympiads.py):
+ * id уникален и укладывается в ^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$.
+ * Существующий id сохраняется при редактировании; новый генерируется
+ * независимо от позиции этапа, чтобы удаление/добавление не порождало
+ * дубли (на сервере дубликаты по-прежнему отклоняются 422). */
+const STAGE_ID_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/;
+
+function generateStageId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(12);
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+        crypto.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function stageNewId(type) {
+    return `${(type || 'stage').toLowerCase()}_${generateStageId()}`;
+}
+
+/* Пройти кандидатов и проставить уникальные id: сохранить существующий
+ * (если валиден), сгенерировать новый для пустого/невалидного/дубликата. */
+function buildScheduleStages(candidates) {
+    const seen = new Set();
+    const out = [];
+    for (const c of candidates) {
+        const existing = (c.id || '').trim();
+        let id = existing && STAGE_ID_RE.test(existing) && !seen.has(existing)
+            ? existing
+            : stageNewId(c.type);
+        while (seen.has(id)) id = stageNewId(c.type);
+        seen.add(id);
+        out.push({ ...c, id });
+    }
+    return out;
+}
+
 /* Собрать этапы из DOM редактора и провалидировать их клиентски. */
 function collectStagesFromEditor(overlay) {
-    const out = [];
-    overlay.querySelectorAll('.stage-row').forEach((row, i) => {
+    const candidates = [];
+    overlay.querySelectorAll('.stage-row').forEach(row => {
         const name = row.querySelector('[data-stage-field="name"]').value.trim();
         const type = row.querySelector('[data-stage-field="type"]').value;
         const start = toLocalIso(row.querySelector('[data-stage-field="start_at"]').value);
@@ -202,9 +243,8 @@ function collectStagesFromEditor(overlay) {
         if (!name) throw new Error('У одного из этапов не указано название');
         if (!start) throw new Error(`У этапа «${name}» не указано время начала`);
         if (end && new Date(end) < new Date(start)) throw new Error(`У этапа «${name}» начало позже конца`);
-        out.push({
-            /* Сервер требует уникальный id; генерируем по типу + номеру. */
-            id: `${type.toLowerCase()}_${i + 1}`,
+        candidates.push({
+            id: (row.dataset.stageId || '').trim(),
             name,
             type,
             start_at: start,
@@ -212,7 +252,7 @@ function collectStagesFromEditor(overlay) {
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
         });
     });
-    return out;
+    return buildScheduleStages(candidates);
 }
 
 function openOlympiadModal(onDone, oly = null, orgs = []) {
@@ -264,7 +304,7 @@ function openOlympiadModal(onDone, oly = null, orgs = []) {
         root.innerHTML = stagesEditorHtml(stages, seasonValue, stageError);
         const addBtn = root.querySelector('#stage-add');
         if (addBtn) addBtn.addEventListener('click', () => {
-            stages.push({ id: '', name: '', type: 'QUALIFICATION', start_at: '', end_at: '' });
+            stages.push({ id: stageNewId('QUALIFICATION'), name: '', type: 'QUALIFICATION', start_at: '', end_at: '' });
             stageError = '';
             renderStageEditor();
         });
