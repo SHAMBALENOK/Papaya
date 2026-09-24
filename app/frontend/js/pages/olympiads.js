@@ -156,10 +156,10 @@ function olympiadCard(oly) {
 
 function stagesEditorHtml(stages, season, error) {
     const rows = (stages || []).map((s, i) => `
-        <div class="grid gap-3 bg-mist/60 rounded p-3" data-stage-row="${i}">
+        <div class="grid gap-3 bg-mist/60 rounded p-3 stage-row" data-stage-row="${i}">
             <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-bold text-ink-soft uppercase tracking-wide">Этап ${i + 1}</span>
-                <button type="button" data-stage-remove="${i}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} text-crimson hover:text-crimson">Удалить</button>
+                <button type="button" data-stage-remove="${i}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} text-crimson hover:text-crimson stage-remove">Удалить</button>
             </div>
             <input class="${UI.input}" data-stage-field="name" value="${escAttr(s.name || '')}" placeholder="Название, напр. «Отборочный тур»">
             <select class="${UI.input}" data-stage-field="type">
