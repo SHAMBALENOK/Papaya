@@ -95,7 +95,13 @@ async function handleAdminClick(e) {
     const btn = e.target.closest('[data-act]');
     if (!btn || btn.disabled) return;
     btn.disabled = true;
-    const { act, id, university } = btn.dataset;
+    const { act, id } = btn.dataset;
+
+    if (act === 'saveRole') {
+        btn.disabled = false;
+        await saveUserRole(id, btn);
+        return;
+    }
 
     const calls = {
         ban: () => api.banUser(id),
@@ -104,8 +110,8 @@ async function handleAdminClick(e) {
         demote: () => api.demoteAdmin(id),
         archive: () => api.archiveOlympiad(id, true),
         restore: () => api.archiveOlympiad(id, false),
-        confirmBvi: () => api.setBviStatus(university, id, 'CONFIRMED'),
-        dropBvi: () => api.setBviStatus(university, id, 'PENDING'),
+        confirmBvi: () => api.setBviStatus(btn.dataset.university, id, 'CONFIRMED'),
+        dropBvi: () => api.setBviStatus(btn.dataset.university, id, 'PENDING'),
         newUniversity: () => openUniversityFormModal(null, () => reloadAdmin()),
         editUniversity: () => editUniversityAction(id),
         newOlympiad: () => openOlympiadFormModal(null, () => reloadAdmin()),
@@ -122,10 +128,10 @@ async function handleAdminClick(e) {
         unban: 'Пользователь разблокирован',
         grant: 'Назначена роль администратора',
         demote: 'Роль администратора снята',
-        archive: 'Олимпиада переведена в архив',
-        restore: 'Олимпиада возвращена в каталог',
+        archive: 'Олимпиада исключена из актуального каталога',
+        restore: 'Олимпиада возвращена в актуальный каталог',
         confirmBvi: 'Связь БВИ подтверждена',
-        dropBvi: 'Связь БВИ снята',
+        dropBvi: 'Подтверждение связи БВИ снято',
     };
 
     const call = calls[act];
@@ -155,16 +161,58 @@ async function handleAdminClick(e) {
     btn.disabled = false;
 }
 
-async function handleAdminChange(e) {
-    const select = e.target.closest('[data-act="assign"]');
-    if (!select) return;
-    const res = await api.assignUniversity(select.dataset.id, select.value);
+/**
+ * Сохранить роль пользователя вместе с привязкой к университету.
+ *
+ * Роль и университет уходят одним запросом: представителем нельзя стать без
+ * вуза, а обычному пользователю нельзя привязать вуз «просто так».
+ */
+async function saveUserRole(userId, btn) {
+    const roleSelect = document.querySelector(`[data-role-for="${CSS.escape(userId)}"]`);
+    const universitySelect = document.querySelector(`[data-university-for="${CSS.escape(userId)}"]`);
+    if (!roleSelect || !universitySelect) return;
+
+    const role = roleSelect.value;
+    // Что уходит в запрос, зависит от роли, и это не «как сложилось»:
+    //
+    // - обычный пользователь не привязывается ни к какому вузу — при снятии
+    //   роли представителя привязку нужно очистить, иначе сервер отклонит
+    //   запрос (а «просто молча» оставить её нельзя);
+    // - администратору привязка не мешает, но она нужна, чтобы demote вернул
+    //   его в представители, а не в обычные пользователи. Поэтому при
+    //   назначении ADMIN не обнуляем то, что уже выбрано.
+    const universityId = role === 'USER' ? null : (universitySelect.value || null);
+
+    if (role === 'EDITOR' && !universityId) {
+        showToast('Выберите университет, который представляет пользователь', 'error');
+        return;
+    }
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Сохраняем…';
+    const res = await api.setUserRole(userId, role, universityId);
+    btn.disabled = false;
+    btn.textContent = originalText;
+
     if (res.ok) {
-        showToast('Представитель привязан к университету', 'success');
+        showToast(`Роль обновлена: ${ROLE_LABELS[res.data.role] || res.data.role}`, 'success');
         await reloadAdmin();
         return;
     }
     showToast(errorText(res), 'error');
+}
+
+async function handleAdminChange(e) {
+    /* Университет доступен для выбора только когда роль — представитель:
+       иначе привязка была бы молчаливым способом выдать права. */
+    const roleSelect = e.target.closest('[data-role-for]');
+    if (roleSelect) {
+        const userId = roleSelect.dataset.roleFor;
+        const universitySelect = document.querySelector(`[data-university-for="${CSS.escape(userId)}"]`);
+        if (universitySelect) universitySelect.disabled = roleSelect.value !== 'EDITOR';
+        return;
+    }
 }
 
 function currentAdminTab() {
@@ -178,6 +226,18 @@ async function reloadAdmin() {
 
 /* ------------------------------- Пользователи ------------------------------ */
 
+const ROLE_LABELS = {
+    USER: 'Школьник',
+    EDITOR: 'Представитель университета',
+    ADMIN: 'Администратор Papaya',
+};
+
+function roleBadge(role) {
+    if (role === 'ADMIN') return `<span class="${UI.badge} ${UI.badgeAdmin}">Администратор</span>`;
+    if (role === 'EDITOR') return `<span class="${UI.badge} ${UI.badgeNeutral}">Представитель</span>`;
+    return `<span class="${UI.badge} ${UI.badgeNeutral}">Школьник</span>`;
+}
+
 function adminUsersHtml(users, universities) {
     if (!users.length) return emptyHtml('Пользователей нет', 'Зарегистрируйте первого пользователя.');
     const selfId = store.user ? store.user.id : null;
@@ -186,6 +246,8 @@ function adminUsersHtml(users, universities) {
     <div class="space-y-6">
         ${users.map(u => {
             const isSelf = String(u.id) === String(selfId);
+            const universityOptions = universities.map(item =>
+                `<option value="${escAttr(item.id)}" ${String(u.university_id) === String(item.id) ? 'selected' : ''}>${escHtml(item.short_name || item.name)}</option>`).join('');
             return `
             <div class="${UI.card} px-8 py-7 flex flex-col xl:flex-row xl:items-center gap-6">
                 <div class="flex items-center gap-5 flex-1 min-w-0">
@@ -193,34 +255,50 @@ function adminUsersHtml(users, universities) {
                     <div class="min-w-0">
                         <p class="font-bold text-ink truncate">${escHtml(u.name)} ${escHtml(u.surname)}${isSelf ? ' <span class="text-ink-faint font-medium">(вы)</span>' : ''}</p>
                         <p class="text-sm text-ink-soft truncate">${escHtml(u.email)}</p>
+                        <div class="mt-3 flex items-center gap-3 flex-wrap">
+                            ${roleBadge(u.role)}
+                            ${u.university_id ? `<span class="text-sm text-ink-soft">представляет: ${escHtml(universityLabel(universities, u.university_id))}</span>` : ''}
+                            ${u.isActive
+                                ? `<span class="${UI.badge} ${UI.badgeSuccess}">Активен</span>`
+                                : `<span class="${UI.badge} ${UI.badgeDanger}">Заблокирован</span>`}
+                        </div>
                     </div>
                 </div>
-                <div class="flex items-center gap-3 flex-wrap shrink-0">
-                    ${u.role === 'ADMIN'
-                        ? `<span class="${UI.badge} ${UI.badgeAdmin}">Администратор</span>`
-                        : (u.role === 'EDITOR'
-                            ? `<span class="${UI.badge} ${UI.badgeNeutral}">Представитель университета</span>`
-                            : `<span class="${UI.badge} ${UI.badgeNeutral}">Школьник</span>`)}
-                    ${u.isActive
-                        ? `<span class="${UI.badge} ${UI.badgeSuccess}">Активен</span>`
-                        : `<span class="${UI.badge} ${UI.badgeDanger}">Заблокирован</span>`}
-                </div>
-                <div class="flex items-center gap-2 flex-wrap xl:justify-end shrink-0">
-                    <select data-act="assign" data-id="${escAttr(u.id)}" class="${UI.input} !w-auto !py-2 text-sm" aria-label="Университет для ${escAttr(u.email)}">
-                        <option value="">Без университета</option>
-                        ${universities.map(item =>
-                            `<option value="${escAttr(item.id)}" ${String(u.university_id) === String(item.id) ? 'selected' : ''}>${escHtml(item.short_name || item.name)}</option>`).join('')}
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 shrink-0 xl:justify-end">
+                    <label class="sr-only" for="role-${escAttr(u.id)}">Роль: ${escHtml(u.email)}</label>
+                    <select id="role-${escAttr(u.id)}" data-role-for="${escAttr(u.id)}" class="${UI.input} !w-auto !py-2 text-sm">
+                        ${Object.keys(ROLE_LABELS).map(role =>
+                            `<option value="${role}" ${u.role === role ? 'selected' : ''}>${ROLE_LABELS[role]}</option>`).join('')}
                     </select>
-                    ${u.role === 'ADMIN'
-                        ? `<button data-act="demote" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}" ${isSelf ? 'disabled title="Нельзя снять роль у себя"' : ''}>Снять админа</button>`
-                        : `<button data-act="grant" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Сделать админом</button>`}
-                    ${u.isActive
-                        ? `<button data-act="ban" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}" ${isSelf ? 'disabled title="Нельзя заблокировать себя"' : ''}>Заблокировать</button>`
-                        : `<button data-act="unban" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Разблокировать</button>`}
+                    <label class="sr-only" for="university-${escAttr(u.id)}">Университет: ${escHtml(u.email)}</label>
+                    <select id="university-${escAttr(u.id)}" data-university-for="${escAttr(u.id)}"
+                            class="${UI.input} !w-auto !py-2 text-sm"
+                            ${u.role === 'EDITOR' ? '' : 'disabled title="Университет назначается представителю"'}>
+                        <option value="">Без университета</option>
+                        ${universityOptions}
+                    </select>
+                    <button type="button" data-act="saveRole" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">
+                        Сохранить роль
+                    </button>
+                    <button type="button" data-act="${u.role === 'ADMIN' ? 'demote' : 'grant'}" data-id="${escAttr(u.id)}"
+                            class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}"
+                            ${isSelf ? 'disabled title="Нельзя менять роль у себя"' : ''}>
+                        ${u.role === 'ADMIN' ? 'Снять админа' : 'Сделать админом'}
+                    </button>
+                    <button type="button" data-act="${u.isActive ? 'ban' : 'unban'}" data-id="${escAttr(u.id)}"
+                            class="${UI.btn} ${u.isActive ? UI.btnDanger : UI.btnSecondary} ${UI.btnSmall}"
+                            ${isSelf ? 'disabled title="Нельзя заблокировать себя"' : ''}>
+                        ${u.isActive ? 'Заблокировать' : 'Разблокировать'}
+                    </button>
                 </div>
             </div>`;
         }).join('')}
     </div>`;
+}
+
+function universityLabel(universities, universityId) {
+    const match = universities.find(item => String(item.id) === String(universityId));
+    return match ? (match.short_name || match.name) : 'университет';
 }
 
 /* -------------------------------- Олимпиады -------------------------------- */
@@ -242,13 +320,18 @@ function adminOlympiadsHtml(olympiads) {
             <div class="flex-1 min-w-0">
                 <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
                 <p class="mt-2 text-sm text-ink-soft">Обновлена ${formatDate(item.updatedAt)}${item.source_doc_id ? ' · из документа РСОШ' : ' · вручную'}</p>
+                ${item.status === 'ARCHIVED' ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(archiveReasonText(item.archive_reason))}</p>` : ''}
             </div>
             <div class="flex items-center gap-3 flex-wrap shrink-0">
                 ${olympiadStatusBadge(item.status)}
                 <a href="#/olympiads/${escAttr(item.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть</a>
                 <button data-act="editOlympiad" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Правка</button>
                 ${item.status === 'ARCHIVED'
-                    ? `<button data-act="restore" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Вернуть</button>`
+                    ? (item.archive_reason === 'RSOSH_ABSENT'
+                        // Вернуть из архива «нет в перечне РСОШ» вручную нельзя:
+                        // кнопка была бы без действия, поэтому её не показываем.
+                        ? `<span class="${UI.badge} ${UI.badgeNeutral}">Вернётся при импорте РСОШ</span>`
+                        : `<button data-act="restore" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Вернуть</button>`)
                     : `<button data-act="archive" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">В архив</button>`}
             </div>
         </div>`).join('')}

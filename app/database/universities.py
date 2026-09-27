@@ -103,6 +103,7 @@ async def add_university(ins: dict) -> dict | None:
         short_name=ins.get('short_name'),
         description=ins.get('description'),
         website=ins.get('website'),
+        preview_image=ins.get('preview_image'),
         image=ins.get('image'),
     )
     async with AsyncSessionLocal() as session:
@@ -117,7 +118,7 @@ async def add_university(ins: dict) -> dict | None:
 
 
 _UNIVERSITY_EDITABLE_FIELDS = frozenset({
-    'name', 'short_name', 'description', 'website', 'image',
+    'name', 'short_name', 'description', 'website', 'preview_image', 'image',
 })
 
 

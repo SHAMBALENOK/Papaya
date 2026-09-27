@@ -75,7 +75,10 @@ Key decisions:
 - **A university never creates a copy of an olympiad.** A link references an existing catalog entry, and a unique index on the pair makes duplicate links impossible even at the database level.
 - **A request is not a public fact.** `PENDING` links are visible to the university's own representative and to the administrator; public lists contain confirmed links only.
 - **Archive, not delete.** An olympiad that disappears from the RSOSH list moves to `ARCHIVED`: the record is kept and the interface states that it is no longer in the current list.
-- **Documents are data sources.** Each olympiad stores `source_doc_id`, so it is always clear where the information came from.
+- **An archive has a reason.** The status is one, but two different mechanisms decide it, so an archived record always carries `archive_reason`: `RSOSH_ABSENT` (not in the RSOSH list — an import brings it back) or `MANUAL` (excluded by an administrator — restorable by hand). A record that vanished from the RSOSH list cannot be restored manually: only the list itself can say it is current again.
+- **A skipped row is not a missing one.** If an administrator removed a row in the preview, it does not count as missing from the list: a single recognition error must not archive a real olympiad.
+- **Two images per entity.** `preview_image` is used in catalog cards, `image` on the entity page; if one is missing, the interface falls back to the other.
+- **Documents are data sources.** Each olympiad stores `source_doc_id`, so it is always clear where the information came from: the olympiad page shows the source via `GET /api/v1/olympiads/<id>/source`, publicly and without exposing the uploaded file itself.
 - **There is no generic "organization" entity.** Papaya models neither olympiad organizers nor schools: that would be an extra abstraction level for a single participant type.
 
 ## Roles and permissions
@@ -89,8 +92,13 @@ Key decisions:
 | Create or edit a university | ❌ | ❌ | ✅ |
 | Upload RSOSH documents and run an import | ❌ | ❌ | ✅ |
 | Manage users and roles | ❌ | ❌ | ✅ |
+| Archive an olympiad and restore it by hand | ❌ | ❌ | ✅ |
 
 The rules live in one place, `app/core/deps.py`, including the object-level check "is this your own university".
+
+Role invariant: a representative is "a role plus a university binding", not a separate flag. `EDITOR` without `university_id` is therefore impossible — both the application and the database reject it (`ck_users_representative_needs_university`, migration `0006`). Role and binding change together through `POST /api/v1/admin/role/<user_id>`: a regular user cannot be bound to a university just like that, while an administrator may keep a binding so that demoting them returns a representative rather than a plain user.
+
+BVI link rights: a representative creates a request and may withdraw it while it is `PENDING`; only an administrator can revoke a confirmed link. A confirmed link is a public fact, so removing it is the administrator's decision, not the requester's.
 
 ## RSOSH document import
 
@@ -199,7 +207,7 @@ Tests run in an isolated container of the `testing` profile and never touch the 
 docker compose --profile testing run --rm test
 ```
 
-Covered scenarios: catalogs and search, BVI links on both sides, moderation, role boundaries (student / representative / administrator), and the importer — XLSX, PDF with a text layer, scanned PDF, pages rotated by 90/180/270, PNG/JPEG images, multi-line and merged cells, repeated import of the same document, archiving of missing olympiads, unreadable documents, and permissions.
+Covered scenarios: catalogs and search, the two images per entity, the public source endpoint, manual archive and the manual-restore restriction, BVI links on both sides, moderation, role boundaries (student / representative / administrator), and the importer — XLSX, PDF with a text layer, scanned PDF, pages rotated by 90/180/270, PNG/JPEG images, multi-line and merged cells, repeated import of the same document, archiving of missing olympiads, unreadable documents, and permissions.
 
 ## API and routes
 
@@ -216,6 +224,7 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `POST` | `/api/v1/universities/<id>/bvi/remove` | Remove a BVI link | `EDITOR` (own university) or `ADMIN` |
 | `POST` | `/api/v1/universities/<id>/bvi/<olympiad_id>/status` | Confirm or revoke a BVI link | `ADMIN` |
 | `GET` | `/api/v1/olympiads?search=&include_archived=` | Olympiad catalog | Public |
+| `GET` | `/api/v1/olympiads/<id>/source` | Where the olympiad data came from | Public |
 | `GET` | `/api/v1/olympiads/<id>` | Olympiad page | Public |
 | `GET` | `/api/v1/olympiads/<id>/universities` | Universities granting BVI for this olympiad | Public |
 | `POST` | `/api/v1/olympiads/add_olympiad` | Create an olympiad manually | `ADMIN` |
@@ -228,7 +237,7 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `GET` | `/api/v1/imports/<id>/preview` | Import preview (candidates) | `ADMIN` |
 | `POST` | `/api/v1/imports/<id>/confirm` | Apply the import | `ADMIN` |
 | `POST` | `/api/v1/imports/<id>/reject` | Reject the import results | `ADMIN` |
-| `POST` | `/api/v1/admin/archive_olympiad/<id>` | Archive or restore an olympiad | `ADMIN` |
+| `POST` | `/api/v1/admin/archive_olympiad/<id>` | Archive or restore an olympiad (409 when restoring one absent in the RSOSH list) | `ADMIN` |
 | `GET` | `/api/v1/admin/users` | Manage users and roles | `ADMIN` |
 | `GET` | `/api/v1/admin/bvi` | BVI request moderation queue | `ADMIN` |
 | `POST` | `/api/v1/auth/register` | Register a user | Public |

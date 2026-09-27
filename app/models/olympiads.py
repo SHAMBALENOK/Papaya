@@ -25,10 +25,25 @@ class Olympiads(Base):
     - ``ARCHIVED`` — олимпиады больше нет в актуальном перечне РСОШ, запись
       сохранена исторически и помечена в интерфейсе (архив не удаляет данные).
 
+    Почему архивировано — ``archive_reason``:
+
+    - ``RSOSH_ABSENT`` — импорт РСОШ не нашёл олимпиаду в актуальном перечне.
+      Вернуть её в актуальные вручную нельзя: это сделает только следующий
+      импорт, где олимпиада снова встретится;
+    - ``MANUAL`` — администратор исключил олимпиаду из актуального каталога
+      руками (например, из-за ошибки в данных). Такую запись можно вернуть.
+
+    Причина архивирования хранится, потому что статус один, а решение о нём
+    принимают два разных механизма; без причины ручное «вернуть» выдавало бы
+    олимпиаду за актуальную по перечню РСОШ, чего нет.
+
     ``source_doc_id`` — документ-источник, из которого взяты данные
     (загруженный документ РСОШ). По нему пользователь видит, откуда взялась
     информация об олимпиаде, и по нему же определяется, какие олимпиады ещё
     присутствуют в актуальном перечне.
+
+    Изображений два: ``preview_image`` — для карточек каталога, ``image`` — для
+    страницы олимпиады. Оба необязательны, интерфейс использует fallback.
     """
 
     __tablename__ = 'olympiads'
@@ -40,6 +55,9 @@ class Olympiads(Base):
     name_norm = Column(String, nullable=False, unique=True, index=True)
     description = Column(Text, nullable=True)
     official_url = Column(String, nullable=True)
+    # Маленькая картинка для карточек каталога.
+    preview_image = Column(String, nullable=True)
+    # Большая картинка для страницы олимпиады.
     image = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
     source_doc_id = Column(
@@ -48,6 +66,9 @@ class Olympiads(Base):
         nullable=True,
     )
     status = Column(String, nullable=False, default='PUBLISHED', index=True)
+    # Причина архивирования: 'RSOSH_ABSENT' (нет в актуальном перечне РСОШ) или
+    # 'MANUAL' (исключена администратором). NULL, когда олимпиада актуальна.
+    archive_reason = Column(String, nullable=True)
     createdAt = Column(DateTime(timezone=True), default=_utcnow, index=True)
     updatedAt = Column(
         DateTime(timezone=True),

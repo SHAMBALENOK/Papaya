@@ -110,7 +110,7 @@ async function renderUniversity(universityId) {
         <header class="mt-14">
             <p class="${UI.eyebrow}">Университет</p>
             <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(university.name)}</h1>
-            ${university.short_name ? `<p class="mt-4 text-lg text-ink-soft">${escHtml(university.short_name)}</p>` : ''}
+            ${university.short_name && university.short_name !== university.name ? `<p class="mt-4 text-lg text-ink-soft">${escHtml(university.short_name)}</p>` : ''}
         </header>
 
         ${university.description ? `
@@ -169,6 +169,7 @@ function bviOlympiadCardHtml(olympiad) {
     return `
     <a href="#/olympiads/${escAttr(olympiad.id)}"
        class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        ${cardImageHtml(olympiad)}
         <div class="flex items-center gap-3 flex-wrap">
             <span class="${UI.badge} ${UI.badgeSuccess}">
                 <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ

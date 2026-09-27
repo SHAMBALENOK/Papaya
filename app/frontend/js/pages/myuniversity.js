@@ -92,7 +92,9 @@ function drawMyBviList(linked, universityId, linkedIds) {
         return;
     }
 
-    box.innerHTML = `<div class="space-y-6">` + linked.map(item => `
+    box.innerHTML = `<div class="space-y-6">` + linked.map(item => {
+        const confirmed = item.bvi_status === 'CONFIRMED';
+        return `
         <div class="${UI.card} px-8 py-7 flex flex-col lg:flex-row lg:items-center gap-6">
             <div class="flex-1 min-w-0">
                 <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
@@ -101,18 +103,23 @@ function drawMyBviList(linked, universityId, linkedIds) {
                     ${item.status === 'ARCHIVED' ? olympiadStatusBadge(item.status) : ''}
                 </div>
             </div>
-            <div class="flex flex-wrap gap-3 shrink-0">
+            <div class="flex flex-col lg:items-end gap-3 shrink-0">
                 <a href="#/olympiads/${escAttr(item.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть</a>
-                <button type="button" data-remove="${escAttr(item.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Убрать</button>
+                ${confirmed
+                    ? `<p class="text-xs text-ink-faint max-w-[18rem] text-right">
+                        Связь подтверждена. Снять подтверждение может администратор Papaya.
+                       </p>`
+                    : `<button type="button" data-remove="${escAttr(item.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать заявку</button>`}
             </div>
-        </div>`).join('') + `</div>`;
+        </div>`;
+    }).join('') + `</div>`;
 
     box.querySelectorAll('[data-remove]').forEach(btn => {
         btn.addEventListener('click', async () => {
             btn.disabled = true;
             const res = await api.removeBvi(universityId, btn.dataset.remove);
             if (res.ok) {
-                showToast('Связь убрана', 'success');
+                showToast('Заявка отозвана', 'success');
                 renderMyUniversity();
                 return;
             }

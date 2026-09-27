@@ -414,3 +414,147 @@ async def test_import_status_and_list(client):
     listing = await client.get('/api/v1/imports')
     assert listing.status_code == 200
     assert any(item['id'] == doc['id'] for item in listing.json()['imports'])
+
+# ------------------------------------------------------- Архив и пропуски
+
+
+async def test_disappeared_olympiad_is_archived_with_reason(client):
+    """Исчезнувшая из перечня олимпиада архивируется с причиной РСОШ."""
+    await admin_client(client)
+    first = await upload_document(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await run_import(client, first['id'])
+    assert (await client.post(f"/api/v1/imports/{first['id']}/confirm", json={})).status_code == 200
+
+    # Следующий перечень короче: часть олимпиад из него исчезла.
+    second = await upload_document(
+        client, 'rsosh_short.xlsx', xlsx_bytes(row_count=2)
+    )
+    await run_import(client, second['id'])
+    confirmed = await client.post(
+        f"/api/v1/imports/{second['id']}/confirm", json={}
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    result = confirmed.json()['result']
+    assert result['archived'], 'исчезнувшие олимпиады должны попасть в архив'
+
+    listing = await client.get('/api/v1/olympiads?include_archived=true')
+    archived = [row for row in listing.json()['olympiads'] if row['status'] == 'ARCHIVED']
+    assert archived
+    assert all(row['archive_reason'] == 'RSOSH_ABSENT' for row in archived)
+    # Архивные олимпиады не видны в обычном каталоге.
+    public = await client.get('/api/v1/olympiads')
+    public_ids = {row['id'] for row in public.json()['olympiads']}
+    assert public_ids.isdisjoint({row['id'] for row in archived})
+
+
+async def test_returned_olympiad_leaves_archive(client):
+    """Олимпиада, снова встретившаяся в перечне, возвращается в актуальные."""
+    await admin_client(client)
+    first = await upload_document(
+        client, 'rsosh_short.xlsx', xlsx_bytes(row_count=2)
+    )
+    await run_import(client, first['id'])
+    await client.post(f"/api/v1/imports/{first['id']}/confirm", json={})
+
+    listing = await client.get('/api/v1/olympiads')
+    olympiad_id = listing.json()['olympiads'][0]['id']
+
+    second = await upload_document(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await run_import(client, second['id'])
+    assert (await client.post(f"/api/v1/imports/{second['id']}/confirm", json={})).status_code == 200
+
+    detail = await client.get(f'/api/v1/olympiads/{olympiad_id}')
+    assert detail.status_code == 200
+    assert detail.json()['status'] == 'PUBLISHED'
+    assert detail.json()['archive_reason'] is None
+
+
+async def test_archive_missing_false_keeps_olympiads_published(client):
+    """Без archive_missing каталог не архивируется — импорт не разрушает его."""
+    await admin_client(client)
+    first = await upload_document(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await run_import(client, first['id'])
+    await client.post(f"/api/v1/imports/{first['id']}/confirm", json={})
+
+    second = await upload_document(
+        client, 'rsosh_short.xlsx', xlsx_bytes(row_count=2)
+    )
+    await run_import(client, second['id'])
+    confirmed = await client.post(
+        f"/api/v1/imports/{second['id']}/confirm",
+        json={'archive_missing': False},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()['result']['archived'] == []
+
+    listing = await client.get('/api/v1/olympiads?include_archived=true')
+    assert all(row['status'] == 'PUBLISHED' for row in listing.json()['olympiads'])
+
+
+async def test_skipped_candidate_is_not_archived(client):
+    """Кандидат, снятый в preview, не считается исчезнувшим из перечня.
+
+    Снятие — это реакция администратора на ошибку распознавания. Если бы
+    «пропущенный» считался отсутствующим в перечне, олимпиада, которая в
+    перечне есть, ушла бы в архив по собственной инициативе.
+    """
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await run_import(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    candidates = preview.json()['candidates']
+    assert len(candidates) > 1
+    skipped = candidates[0]['name_norm']
+
+    confirmed = await client.post(
+        f"/api/v1/imports/{doc['id']}/confirm",
+        json={'skip': [skipped], 'archive_missing': True},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    body = confirmed.json()
+    # Снятый кандидат не попал в каталог, но виден в отчёте о импорте.
+    assert body['skipped'] == [skipped]
+    skipped_name = candidates[0]['name']
+    assert skipped_name not in body['result']['created']
+
+    # Остальные олимпиады созданы и опубликованы; архивировать нечего.
+    listing = await client.get('/api/v1/olympiads?include_archived=true')
+    rows = listing.json()['olympiads']
+    assert rows
+    assert skipped_name not in [row['name'] for row in rows]
+    assert all(row['status'] == 'PUBLISHED' for row in rows)
+    assert not body['result']['archived']
+
+
+async def test_skipped_matched_candidate_protects_existing_olympiad(client):
+    """Снятый merge-кандидат защищает уже существующую олимпиаду от архива."""
+    await admin_client(client)
+    existing = await create_olympiad(client, 'Олимпиада школьников «Ломоносов»')
+
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await run_import(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    candidates = preview.json()['candidates']
+    merged = next(
+        (
+            item for item in candidates
+            if item.get('action') == 'merge'
+            and str(item.get('matched_olympiad_id')) == str(existing['id'])
+        ),
+        None,
+    )
+    assert merged, 'ожидался кандидат на merge с существующей олимпиадой'
+
+    confirmed = await client.post(
+        f"/api/v1/imports/{doc['id']}/confirm",
+        json={'skip': [merged['name_norm']], 'archive_missing': True},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+
+    detail = await client.get(f"/api/v1/olympiads/{existing['id']}")
+    assert detail.status_code == 200
+    assert detail.json()['status'] == 'PUBLISHED', (
+        'снятый в preview кандидат не должен архивировать олимпиаду'
+    )

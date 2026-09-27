@@ -198,11 +198,25 @@ async def login_user(
 
 
 async def promote_role(user_id: str, role: str) -> None:
-    """Сменить роль напрямую в БД и сбросить версионный кэш ролей."""
+    """Сменить роль напрямую в БД и сбросить версионный кэш ролей.
+
+    Только для ``USER`` и ``ADMIN``: инвариант «представитель = роль с вузом»
+    защищён ещё и CHECK-ограничением в БД, поэтому создать ``EDITOR`` без
+    университета таким путём нельзя. Для роли представителя есть
+    ``university_rep_client``, для остальных ролей — ``set_user_role``
+    (через API, где проверки видны в ответе).
+    """
     from sqlalchemy import update
 
     from app.database.database import AsyncSessionLocal
     from app.models.users import Users
+
+    if role == 'EDITOR':
+        raise ValueError(
+            'promote_role не умеет назначать EDITOR: представитель обязан быть '
+            'привязан к университету. Используйте university_rep_client '
+            'или set_user_role.'
+        )
 
     async with AsyncSessionLocal() as session:
         await session.execute(
@@ -270,6 +284,23 @@ async def university_rep_client(
         await session.commit()
     _redis_client().flushdb()
     return user
+
+
+async def set_user_role(
+    test_client: AsyncClient,
+    user_id: str,
+    role: str,
+    university_id: str | None = None,
+):
+    """Назначить роль через публичный API администратора.
+
+    Возвращает ответ целиком, чтобы тесты могли проверить коды ошибок
+    (например, ``EDITOR`` без университета).
+    """
+    return await test_client.post(
+        f'/api/v1/admin/role/{user_id}',
+        json={'role': role, 'university_id': university_id},
+    )
 
 
 async def upload_document(

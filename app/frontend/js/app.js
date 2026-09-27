@@ -104,6 +104,21 @@ function olympiadStatusBadge(status) {
     </span>`;
 }
 
+/** Человеческое объяснение архива — по причине, а не только по статусу.
+ *
+ * Причины две, и пользователю важно различать их: олимпиада, исчезнувшая из
+ * перечня РСОШ, вернётся сама при следующем импорте, а исключённую
+ * администратором вернуть можно только вручную.
+ */
+function archiveReasonText(reason) {
+    if (reason === 'MANUAL') {
+        return 'Олимпиада исключена из актуального каталога администратором Papaya. '
+             + 'Вернуть её в актуальные можно в разделе администратора.';
+    }
+    return 'Олимпиады больше нет в актуальном перечне РСОШ. Запись сохранена исторически '
+         + 'и вернётся автоматически, если олимпиада снова появится в перечне.';
+}
+
 function bviStatusBadge(status) {
     if (status === 'CONFIRMED') {
         return `<span class="${UI.badge} ${UI.badgeSuccess}">Подтверждено</span>`;
@@ -206,7 +221,8 @@ function openUniversityFormModal(university, onDone) {
             ${inputField({ id: 'un-name', name: 'name', label: 'Полное название', required: true, value: (university || {}).name || '' })}
             ${inputField({ id: 'un-short', name: 'short_name', label: 'Краткое название / аббревиатура', value: (university || {}).short_name || '', placeholder: 'МФТИ' })}
             ${inputField({ id: 'un-site', name: 'website', label: 'Официальный сайт', type: 'url', value: (university || {}).website || '', placeholder: 'https://…' })}
-            ${inputField({ id: 'un-image', name: 'image', label: 'URL изображения (логотип/превью)', type: 'url', value: (university || {}).image || '', placeholder: 'https://…' })}
+            ${inputField({ id: 'un-preview', name: 'preview_image', label: 'Превью для карточек (URL)', type: 'url', value: (university || {}).preview_image || '', placeholder: 'https://…' })}
+            ${inputField({ id: 'un-image', name: 'image', label: 'Большая картинка для страницы (URL)', type: 'url', value: (university || {}).image || '', placeholder: 'https://…' })}
             ${textareaField({ id: 'un-desc', name: 'description', label: 'Описание', value: (university || {}).description || '' })}
             <div class="flex flex-wrap justify-end gap-3 mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
@@ -223,6 +239,7 @@ function openUniversityFormModal(university, onDone) {
             name: (fd.get('name') || '').trim(),
             short_name: (fd.get('short_name') || '').trim() || null,
             website: (fd.get('website') || '').trim() || null,
+            preview_image: (fd.get('preview_image') || '').trim() || null,
             image: (fd.get('image') || '').trim() || null,
             description: (fd.get('description') || '').trim() || null,
         };
@@ -253,7 +270,8 @@ function openOlympiadFormModal(olympiad, onDone) {
         <form id="olympiad-form">
             ${inputField({ id: 'ol-name', name: 'name', label: 'Название олимпиады', required: true, value: (olympiad || {}).name || '' })}
             ${inputField({ id: 'ol-site', name: 'official_url', label: 'Официальный сайт', type: 'url', value: (olympiad || {}).official_url || '', placeholder: 'https://…' })}
-            ${inputField({ id: 'ol-image', name: 'image', label: 'URL изображения', type: 'url', value: (olympiad || {}).image || '', placeholder: 'https://…' })}
+            ${inputField({ id: 'ol-preview', name: 'preview_image', label: 'Превью для карточек (URL)', type: 'url', value: (olympiad || {}).preview_image || '', placeholder: 'https://…' })}
+            ${inputField({ id: 'ol-image', name: 'image', label: 'Большая картинка для страницы (URL)', type: 'url', value: (olympiad || {}).image || '', placeholder: 'https://…' })}
             ${inputField({ id: 'ol-source', name: 'source_url', label: 'Источник информации (ссылка)', type: 'url', value: (olympiad || {}).source_url || '', placeholder: 'https://…' })}
             ${textareaField({ id: 'ol-desc', name: 'description', label: 'Описание', value: (olympiad || {}).description || '' })}
             <div class="flex flex-wrap justify-end gap-3 mt-10">
@@ -274,6 +292,7 @@ function openOlympiadFormModal(olympiad, onDone) {
         const payload = {
             name: (fd.get('name') || '').trim(),
             official_url: (fd.get('official_url') || '').trim() || null,
+            preview_image: (fd.get('preview_image') || '').trim() || null,
             image: (fd.get('image') || '').trim() || null,
             source_url: (fd.get('source_url') || '').trim() || null,
             description: (fd.get('description') || '').trim() || null,

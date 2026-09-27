@@ -9,6 +9,21 @@ from app.database.database import AsyncSessionLocal
 from app.middlewares.serializers import user_to_dict
 from app.models.users import Users
 
+# Роли платформы. Константы живут в слое доступа: от них зависят и проверки
+# прав (app/core/deps.py), и правила назначения роли (apply_role ниже).
+ROLE_USER = 'USER'
+ROLE_UNIVERSITY_REP = 'EDITOR'
+ROLE_ADMIN = 'ADMIN'
+ROLES = (ROLE_USER, ROLE_UNIVERSITY_REP, ROLE_ADMIN)
+
+
+class RoleInvariantError(ValueError):
+    """Нарушение инварианта роли представителя университета.
+
+    Несёт понятный текст: его отдаёт HTTP-слой как 400, поэтому сообщение
+    должно быть пригодно для показа администратору.
+    """
+
 
 def _full_user_dict(user) -> dict:
     """Сериализовать пользователя вместе с хэшем пароля для входа."""
@@ -106,6 +121,70 @@ async def edit_user(user_id: str, ins: dict):
             raise
         await session.refresh(user)
         return user_to_dict(user)
+
+
+async def apply_role(
+    user_id: str,
+    role: str,
+    university_id: str | None = None,
+) -> dict | None:
+    """Назначить пользователю роль с соблюдением инвариантов Papaya.
+
+    Правила (единое место, где они проверяются):
+
+    - ``EDITOR`` (представитель университета) обязан быть привязан к
+      конкретному университету: без привязки непонятно, чьи связи БВИ он
+      будет вести, поэтому такое состояние недопустимо;
+    - ``USER`` не привязывается к университету: привязка без роли
+      представителя была бы молчаливым способом выдать права;
+    - ``ADMIN`` не зависит от привязки: его права определяются ролью, но
+      привязка сохраняется, чтобы понижение админа могло вернуть роль
+      представителя, а не «обнулить» пользователя.
+
+    Возвращает обновлённого пользователя или ``None``, если его нет.
+    """
+    if role not in ROLES:
+        raise RoleInvariantError(f'Unknown role: {role}')
+    if role == ROLE_UNIVERSITY_REP and not university_id:
+        raise RoleInvariantError(
+            'Представитель университета должен быть привязан к университету'
+        )
+    if role == ROLE_USER and university_id:
+        raise RoleInvariantError(
+            'Роль USER не предполагает привязки к университету'
+        )
+
+    if isinstance(user_id, str):
+        user_id = uuid_mod.UUID(user_id)
+    university_uuid = (
+        uuid_mod.UUID(str(university_id)) if university_id else None
+    )
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Users).where(Users.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            return None
+        user.role = role
+        user.university_id = university_uuid
+        user.updatedAt = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(user)
+        return user_to_dict(user)
+
+
+def demote_role(user: dict) -> str:
+    """Роль, которая должна остаться после снятия ADMIN.
+
+    Если пользователь привязан к университету, он продолжает быть его
+    представителем (``EDITOR``), иначе становится обычным пользователем
+    (``USER``). Так смена роли не оставляет противоречий: представитель не
+    может остаться без университета, а «просто пользователь» не получает
+    привязку, на которую он не подписан.
+    """
+    return ROLE_UNIVERSITY_REP if user.get('university_id') else ROLE_USER
 
 
 async def list_users(

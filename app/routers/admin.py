@@ -17,13 +17,15 @@ from typing import List
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_redis
 from app.core import deps
 from app.core.cache_guard import safe_cache_write
+from app.database import users as users_db
+from app.rsosh.persist import ARCHIVE_BY_RSOSH, ARCHIVE_MANUAL
 
 admin_page = APIRouter(
     prefix='/admin',
@@ -82,6 +84,30 @@ class UniversityAssignment(BaseModel):
     """
 
     university_id: str | None = None
+
+
+class RoleAssignment(BaseModel):
+    """Назначение роли пользователю.
+
+    Единый контракт управления ролью: роль и привязка меняются вместе, поэтому
+    нельзя получить ``EDITOR`` без университета или привязать университет
+    обычному пользователю.
+
+    - ``USER`` — обычный школьник, ``university_id`` должен быть пуст;
+    - ``EDITOR`` — представитель университета, ``university_id`` обязателен;
+    - ``ADMIN`` — администратор Papaya; привязка не влияет на его права, но
+      сохраняется, чтобы понижение вернуло роль представителя.
+    """
+
+    role: str
+    university_id: str | None = None
+
+    @field_validator('role')
+    @classmethod
+    def _check_role(cls, v):
+        if v not in users_db.ROLES:
+            raise ValueError('role must be one of ' + ', '.join(users_db.ROLES))
+        return v
 
 
 def _serialize_user(user: dict) -> dict:
@@ -261,6 +287,77 @@ async def unban(
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
+async def _apply_role(
+    user_id: uuid.UUID,
+    role: str,
+    university_id: str | None,
+    r: aioredis.Redis,
+) -> dict:
+    """Назначить роль с проверкой инвариантов и сбросом кэша.
+
+    Инварианты (``EDITOR`` требует вуз, ``USER`` не привязывается) проверяет
+    слой доступа, существование университета — здесь: ошибка 404 должна
+    говорить администратору, что такого вуза в каталоге нет.
+    """
+    if university_id and role == users_db.ROLE_UNIVERSITY_REP:
+        university = await database.universities.get_university(university_id)
+        if not university:
+            raise HTTPException(status_code=404, detail='University not found')
+
+    try:
+        updated = await users_db.apply_role(user_id, role, university_id)
+    except users_db.RoleInvariantError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        # CHECK-ограничение БД: страховка от гонки и прямых правок данных.
+        logger.warning('Role invariant violated for user %s: %s', user_id, exc)
+        raise HTTPException(status_code=400, detail='Role invariant violated') from exc
+
+    if not updated:
+        raise HTTPException(status_code=404, detail='User not found')
+    await safe_cache_write(cache_user_after_write(r, updated))
+    return updated
+
+
+@admin_page.post(
+    '/role/{user_id}',
+    response_model=schemas.users.UserResponse,
+    responses={
+        200: {'description': 'Role assigned'},
+        400: {'description': 'Role invariant violated (EDITOR without university)'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'User or university not found'},
+        422: {'description': 'Validation error'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def assign_role(
+    user_id: uuid.UUID,
+    payload: RoleAssignment,
+    r: aioredis.Redis = Depends(get_redis),
+    current_user: deps.AdminUser = None,
+):
+    """Назначить пользователю роль: ``USER``, ``EDITOR`` или ``ADMIN``.
+
+    Роль и университет меняются одним запросом — это единственный способ
+    назначить представителя, поэтому нельзя случайно получить ``EDITOR``
+    без университета или привязать вуз обычному пользователю.
+    """
+    try:
+        return await _apply_role(
+            user_id,
+            payload.role,
+            payload.university_id,
+            r,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
 @admin_page.post(
     '/grant_admin/{user_id}',
     response_model=schemas.users.UserResponse,
@@ -278,14 +375,19 @@ async def grant_admin(
     r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
-    """Назначить роль ADMIN."""
+    """Назначить роль ADMIN (привязка к университету, если была, сохраняется)."""
     try:
-        to_user = await database.users.find_user_by_id(user_id)
+        to_user = await users_db.find_user_by_id(user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
-        if to_user.get('role') == 'ADMIN':
+        if to_user.get('role') == users_db.ROLE_ADMIN:
             raise HTTPException(status_code=409, detail='User is already ADMIN')
-        return await _change_user(user_id, {'role': 'ADMIN'}, r)
+        return await _apply_role(
+            user_id,
+            users_db.ROLE_ADMIN,
+            to_user.get('university_id'),
+            r,
+        )
     except HTTPException:
         raise
     except Exception:
@@ -301,7 +403,7 @@ async def grant_admin(
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         404: {'description': 'User not found'},
-        409: {'description': 'User is already USER'},
+        409: {'description': 'User is not ADMIN'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -310,14 +412,24 @@ async def demote_admin(
     r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
-    """Снять роль ADMIN до USER."""
+    """Снять роль ADMIN.
+
+    Роль, которая остаётся дальше, выбирается по привязке: привязанный к
+    университету пользователь продолжает быть его представителем
+    (``EDITOR``), остальные становятся обычными пользователями (``USER``).
+    """
     try:
-        to_user = await database.users.find_user_by_id(user_id)
+        to_user = await users_db.find_user_by_id(user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
-        if to_user.get('role') == 'USER':
-            raise HTTPException(status_code=409, detail='User is already USER')
-        return await _change_user(user_id, {'role': 'USER'}, r)
+        if to_user.get('role') != users_db.ROLE_ADMIN:
+            raise HTTPException(status_code=409, detail='User is not ADMIN')
+        return await _apply_role(
+            user_id,
+            users_db.demote_role(to_user),
+            to_user.get('university_id'),
+            r,
+        )
     except HTTPException:
         raise
     except Exception:
@@ -333,6 +445,7 @@ async def demote_admin(
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         404: {'description': 'User or university not found'},
+        422: {'description': 'Validation error'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -342,27 +455,29 @@ async def assign_university(
     r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
-    """Привязать пользователя к университету (роль представителя).
+    """Назначить или снять роль представителя университета.
 
-    Пустой ``university_id`` отвязывает пользователя от университета.
+    Тонкая обёртка над ``POST /admin/role/{user_id}``: привязка вуза и есть
+    назначение представителя. Отдельная привязка обычному ``USER`` не
+    допускается — она была бы молчаливым способом выдать права.
     """
     try:
-        if payload.university_id:
-            university = await database.universities.get_university(
-                payload.university_id
-            )
-            if not university:
-                raise HTTPException(status_code=404, detail='University not found')
-        return await _change_user(
+        to_user = await users_db.find_user_by_id(user_id)
+        if not to_user:
+            raise HTTPException(status_code=404, detail='User not found')
+        role = (
+            users_db.ROLE_UNIVERSITY_REP
+            if payload.university_id
+            else users_db.ROLE_USER
+        )
+        return await _apply_role(
             user_id,
-            {'university_id': payload.university_id},
+            role,
+            payload.university_id,
             r,
         )
     except HTTPException:
         raise
-    except IntegrityError:
-        logger.warning('University assignment conflict for user %s', user_id)
-        raise HTTPException(status_code=404, detail='University not found')
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -376,6 +491,7 @@ async def assign_university(
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         404: {'description': 'Olympiad not found'},
+        409: {'description': 'Olympiad is absent in the current RSOSH list and cannot be restored manually'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -384,16 +500,44 @@ async def archive_olympiad(
     archived: bool = True,
     current_user: deps.AdminUser = None,
 ):
-    """Перевести олимпиаду в архив или вернуть в актуальный каталог.
+    """Исключить олимпиаду из актуального каталога или вернуть её.
 
-    Архив означает «олимпиады нет в актуальном перечне РСОШ»: запись
-    сохраняется, но исчезает из публичного каталога.
+    Статус отвечает на вопрос «есть ли олимпиада в актуальном перечне РСОШ»,
+    поэтому решение о нём принимают два механизма, и это видно по причине
+    архива (``archive_reason``):
+
+    - ``MANUAL`` — администратор исключил олимпиаду руками (например, из-за
+      ошибки в данных). Такую запись можно вернуть;
+    - ``RSOSH_ABSENT`` — импорт не нашёл олимпиаду в перечне. Вернуть её в
+      актуальные вручную нельзя (409): это сделает только импорт РСОШ, где
+      олимпиада снова встретится. Иначе кнопка «вернуть» превращала бы
+      олимпиаду в актуальную по перечню без всякого перечня.
     """
     try:
-        updated = await database.olympiads.edit_olympiad(
-            olympiad_id,
-            {'status': 'ARCHIVED' if archived else 'PUBLISHED'},
-        )
+        olympiad = await database.olympiads.get_olympiad(olympiad_id)
+        if not olympiad:
+            raise HTTPException(status_code=404, detail='Olympiad not found')
+
+        if archived:
+            updated = await database.olympiads.edit_olympiad(
+                olympiad_id,
+                {'status': 'ARCHIVED', 'archive_reason': ARCHIVE_MANUAL},
+            )
+        else:
+            if olympiad.get('archive_reason') == ARCHIVE_BY_RSOSH:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        'Олимпиада архивирована, потому что её нет в актуальном '
+                        'перечне РСОШ. Вернуть её в актуальные можно только '
+                        'подтверждением импорта РСОШ, где олимпиада есть.'
+                    ),
+                )
+            updated = await database.olympiads.edit_olympiad(
+                olympiad_id,
+                {'status': 'PUBLISHED', 'archive_reason': None},
+            )
+
         if not updated:
             raise HTTPException(status_code=404, detail='Olympiad not found')
         return updated

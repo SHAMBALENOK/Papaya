@@ -4,9 +4,11 @@
 логику и чтобы модель прав была в одном месте:
 
 - ``USER`` — посетитель: каталоги, поиск и страницы сущностей открыты;
-- ``EDITOR`` — представитель университета: управляет связями своего
-  университета с олимпиадами каталога; создавать олимпиады не может;
-- ``ADMIN`` — администратор Papaya: каталог, импорт РСОШ, модерация.
+- ``EDITOR`` — представитель университета: управляет связями **своего**
+  университета с олимпиадами каталога; назначается только вместе с
+  привязкой (см. ``app.database.users.apply_role``);
+- ``ADMIN`` — администратор Papaya: каталог, импорт РСОШ, модерация. Права
+  администратора не зависят от привязки к университету.
 
 Роль всегда читается из актуальной версии пользователя (Redis-кэш с
 версионированием или БД), а не из JWT: иначе понижение прав не действовало бы
@@ -20,13 +22,21 @@ from fastapi import Cookie, Depends, HTTPException
 
 from app import database
 from app.caching.main import get_cached_user, get_redis
+from app.database.users import ROLE_ADMIN, ROLE_UNIVERSITY_REP, ROLE_USER
 
 import app.middlewares.tokenz.main as tokenz
 
-
-ROLE_USER = 'USER'
-ROLE_UNIVERSITY_REP = 'EDITOR'
-ROLE_ADMIN = 'ADMIN'
+__all__ = [
+    'ROLE_ADMIN',
+    'ROLE_UNIVERSITY_REP',
+    'ROLE_USER',
+    'can_manage_university',
+    'get_current_user',
+    'get_optional_user',
+    'require_admin',
+    'require_manage_university',
+    'require_university_rep',
+]
 
 
 async def get_current_user(
@@ -79,8 +89,11 @@ async def require_university_rep(
 ) -> dict:
     """Администратор или представитель университета.
 
-    Представитель без привязанного университета (``university_id`` пуст) не
-    может управлять связями: непонятно, чьи именно.
+    ``EDITOR`` без привязанного университета (``university_id`` пуст) — это
+    противоречивое состояние, которого не должно быть: неизвестно, чьи именно
+    связи ему позволено вести. Таких пользователей приводит в порядок
+    администратор через ``POST /admin/role/{user_id}``, а до этого прав на
+    управление связями у них нет.
     """
     role = current_user.get('role')
     if role == ROLE_ADMIN:

@@ -13,6 +13,9 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 OLYMPIAD_STATUSES = ('PUBLISHED', 'ARCHIVED')
 
+# Причины архивирования: см. app/models/olympiads.py.
+ARCHIVE_REASONS = ('RSOSH_ABSENT', 'MANUAL')
+
 
 class OlympiadBase(BaseModel):
     id: Optional[UUID] = None
@@ -20,10 +23,12 @@ class OlympiadBase(BaseModel):
     name_norm: Optional[str] = None
     description: Optional[str] = None
     official_url: Optional[str] = None
+    preview_image: Optional[str] = None
     image: Optional[str] = None
     source_url: Optional[str] = None
     source_doc_id: Optional[UUID] = None
     status: str = 'PUBLISHED'
+    archive_reason: Optional[str] = None
 
     @field_validator('id', mode='before')
     @classmethod
@@ -37,6 +42,13 @@ class OlympiadBase(BaseModel):
             raise ValueError('status must be one of ' + ', '.join(OLYMPIAD_STATUSES))
         return v
 
+    @field_validator('archive_reason')
+    @classmethod
+    def _check_archive_reason(cls, v):
+        if v is not None and v not in ARCHIVE_REASONS:
+            raise ValueError('archive_reason must be one of ' + ', '.join(ARCHIVE_REASONS))
+        return v
+
 
 class OlympiadCreate(BaseModel):
     """Создание олимпиады вручную (администратором).
@@ -48,6 +60,7 @@ class OlympiadCreate(BaseModel):
     name: str
     description: Optional[str] = None
     official_url: Optional[str] = None
+    preview_image: Optional[str] = None
     image: Optional[str] = None
     source_url: Optional[str] = None
 
@@ -60,21 +73,30 @@ class OlympiadCreate(BaseModel):
 
 
 class OlympiadUpdate(BaseModel):
-    """Частичное обновление олимпиады. Все поля опциональны."""
+    """Частичное обновление олимпиады. Все поля опциональны.
+
+    ``status`` и ``archive_reason`` здесь нет намеренно: актуальность и причина
+    архива — решение импорта РСОШ или администратора, и меняются они через
+    ``POST /api/v1/admin/archive_olympiad/{id}``, где причина выставляется
+    вместе со статусом. Через эту схему нельзя сделать запись актуальной
+    «просто потому, что её вернули из архива».
+    """
 
     name: Optional[str] = None
     description: Optional[str] = None
     official_url: Optional[str] = None
+    preview_image: Optional[str] = None
     image: Optional[str] = None
     source_url: Optional[str] = None
-    status: Optional[str] = None
 
-    @field_validator('status')
+    @field_validator('name')
     @classmethod
-    def _check_status(cls, v):
-        if v is not None and v not in OLYMPIAD_STATUSES:
-            raise ValueError('status must be one of ' + ', '.join(OLYMPIAD_STATUSES))
-        return v
+    def _name_not_blank(cls, v):
+        if v is None:
+            return v
+        if not v or not v.strip():
+            raise ValueError('name is required')
+        return v.strip()
 
 
 class OlympiadResponse(OlympiadBase):
