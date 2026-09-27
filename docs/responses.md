@@ -207,10 +207,17 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "image", "source_url", "source_doc_id", "status"}]}` |
+| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "source_doc_id", "status", "archive_reason"}]}` |
 
 `status`: `PUBLISHED` — в актуальном перечне РСОШ, `ARCHIVED` — больше нет
 в перечне (запись сохранена исторически).
+
+`archive_reason`: причина архива — `RSOSH_ABSENT` (нет в перечне РСОШ,
+вернёт импорт) или `MANUAL` (исключил администратор, можно вернуть руками);
+`null`, пока олимпиада актуальна.
+
+`preview_image` — картинка для карточки, `image` — для страницы. Оба
+необязательны; интерфейс берёт второе, если первое не заполнено.
 
 ---
 
@@ -218,7 +225,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Карточка олимпиады | `{"id", "name", "name_norm", "description", "official_url", "image", "source_url", "source_doc_id", "status", "createdAt", "updatedAt"}` |
+| 200 | Карточка олимпиады | `{"id", "name", "name_norm", "description", "official_url", "preview_image", "image", "source_url", "source_doc_id", "status", "archive_reason", "createdAt", "updatedAt"}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
 ---
@@ -235,11 +242,23 @@
 
 ---
 
+## GET /olympiads/{olympiad_id}/source
+
+Откуда взялась информация об олимпиаде. Публично, без доступа к файлу
+документа: только название источника и ссылка.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Источник данных | `{"title": str?, "source_url": str?, "olympiad": str?}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+
+---
+
 ## POST /olympiads/add_olympiad
 
 Ручное создание олимпиады (резервный путь; основной — импорт РСОШ).
 
-**Request body:** `{"name": str, "description"?, "official_url"?, "image"?, "source_url"?}`
+**Request body:** `{"name": str, "description"?, "official_url"?, "preview_image"?, "image"?, "source_url"?}`
 
 | Code | Description | Body |
 |------|-------------|------|
@@ -339,8 +358,13 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Импорт применён | `{"import": {...}, "result": {"created": [...], "updated": [...], "archived": [...], "skipped": [...], "errors": [...]}}` |
+| 200 | Импорт применён | `{"import": {...}, "result": {"created": [...], "updated": [...], "archived": [...], "skipped": [...], "errors": [...]}, "skipped": [name_norm, ...]}` |
 | 400 | Импорт нельзя подтвердить или неизвестные `skip` | `{"detail": "Import state approved is not confirmable; start a new import first"}` |
+
+Поле верхнего уровня `skipped` — то, что администратор снял в preview.
+Снятый кандидат не пишется в каталог **и не считается отсутствующим** в
+перечне: иначе ошибка распознавания одной строки архивировала бы
+существующую олимпиаду (у кандидата-merge защищается его `matched_olympiad_id`).
 
 ---
 
@@ -360,14 +384,39 @@
 
 ---
 
+## POST /admin/role/{user_id}
+
+Смена роли вместе с привязкой к университету. **Администратор.**
+
+**Request body:** `{"role": "USER"｜"EDITOR"｜"ADMIN", "university_id": str｜null}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Роль применена | `UserResponse` |
+| 400 | Нарушен инвариант роли | `{"detail": "..."}` — например, `EDITOR` без университета или `USER` с привязкой |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Пользователь или университет не найден | `{"detail": "User not found"}` |
+| 422 | Неизвестная роль | `{"detail": [...]}` |
+
+`POST /admin/university/{user_id}` остаётся как совместимая обёртка над этим
+маршрутом: привязка — часть роли, а не отдельное действие.
+
+---
+
 ## POST /admin/archive_olympiad/{olympiad_id}?archived=true|false
 
 Архивирование или возврат олимпиады в каталог. **Администратор.**
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Статус изменён | `OlympiadResponse` со `status: "ARCHIVED"｜"PUBLISHED"` |
+| 200 | Статус изменён | `OlympiadResponse` со `status: "ARCHIVED"｜"PUBLISHED"` и `archive_reason: "MANUAL"｜null` |
 | 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+| 409 | Вернуть из архива РСОШ вручную нельзя | `{"detail": "Олимпиада архивирована, потому что её нет в актуальном перечне РСОШ..."}` |
+
+`archived=true` ставит причину `MANUAL` (исключил администратор — вернуть
+можно). Олимпиада, исчезнувшая из перечня РСОШ, помечена `RSOSH_ABSENT` и
+возвращается только подтверждением импорта, где она снова встретилась.
 
 ---
 

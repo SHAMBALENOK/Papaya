@@ -221,6 +221,10 @@ async def confirm(
         return {
             'import': _import_view(doc),
             'result': result['result'],
+            # Что администратор снял в preview. Отдаём отдельным полем, а не
+            # внутри result: это его решение, а не итог записи в каталог, и по
+            # нему видно, что «создано 4 из 5» — намеренно, а не из-за ошибки.
+            'skipped': result['skipped'],
         }
     except processor.RsoshError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

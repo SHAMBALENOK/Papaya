@@ -30,19 +30,26 @@ HEADER = ('Наименование олимпиады', 'Профиль', 'Ур
 RSOSH_SAMPLE_PDF = 'app/tables/rsosh_bvi/rsosh_bvi.pdf'
 
 
-def xlsx_bytes() -> bytes:
-    """XLSX с шапкой, многострочными ячейками и объединённой ячейкой."""
+def xlsx_bytes(row_count: int | None = None) -> bytes:
+    """XLSX с шапкой, многострочными ячейками и объединённой ячейкой.
+
+    ``row_count`` ограничивает число олимпиад в перечне: нужен, чтобы
+    смоделировать следующий, более короткий перечень РСОШ (олимпиады, исчезнувшие
+    из него, должны уйти в архив).
+    """
     import openpyxl
 
+    rows = OLYMPIAD_ROWS if row_count is None else OLYMPIAD_ROWS[:row_count]
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = 'Перечень'
     sheet.append(list(HEADER))
-    for name, profile, level, diploma in OLYMPIAD_ROWS:
+    for name, profile, level, diploma in rows:
         sheet.append([name, profile, level, diploma])
 
     # Объединённая по вертикали ячейка: пустой предмет во второй строке.
-    sheet.merge_cells(start_row=4, start_column=2, end_row=5, end_column=2)
+    if len(rows) > 1:
+        sheet.merge_cells(start_row=4, start_column=2, end_row=5, end_column=2)
 
     buffer = io.BytesIO()
     book.save(buffer)

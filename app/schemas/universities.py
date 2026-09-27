@@ -19,6 +19,7 @@ class UniversityBase(BaseModel):
     short_name: Optional[str] = None
     description: Optional[str] = None
     website: Optional[str] = None
+    preview_image: Optional[str] = None
     image: Optional[str] = None
 
     @field_validator('id', mode='before')
@@ -37,6 +38,7 @@ class UniversityCreate(BaseModel):
     short_name: Optional[str] = None
     description: Optional[str] = None
     website: Optional[str] = None
+    preview_image: Optional[str] = None
     image: Optional[str] = None
 
     @field_validator('name')
@@ -54,6 +56,7 @@ class UniversityUpdate(BaseModel):
     short_name: Optional[str] = None
     description: Optional[str] = None
     website: Optional[str] = None
+    preview_image: Optional[str] = None
     image: Optional[str] = None
 
 

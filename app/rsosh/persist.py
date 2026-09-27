@@ -1,15 +1,16 @@
 """Запись подтверждённого импорта в каталог олимпиад.
 
-Правила, которые держит этот модуслей:
+Правила, которые держит этот модуль:
 
 - одна строка кандидата = одна запись каталога: дубли не создаются, а
   существующая олимпиада обновляется (merge);
 - олимпиада, присутствующая в новом перечне РСОШ, снова становится актуальной
-  (``PUBLISHED``) — так возвращается из архива;
+  (``PUBLISHED``, причина архива сбрасывается) — так возвращается из архива;
 - олимпиада, **исчезнувшая** из перечня РСОШ, не удаляется, а переводится в
-  ``ARCHIVED`` (см. ``archive_missing``): историческая запись сохраняется, а
-  пользователь видит, что олимпиады больше нет в актуальном перечне;
-- записи, которые администратор снял в preview (``skip``), не пишутся.
+  ``ARCHIVED`` с причиной ``RSOSH_ABSENT`` (см. ``archive_missing``);
+- записи, которые администратор снял в preview (``skip``), не считаются
+  отсутствующими: ошибочная строка распознавания не должна архивировать
+  существующую олимпиаду.
 """
 
 import logging
@@ -25,6 +26,10 @@ from app.rsosh.types import Candidate
 
 logger = logging.getLogger('papaya.rsosh.persist')
 
+# Причины архивирования (совпадают с комментарием в app/models/olympiads.py).
+ARCHIVE_BY_RSOSH = 'RSOSH_ABSENT'
+ARCHIVE_MANUAL = 'MANUAL'
+
 
 def _as_uuid(value):
     import uuid as uuid_mod
@@ -37,8 +42,13 @@ async def apply_candidates(
     candidates: list[Candidate],
     doc: dict,
     archive_missing: bool = True,
+    protected_ids: set[str] | None = None,
 ) -> dict:
     """Применить подтверждённый импорт.
+
+    ``protected_ids`` — id олимпиад, которые нельзя архивировать, даже если их
+    не было в текущем документе (например, кандидаты, которые администратор
+    снял в preview из-за ошибки распознавания).
 
     Возвращает итог: сколько олимпиад создано, сколько обновлено, какие
     отправлены в архив и какие записи пропущены.
@@ -49,6 +59,9 @@ async def apply_candidates(
     skipped: list[str] = []
     errors: list[str] = []
     touched_ids: list[str] = []
+    # Олимпиады, о которых администратор сказал «не трогать»: снятые с
+    # подтверждения кандидаты. Они не считаются отсутствующими в перечне.
+    protected_ids: set[str] = {str(value) for value in (protected_ids or set())}
 
     async with AsyncSessionLocal() as session:
         for candidate in candidates:
@@ -70,7 +83,11 @@ async def apply_candidates(
 
         archived: list[str] = []
         if archive_missing:
-            archived = await _archive_missing(session, doc_id, set(touched_ids))
+            archived = await _archive_missing(
+                session,
+                doc_id,
+                set(touched_ids) | protected_ids,
+            )
 
         await session.commit()
 
@@ -89,7 +106,8 @@ async def apply_candidates(
 
 async def _upsert(session, candidate: Candidate, doc_id):
     """Создать или обновить олимпиаду по кандидату."""
-    now = None
+    from datetime import datetime, timezone
+
     olympiad = None
     if candidate.action == 'merge' and candidate.matched_olympiad_id:
         result = await session.execute(
@@ -107,8 +125,6 @@ async def _upsert(session, candidate: Candidate, doc_id):
         olympiad = result.scalar_one_or_none()
 
     if olympiad is None:
-        from datetime import datetime, timezone
-
         now = datetime.now(timezone.utc)
         olympiad = Olympiads(
             name=candidate.name,
@@ -116,6 +132,7 @@ async def _upsert(session, candidate: Candidate, doc_id):
             description=candidate.description,
             source_doc_id=doc_id,
             status='PUBLISHED',
+            archive_reason=None,
             createdAt=now,
             updatedAt=now,
         )
@@ -123,11 +140,12 @@ async def _upsert(session, candidate: Candidate, doc_id):
         await session.flush()
         return olympiad_to_dict(olympiad)
 
-    from datetime import datetime, timezone
-
     changed = False
-    if olympiad.status != 'PUBLISHED':
+    if olympiad.status != 'PUBLISHED' or olympiad.archive_reason is not None:
+        # Олимпиада снова встретилась в актуальном перечне: возвращаем её в
+        # актуальные и сбрасываем причину архива.
         olympiad.status = 'PUBLISHED'
+        olympiad.archive_reason = None
         changed = True
     if candidate.description and not olympiad.description:
         olympiad.description = candidate.description
@@ -141,12 +159,17 @@ async def _upsert(session, candidate: Candidate, doc_id):
     return olympiad_to_dict(olympiad)
 
 
-async def _archive_missing(session, doc_id, touched_ids: set[str]) -> list[str]:
+async def _archive_missing(session, doc_id, keep_ids: set[str]) -> list[str]:
     """Перевести в архив олимпиады, исчезнувшие из перечня РСОШ.
 
     Архивируются только те записи, которые ранее пришли из документа РСОШ
     (``source_doc_id`` задан и это не текущий документ) и не встретились в
     новом перечне. Олимпиады, созданные вручную, архивированию не подлежат.
+
+    ``keep_ids`` — олимпиады, которых нельзя архивировать: применённые
+    кандидаты и кандидаты, снятые администратором в preview. Снятые с
+    подтверждения записи не считаются отсутствующими в перечне: иначе ошибка
+    распознавания одной строки архивировала бы существующую олимпиаду.
     """
     from datetime import datetime, timezone
 
@@ -158,11 +181,13 @@ async def _archive_missing(session, doc_id, touched_ids: set[str]) -> list[str]:
         )
     )
     archived: list[str] = []
+    now = datetime.now(timezone.utc)
     for olympiad in result.scalars().all():
-        if str(olympiad.id) in touched_ids:
+        if str(olympiad.id) in keep_ids:
             continue
         olympiad.status = 'ARCHIVED'
-        olympiad.updatedAt = datetime.now(timezone.utc)
+        olympiad.archive_reason = ARCHIVE_BY_RSOSH
+        olympiad.updatedAt = now
         archived.append(olympiad.name)
     return archived
 

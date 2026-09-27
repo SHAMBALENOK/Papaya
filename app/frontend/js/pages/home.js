@@ -89,7 +89,9 @@ async function loadHomeCatalog() {
           `</div>
            <p class="mt-8"><a href="#/universities" class="${UI.btn} ${UI.btnGhost}">Все университеты →</a></p>`
         : emptyHtml('Каталог университетов пока пуст',
-                    'Университеты заводит администратор: вручную или из документов РСОШ.');
+                    'Университеты заводит администратор Papaya. Связь с олимпиадами '
+                    + 'представитель университета подтверждает сам — после этого олимпиады '
+                    + 'дают БВИ.');
 
     const olympiadsHtml = olympiadsData.length
         ? `<div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">` +
@@ -97,40 +99,37 @@ async function loadHomeCatalog() {
           `</div>
            <p class="mt-8"><a href="#/olympiads" class="${UI.btn} ${UI.btnGhost}">Все олимпиады →</a></p>`
         : emptyHtml('Каталог олимпиад пока пуст',
-                    'Олимпиады добавляются импортом документов РСОШ или вручную администратором.');
+                    'Перечень олимпиад загружает администратор из документов РСОШ.');
 
     box.innerHTML = `
     <div class="mb-16 md:mb-24">
-        <p class="${UI.eyebrow}">Каталог университетов</p>
+        <p class="${UI.eyebrow}">Каталог БВИ университетов</p>
         <h2 class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">Университеты</h2>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-            Откройте университет, чтобы увидеть олимпиады, дающие БВИ.
+            Главный раздел Papaya: университет и олимпиады, которые дают поступающим
+            право на зачисление без экзаменов. Откройте университет, чтобы увидеть его
+            подтверждённый перечень.
         </p>
         <div class="mt-12">${universitiesHtml}</div>
     </div>
     <div>
-        <p class="${UI.eyebrow}">Каталог олимпиад</p>
-        <h2 class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">Олимпиады перечня РСОШ</h2>
+        <p class="${UI.eyebrow}">Перечень олимпиад РСОШ</p>
+        <h2 class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">Олимпиады</h2>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-            Единый каталог олимпиад: одна запись на олимпиаду, независимо от года проведения.
+            Единый каталог олимпиад: одна запись на олимпиаду, независимо от года
+            проведения. Каталог наполняется импортом документов РСОШ.
         </p>
         <div class="mt-12">${olympiadsHtml}</div>
     </div>`;
 }
 
 function universityCardHtml(university) {
-    const name = university.short_name || university.name;
     return `
     <a href="#/universities/${escAttr(university.id)}"
        class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
         <div class="p-8">
-            ${university.image ? `
-            <div class="mb-6 bg-mist">
-                <img src="${escAttr(university.image)}" alt="${escAttr(university.name)}"
-                     class="w-full h-32 object-cover"
-                     onerror="this.onerror=null;this.parentElement.style.display='none'">
-            </div>` : ''}
-            <h3 class="text-xl font-bold tracking-tight leading-snug">${escHtml(name)}</h3>
+            ${cardImageHtml(university)}
+            ${entityTitleHtml(university)}
             <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-3">${escHtml(university.description || '')}</p>
             <p class="mt-7 text-sm font-semibold text-ink group-hover:text-black transition-colors">Олимпиады с БВИ →</p>
         </div>
@@ -142,16 +141,44 @@ function olympiadCardHtml(olympiad) {
     <a href="#/olympiads/${escAttr(olympiad.id)}"
        class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
         <div class="p-8">
-            ${olympiad.image ? `
-            <div class="mb-6 bg-mist">
-                <img src="${escAttr(olympiad.image)}" alt="${escAttr(olympiad.name)}"
-                     class="w-full h-32 object-cover"
-                     onerror="this.onerror=null;this.parentElement.style.display='none'">
-            </div>` : ''}
+            ${cardImageHtml(olympiad)}
             <div class="flex items-center gap-3 flex-wrap">${olympiadStatusBadge(olympiad.status)}</div>
             <h3 class="mt-5 text-lg font-bold tracking-tight leading-snug">${escHtml(olympiad.name)}</h3>
             <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-3">${escHtml(olympiad.description || '')}</p>
             <p class="mt-7 text-sm font-semibold text-ink group-hover:text-black transition-colors">Подробнее →</p>
         </div>
     </a>`;
+}
+
+/** Картинка для карточки каталога.
+ *
+ * У сущности две картинки: маленькое превью для карточек и большая для
+ * страницы. Если превью не задано, показываем большую — каталог не должен
+ * выглядеть пустым из-за не заполненного необязательного поля.
+ */
+function cardImageHtml(entity) {
+    const src = entity.preview_image || entity.image;
+    if (!src) return '';
+    return `
+            <div class="mb-6 bg-mist">
+                <img src="${escAttr(src)}" alt="${escAttr(entity.name)}"
+                     class="w-full h-32 object-cover"
+                     onerror="this.onerror=null;this.parentElement.style.display='none'">
+            </div>`;
+}
+
+/** Заголовок карточки: полное название и краткое — оба, если они разные.
+ *
+ * Раньше карточка показывала только краткое название, из-за чего
+ * «НИУ ВШЭ — Школа экономики» выглядело как случайный набор слов.
+ */
+function entityTitleHtml(entity) {
+    const name = escHtml(entity.name || '');
+    const shortName = escHtml(entity.short_name || '');
+    if (!shortName || shortName === name) {
+        return `<h3 class="text-xl font-bold tracking-tight leading-snug">${name}</h3>`;
+    }
+    return `
+            <h3 class="text-xl font-bold tracking-tight leading-snug">${name}</h3>
+            <p class="mt-1 text-sm font-semibold text-ink-soft">${shortName}</p>`;
 }

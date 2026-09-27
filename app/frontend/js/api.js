@@ -91,6 +91,7 @@ const api = {
     },
     getOlympiad(id)      { return this.get(`/olympiads/${id}`, { skipAuthRedirect: true }); },
     getOlympiadUniversities(id) { return this.get(`/olympiads/${id}/universities`, { skipAuthRedirect: true }); },
+    getOlympiadSource(id) { return this.get(`/olympiads/${id}/source`, { skipAuthRedirect: true }); },
     addOlympiad(d)       { return this.post('/olympiads/add_olympiad', d); },
     editOlympiad(id, d)  { return this.post(`/olympiads/edit_olympiad/${id}`, d); },
 
@@ -118,8 +119,13 @@ const api = {
     unbanUser(id)    { return this.post(`/admin/unban/${id}`); },
     grantAdmin(id)   { return this.post(`/admin/grant_admin/${id}`); },
     demoteAdmin(id)  { return this.post(`/admin/demote_admin/${id}`); },
-    assignUniversity(id, universityId) {
-        return this.post(`/admin/university/${id}`, { university_id: universityId || null });
+    /* Единственный способ назначить/снять роль: роль и университет меняются
+       одним запросом, поэтому EDITOR без университета получить нельзя. */
+    setUserRole(id, role, universityId) {
+        return this.post(`/admin/role/${id}`, {
+            role,
+            university_id: universityId || null,
+        });
     },
     setBviStatus(universityId, olympiadId, status) {
         return this.post(`/universities/${universityId}/bvi/${olympiadId}/status`, { status });

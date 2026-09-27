@@ -2,11 +2,13 @@
 
 Сценарий Papaya: школьник открывает каталог, находит свой университет и видит
 олимпиады, дающие БВИ. Поэтому чтение каталога публично (регистрация не
-нужна), а запись каталога — только у администратора.
+нужна), а запись каталога — только у администратора. Университеты создаёт
+администратор: РСОШ — источник каталога **олимпиад**, а не университетов.
 
 Представитель университета (``EDITOR`` + ``university_id``) управляет связями
 **своего** университета: выбирает существующую олимпиаду из каталога и
-заявляет, что вуз даёт за неё БВИ. Новую олимпиаду он не создаёт.
+заявляет, что вуз даёт за неё БВИ. Новую олимпиаду он не создаёт, а
+подтверждённую связь не может убрать сам — это делает администратор.
 """
 
 import logging
@@ -33,6 +35,7 @@ class UniversityListItem(BaseModel):
     short_name: str | None = None
     description: str | None = None
     website: str | None = None
+    preview_image: str | None = None
     image: str | None = None
 
 
@@ -47,6 +50,7 @@ def _serialize(university: dict) -> dict:
         'short_name': university.get('short_name'),
         'description': university.get('description'),
         'website': university.get('website'),
+        'preview_image': university.get('preview_image'),
         'image': university.get('image'),
     }
 
@@ -279,10 +283,11 @@ async def request_bvi(
 @universities_page.post(
     '/{university_id}/bvi/remove',
     responses={
-        200: {'description': 'BVI link removed'},
+        200: {'description': 'BVI request removed'},
         401: {'description': 'Access token missing'},
         403: {'description': 'You can only manage your own university'},
         404: {'description': 'BVI link not found'},
+        409: {'description': 'Confirmed link can only be revoked by an administrator'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -291,8 +296,29 @@ async def remove_bvi(
     body: schemas.bvi.BviLinkRequest,
     current_user: deps.ManageUniversity = None,
 ):
-    """Убрать связь БВИ (и заявку, и подтверждение)."""
+    """Убрать связь БВИ.
+
+    Бизнес-правило: подтверждённая администратором связь — это публичный
+    факт, поэтому представитель не может убрать её одним запросом. Он может
+    отозвать только собственную неподтверждённую заявку; снять подтверждение
+    (или удалить связь целиком) может администратор.
+    """
     try:
+        link = await database.bvi.get_link(body.olympiad_id, university_id)
+        if not link:
+            raise HTTPException(status_code=404, detail='BVI link not found')
+        if (
+            link['status'] == 'CONFIRMED'
+            and current_user.get('role') != deps.ROLE_ADMIN
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    'Связь подтверждена администратором: снять подтверждение '
+                    'может только администратор'
+                ),
+            )
+
         removed = await database.bvi.delete_bvi_link(body.olympiad_id, university_id)
         if not removed:
             raise HTTPException(status_code=404, detail='BVI link not found')

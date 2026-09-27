@@ -30,14 +30,29 @@ class OlympiadListItem(BaseModel):
     name: str | None = None
     description: str | None = None
     official_url: str | None = None
+    preview_image: str | None = None
     image: str | None = None
     source_url: str | None = None
     source_doc_id: str | None = None
     status: str | None = None
+    archive_reason: str | None = None
 
 
 class OlympiadsResponse(BaseModel):
     olympiads: List[OlympiadListItem]
+
+
+class SourceInfo(BaseModel):
+    """Откуда взялась информация об олимпиаде.
+
+    Публичный минимум: пользователь должен видеть источник данных, не скачивая
+    при этом документ. Служебные поля документа (внутренний файл, хеш, статус
+    обработки) наружу не отдаются.
+    """
+
+    title: str | None = None
+    source_url: str | None = None
+    olympiad: str | None = None
 
 
 def _serialize(olympiad: dict) -> dict:
@@ -46,10 +61,12 @@ def _serialize(olympiad: dict) -> dict:
         'name': olympiad.get('name'),
         'description': olympiad.get('description'),
         'official_url': olympiad.get('official_url'),
+        'preview_image': olympiad.get('preview_image'),
         'image': olympiad.get('image'),
         'source_url': olympiad.get('source_url'),
         'source_doc_id': olympiad.get('source_doc_id'),
         'status': olympiad.get('status'),
+        'archive_reason': olympiad.get('archive_reason'),
     }
 
 
@@ -98,6 +115,59 @@ async def olympiad_details(olympiad_id: uuid.UUID):
         if not olympiad:
             raise HTTPException(status_code=404, detail='Olympiad not found')
         return olympiad
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@olympiads_page.get(
+    '/{olympiad_id}/source',
+    response_model=SourceInfo,
+    responses={
+        200: {'description': 'Источник данных об олимпиаде'},
+        404: {'description': 'Olympiad not found or has no source document'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def olympiad_source(olympiad_id: uuid.UUID):
+    """Откуда взята информация об олимпиаде.
+
+    Публичный минимум для доверия к данным: название документа-источника и
+    ссылка на него, если она была указана. Служебные поля документа (имя
+    файла, хеш, статус обработки) намеренно не отдаются — здесь нужен ответ на
+    вопрос «откуда это», а не доступ к загруженному файлу.
+    """
+    try:
+        olympiad = await database.olympiads.get_olympiad(olympiad_id)
+        if not olympiad:
+            raise HTTPException(status_code=404, detail='Olympiad not found')
+
+        source: SourceInfo = SourceInfo(
+            title=olympiad.get('source_url') or None,
+            source_url=olympiad.get('source_url') or None,
+            olympiad=olympiad.get('name'),
+        )
+
+        doc_id = olympiad.get('source_doc_id')
+        if doc_id:
+            doc = await database.docs.get_doc(uuid.UUID(str(doc_id)))
+            if doc:
+                metadata = doc.get('metadata') or {}
+                rsosh = metadata.get('rsosh') or {}
+                # РСОШ-источник: показываем название документа, если оно есть, и
+                # ссылку на перечень. Название файла и хеш наружу не отдаются —
+                # это детали загрузки, а не «источник данных».
+                source.title = (
+                    metadata.get('title')
+                    or rsosh.get('title')
+                    or 'Перечень олимпиад РСОШ'
+                )
+                source.source_url = metadata.get('source_url') or olympiad.get(
+                    'source_url'
+                )
+        return source
     except HTTPException:
         raise
     except Exception:

@@ -189,21 +189,42 @@ async def test_anonymous_user_cannot_create_link(client):
     assert response.status_code == 401
 
 
-async def test_user_without_university_cannot_manage_links(client):
-    """Роль EDITOR без привязки к вузу не даёт доступа к чужим каталогам."""
+async def test_plain_user_cannot_manage_links(client):
+    """Без роли представителя доступа к чужим каталогам нет."""
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
 
     user = await register_user(client)
     from tests.conftest import promote_role
 
-    await promote_role(user['id'], 'EDITOR')
+    await promote_role(user['id'], 'USER')
 
     response = await client.post(
         f"/api/v1/universities/{university['id']}/bvi",
         json={'olympiad_id': olympiad['id']},
     )
     assert response.status_code == 403
+
+
+async def test_database_rejects_representative_without_university(client):
+    """Инвариант роли защищён и на уровне БД, а не только в приложении."""
+    import pytest
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
+    from app.database.database import AsyncSessionLocal
+    from app.models.users import Users
+
+    user = await register_user(client)
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(IntegrityError):
+            await session.execute(
+                update(Users)
+                .where(Users.id == user['id'])
+                .values(role='EDITOR', university_id=None)
+            )
+            await session.commit()
+        await session.rollback()
 
 
 async def test_admin_confirms_and_unconfirms_link(client):
@@ -249,7 +270,7 @@ async def test_status_update_requires_admin(client):
     assert response.status_code == 403
 
 
-async def test_rep_removes_link(client):
+async def test_rep_removes_own_pending_request(client):
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
     await university_rep_client(client, university['id'])
@@ -269,6 +290,81 @@ async def test_rep_removes_link(client):
         json={'olympiad_id': olympiad['id']},
     )
     assert again.status_code == 404
+
+
+async def test_rep_cannot_remove_confirmed_link(client):
+    """Подтверждённая связь — публичный факт: снимает её администратор."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await _confirmed_link(client, university, olympiad)
+
+    await university_rep_client(client, university['id'])
+    await client.post(
+        f"/api/v1/universities/{university['id']}/bvi",
+        json={'olympiad_id': olympiad['id']},
+    )
+
+    denied = await client.post(
+        f"/api/v1/universities/{university['id']}/bvi/remove",
+        json={'olympiad_id': olympiad['id']},
+    )
+    assert denied.status_code == 409
+    assert 'администратор' in denied.json()['detail']
+
+    # Связь осталась на месте и по-прежнему видна публично.
+    client.cookies.clear()
+    public = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert [item['id'] for item in public.json()['olympiads']] == [olympiad['id']]
+
+
+async def test_admin_can_remove_confirmed_link(client):
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await _confirmed_link(client, university, olympiad)
+
+    removed = await client.post(
+        f"/api/v1/universities/{university['id']}/bvi/remove",
+        json={'olympiad_id': olympiad['id']},
+    )
+    assert removed.status_code == 200
+
+    public = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert public.json()['olympiads'] == []
+
+
+async def test_admin_revoke_keeps_link_but_hides_it(client):
+    """Снятие подтверждения возвращает связь в статус заявки, а не удаляет её."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await _confirmed_link(client, university, olympiad)
+
+    revoked = await client.post(
+        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
+        json={'status': 'PENDING'},
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()['status'] == 'PENDING'
+
+    client.cookies.clear()
+    public = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert public.json()['olympiads'] == []
+
+
+async def test_archived_olympiad_keeps_confirmed_link(client):
+    """Архивная олимпиада не теряет подтверждённую связь с вузом."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await _confirmed_link(client, university, olympiad)
+
+    await client.post(f"/api/v1/admin/archive_olympiad/{olympiad['id']}")
+    client.cookies.clear()
+
+    public = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert [item['id'] for item in public.json()['olympiads']] == [olympiad['id']]
+    assert public.json()['olympiads'][0]['status'] == 'ARCHIVED'
+
+    back = await client.get(f"/api/v1/olympiads/{olympiad['id']}/universities")
+    assert [item['id'] for item in back.json()['universities']] == [university['id']]
 
 
 async def test_link_to_unknown_olympiad_is_404(client):

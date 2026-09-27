@@ -26,6 +26,11 @@ class Universities(Base):
     ``name_norm`` — нормализованное имя (регистр, «ё», лишние пробелы и
     типографские кавычки). Он же держит уникальность каталога: вуз нельзя
     завести дважды, даже если в написании есть мелкие различия.
+
+    Изображений два: ``preview_image`` показывается в карточках каталога,
+    ``image`` — на странице университета. Оба необязательны, а интерфейс
+    использует fallback: если превью нет, показывается большая картинка, и
+    наоборот.
     """
 
     __tablename__ = 'universities'
@@ -36,6 +41,9 @@ class Universities(Base):
     short_name = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     website = Column(String, nullable=True)
+    # Маленькая картинка для карточек каталога.
+    preview_image = Column(String, nullable=True)
+    # Большая картинка для страницы университета.
     image = Column(String, nullable=True)
     createdAt = Column(DateTime(timezone=True), default=_utcnow, index=True)
     updatedAt = Column(

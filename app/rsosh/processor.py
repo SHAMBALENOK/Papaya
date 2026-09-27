@@ -179,10 +179,19 @@ async def confirm_import(
         raise RsoshError('Unknown candidates in skip: ' + ', '.join(sorted(unknown)))
 
     selected = [item for item in candidates if item.name_norm not in skip_set]
+    # Кандидаты, снятые администратором в preview, защищаются от
+    # автоматического архивирования: «не подтвердил» не значит «нет в
+    # перечне РСОШ» (чаще всего снятие — это реакция на ошибку распознавания).
+    protected_ids = {
+        item.matched_olympiad_id
+        for item in candidates
+        if item.name_norm in skip_set and item.matched_olympiad_id
+    }
     result = await persist.apply_candidates(
         candidates=selected,
         doc=doc,
         archive_missing=archive_missing,
+        protected_ids=protected_ids,
     )
     await persist.mark_processed(doc['id'])
 

@@ -68,9 +68,12 @@ async function renderOlympiad(olympiadId) {
     if (!olympiadId) { renderNotFound(); return; }
     page.innerHTML = loadingHtml('Открываем олимпиаду…');
 
-    const [olyRes, uniRes] = await Promise.all([
+    const [olyRes, uniRes, srcRes] = await Promise.all([
         api.getOlympiad(olympiadId),
         api.getOlympiadUniversities(olympiadId),
+        // Источник публичный и необязательный: его отсутствие — не ошибка
+        // страницы, поэтому гасим неудачу вместо того, чтобы ломать рендер.
+        api.getOlympiadSource(olympiadId).catch(() => ({ ok: false })),
     ]);
 
     if (!olyRes.ok || !olyRes.data) {
@@ -82,6 +85,7 @@ async function renderOlympiad(olympiadId) {
 
     const olympiad = olyRes.data;
     const universities = (uniRes.ok && uniRes.data && uniRes.data.universities) || [];
+    const source = (srcRes.ok && srcRes.data) || null;
     const isAdmin = store.isAdmin();
 
     const universitiesHtml = universities.length
@@ -91,7 +95,7 @@ async function renderOlympiad(olympiadId) {
                 <span class="${UI.badge} ${UI.badgeSuccess}">
                     <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
                 </span>
-                <h3 class="mt-5 text-lg font-bold tracking-tight leading-snug">${escHtml(u.short_name || u.name)}</h3>
+                ${entityTitleHtml(u)}
                 <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть →</p>
             </a>`).join('')}</div>`
         : emptyHtml('Университеты с БВИ пока не указаны',
@@ -104,9 +108,9 @@ async function renderOlympiad(olympiadId) {
             Все олимпиады
         </a>
 
-        ${olympiad.image ? `
+        ${(olympiad.image || olympiad.preview_image) ? `
         <div class="mt-12 bg-mist shadow-elev-1">
-            <img src="${escAttr(olympiad.image)}" alt="${escAttr(olympiad.name)}" class="w-full max-h-[22rem] object-cover"
+            <img src="${escAttr(olympiad.image || olympiad.preview_image)}" alt="${escAttr(olympiad.name)}" class="w-full max-h-[22rem] object-cover"
                  onerror="this.onerror=null;this.parentElement.style.display='none'">
         </div>` : ''}
 
@@ -116,7 +120,7 @@ async function renderOlympiad(olympiadId) {
         </header>
 
         ${olympiad.status === 'ARCHIVED' ? `
-        <div class="mt-8">${alertHtml('Олимпиады больше нет в актуальном перечне РСОШ. Запись сохранена исторически.', 'error')}</div>` : ''}
+        <div class="mt-8">${alertHtml(archiveReasonText(olympiad.archive_reason), 'error')}</div>` : ''}
 
         ${olympiad.description ? `
         <section class="mt-14">
@@ -132,12 +136,9 @@ async function renderOlympiad(olympiadId) {
                           class="${UI.btn} ${UI.btnPrimary}">Официальный сайт олимпиады</a>`
                     : `<p class="text-ink-soft leading-relaxed">Официальный сайт олимпиады пока не указан в каталоге.</p>`}
             </div>
-            ${olympiad.source_url ? `
-            <p class="mt-6 text-sm text-ink-soft">
-                Источник информации:
-                <a href="${escAttr(olympiad.source_url)}" target="_blank" rel="noopener noreferrer" class="text-ink font-semibold underline underline-offset-4">${escHtml(olympiad.source_url)}</a>
-            </p>` : ''}
         </section>
+
+        ${sourceBlockHtml(source, olympiad)}
 
         ${isAdmin ? `
         <section class="mt-12">
@@ -153,20 +154,6 @@ async function renderOlympiad(olympiadId) {
             </p>
             <div class="mt-12">${universitiesHtml}</div>
         </section>
-
-        <section class="mt-20">
-            <h2 class="${UI.eyebrow}">Служебное</h2>
-            <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">
-                <div>
-                    <dt class="text-sm font-medium text-ink-faint">Добавлена</dt>
-                    <dd class="mt-2 text-base">${formatDate(olympiad.createdAt)}</dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-ink-faint">Обновлена</dt>
-                    <dd class="mt-2 text-base">${formatDate(olympiad.updatedAt)}</dd>
-                </div>
-            </dl>
-        </section>
     </article>`;
 
     const editBtn = document.getElementById('oly-edit');
@@ -174,4 +161,35 @@ async function renderOlympiad(olympiadId) {
         editBtn.addEventListener('click', () =>
             openOlympiadFormModal(olympiad, () => renderOlympiad(olympiadId)));
     }
+}
+
+
+/** Блок «Откуда взялась информация».
+ *
+ * Источник важен для доверия к каталогу: пользователь должен видеть, что
+ * перечень загружен из РСОШ, а не написан вручную. Если источник неизвестен,
+ * блок не показывается — «источника нет» не то же самое, что «источник РСОШ».
+ */
+function sourceBlockHtml(source, olympiad) {
+    const title = (source && source.title) || '';
+    const url = (source && source.source_url) || olympiad.source_url;
+    if (!title && !url) return '';
+
+    const titleHtml = title
+        ? `<p class="mt-4 text-base font-semibold">${escHtml(title)}</p>`
+        : '<p class="mt-4 text-base text-ink-soft">Документ с перечнем олимпиад РСОШ</p>';
+
+    const linkHtml = url
+        ? `<p class="mt-3 text-sm">
+               <a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer"
+                  class="text-ink font-semibold underline underline-offset-4">Открыть источник</a>
+           </p>`
+        : '';
+
+    return `
+        <section class="mt-14">
+            <h2 class="${UI.eyebrow}">Откуда взялась информация</h2>
+            ${titleHtml}
+            ${linkHtml}
+        </section>`;
 }
