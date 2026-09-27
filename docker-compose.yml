@@ -63,10 +63,6 @@ services:
     container_name: web
     environment:
       ENVIRONMENT: "${ENVIRONMENT:-development}"
-      # ВАЖНО: реальный HF_TOKEN был случайно добавлен в этот файл ранее.
-      # Он удалён; сам токен нужно отозвать на https://huggingface.co/settings/tokens.
-      # Если токен потребуется снова, передавайте его через .env:
-      #   HF_TOKEN: "${HF_TOKEN:-}"
       JWT_KEY: "${JWT_KEY:-change_this_secret_key}"
       DATABASE_URL: "${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/postgres}"
       REDIS_HOST: "redis"
@@ -74,11 +70,21 @@ services:
       CACHE_TTL: "${CACHE_TTL:-600}"
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-30}"
       TABLES_DIR: "/app/app/tables"
+      DOCS_DIR: "/app/app/tables/docs"
+      # Стратегия запуска импорта РСОШ: celery (в фоне) либо inline (в процессе
+      # API). auto — celery, если брокер доступен, иначе inline.
+      RSOSH_EXECUTION: "${RSOSH_EXECUTION:-auto}"
+      RSOSH_PDF_DPI: "${RSOSH_PDF_DPI:-300}"
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
     ports:
       - "5000:5000"
     volumes:
-      - ./app/tables:/app/app/tables
+      # Рабочее дерево вместо кода, запечённого в образ: правки в app/
+      # подхватываются без пересборки. requirements.txt при изменении требует
+      # `docker compose build web` (смотрите README).
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./scripts:/app/scripts
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
@@ -94,16 +100,6 @@ services:
     restart: unless-stopped
     networks:
       - project
-    develop:
-      watch:
-        - action: sync+restart
-          path: ./app
-          target: /app/app
-          ignore:
-            - __pycache__
-            - "*.pyc"
-        - action: rebuild
-          path: requirements.txt
 
   celery:
     build: .
@@ -118,8 +114,13 @@ services:
       CACHE_TTL: "${CACHE_TTL:-600}"
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-30}"
       TABLES_DIR: "/app/app/tables"
+      DOCS_DIR: "/app/app/tables/docs"
+      RSOSH_EXECUTION: "${RSOSH_EXECUTION:-auto}"
+      RSOSH_PDF_DPI: "${RSOSH_PDF_DPI:-300}"
     volumes:
-      - ./app/tables:/app/app/tables
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./scripts:/app/scripts
       - ml-models-cache:/app/.cache
     depends_on:
       postgres:
@@ -148,7 +149,9 @@ services:
       CACHE_TTL: "60"
       MAX_UPLOAD_MB: "1"
       TABLES_DIR: "/tmp/papaya-tables-test"
-      TABLE_IMPORT_IMAGES: "false"
+      DOCS_DIR: "/tmp/papaya-docs-test"
+      # В тестовом окружении нет celery-воркера: импорт выполняется в процессе API.
+      RSOSH_EXECUTION: "inline"
     depends_on:
       postgres:
         condition: service_healthy
@@ -157,8 +160,11 @@ services:
     volumes:
       # Тесты запускаются против рабочего дерева, а не против кода,
       # запечённого в образ: правки в app/ и tests/ подхватываются без rebuild.
+      # scripts/ тоже монтируется: entrypoint через ensure_db_schema.py
+      # накатывает миграции, и он должен быть из рабочего дерева.
       - ./app:/app/app
       - ./migrations:/app/migrations
+      - ./scripts:/app/scripts
       - ./tests:/app/tests
       - ./pytest.ini:/app/pytest.ini
       - ./alembic.ini:/app/alembic.ini

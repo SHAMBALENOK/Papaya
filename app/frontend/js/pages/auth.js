@@ -14,10 +14,10 @@ function renderAuth() {
     <div class="max-w-narrow mx-auto py-12 md:py-24">
 
         <div class="mb-16 md:mb-20">
-            <p class="${UI.eyebrow}">Олимпиады для школьников</p>
+            <p class="${UI.eyebrow}">Олимпиады и поступление</p>
             <h1 class="mt-5 text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.05] text-ink">Papaya<span class="text-ember" aria-hidden="true">.</span></h1>
             <p class="mt-7 text-lg text-ink-soft leading-relaxed max-w-md">
-                Всероссийские и региональные олимпиады — в одном удобном месте.
+                Какие олимпиады дают БВИ в вашем университете — в одном месте.
             </p>
         </div>
 
@@ -81,6 +81,7 @@ function renderAuth() {
             surname: userData && userData.surname,
             email: userData && userData.email,
             role: (userData && userData.role) || 'USER',
+            university_id: (userData && userData.university_id) || null,
         });
         renderHeader();
         navigate('#/');

@@ -23,8 +23,12 @@ services:
         value: "30"
       - key: COOKIE_SECURE
         value: "true"
-      - key: HF_TOKEN
-        sync: false
+      # Импорт РСОШ без брокера выполняется в процессе API.
+      - key: RSOSH_EXECUTION
+        value: "inline"
+      # OCR на бесплатном плане считают медленно: ниже разрешение рендеринга.
+      - key: RSOSH_PDF_DPI
+        value: "200"
       # Ограничение потоков для экономии памяти на CPU
       - key: OMP_NUM_THREADS
         value: "1"

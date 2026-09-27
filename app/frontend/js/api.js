@@ -1,6 +1,9 @@
 /* ==========================================================================
  * api.js — клиент API. Все запросы уходят с cookie (JWT: access/refresh).
  * Пути совпадают с роутерами FastAPI под префиксом /api/v1.
+ *
+ * Каталоги (университеты, олимпиады, поиск) публичные — регистрация для них
+ * не нужна: главный сценарий Papaya доступен гостю.
  * ========================================================================== */
 const API_BASE = '/api/v1';
 
@@ -15,8 +18,7 @@ function isJwtAuthError(status, data) {
 
 function redirectToAuthAfterJwtError() {
     store.clear();
-    if (typeof setChrome === 'function') setChrome(false);
-    if (typeof setFab === 'function') setFab(false);
+    if (typeof renderHeader === 'function') renderHeader();
     if (window.location.hash !== '#/auth') window.location.hash = '#/auth';
 }
 
@@ -44,39 +46,85 @@ const api = {
     },
 
     get(path, options) { return this.request('GET', path, null, false, options); },
-    post(path, body, options) { return this.request('POST', path, body, false, options); },
-    postForm(path, formData, options) { return this.request('POST', path, formData, true, options); },
+    post(path, body, options) { return this.post_(path, body, false, options); },
+    postForm(path, formData, options) { return this.post_(path, formData, true, options); },
+    post_(path, body, isFormData, options) {
+        return this.request('POST', path, body, isFormData, options);
+    },
 
     /* Аутентификация */
-    checkAuth()  { return this.get('/auth/'); },
     register(d)  { return this.post('/auth/register', d); },
     login(d)     { return this.post('/auth/login', d); },
     logout()     { return this.post('/auth/logout'); },
 
-    /* Текущий пользователь: GET /api/v1/ отдаёт полный профиль из JWT */
-    getMe()      { return this.get('/'); },
+    /* Текущий пользователь: GET /api/v1/ отдаёт полный профиль из JWT.
+       Для гостя ответ 401 — это норма, поэтому редиректа на /auth нет. */
+    getMe()      { return this.get('/', { skipAuthRedirect: true }); },
+    getUser(id)  { return this.get(`/user/${id}`); },
+    editUser(id, d) { return this.post(`/user/${id}/edit_info`, d); },
 
-    /* Главный экран: пользователь (с ролью) + все события */
-    getDashboard(options) { return this.get('/events/dashboard', options); },
-    getMyEvents()  { return this.get('/events/dashboard/my_events'); },
+    /* Каталоги (публичные) */
+    listUniversities(search) {
+        const query = search ? `?search=${encodeURIComponent(search)}` : '';
+        return this.get(`/universities${query}`, { skipAuthRedirect: true });
+    },
+    getUniversity(id) { return this.get(`/universities/${id}`, { skipAuthRedirect: true }); },
+    getUniversityOlympiads(id, includePending) {
+        const query = includePending ? '?include_pending=true' : '';
+        return this.get(`/universities/${id}/olympiads${query}`, { skipAuthRedirect: true });
+    },
+    addUniversity(d)     { return this.post('/universities/add_university', d); },
+    editUniversity(id, d) { return this.post(`/universities/edit_university/${id}`, d); },
+    requestBvi(universityId, olympiadId) {
+        return this.post(`/universities/${universityId}/bvi`, { olympiad_id: olympiadId });
+    },
+    removeBvi(universityId, olympiadId) {
+        return this.post(`/universities/${universityId}/bvi/remove`, { olympiad_id: olympiadId });
+    },
 
-    /* Пользователи */
-    getUsers()       { return this.get('/user/users'); },
-    getUser(id)      { return this.get(`/user/${id}`); },
-    editUser(id, d)  { return this.post(`/user/${id}/edit_info`, d); },
+    listOlympiads(search, includeArchived) {
+        const params = new URLSearchParams();
+        if (search) params.set('search', search);
+        if (includeArchived) params.set('include_archived', 'true');
+        const query = params.toString();
+        return this.get(`/olympiads${query ? `?${query}` : ''}`, { skipAuthRedirect: true });
+    },
+    getOlympiad(id)      { return this.get(`/olympiads/${id}`, { skipAuthRedirect: true }); },
+    getOlympiadUniversities(id) { return this.get(`/olympiads/${id}/universities`, { skipAuthRedirect: true }); },
+    addOlympiad(d)       { return this.post('/olympiads/add_olympiad', d); },
+    editOlympiad(id, d)  { return this.post(`/olympiads/edit_olympiad/${id}`, d); },
 
-    /* События — пути совпадают с app/routers/events.py */
-    getEvent(id)     { return this.get(`/events/${id}`); },
-    addEvent(d)      { return this.post('/events/add_event', d); },
-    editEvent(d)     { return this.post(`/events/edit_event/${d.id}`, d); },
-    addEventsPdf(fd) { return this.postForm('/events/add_events_via_tables', fd); },
+    /* Поиск по обоим каталогам */
+    search(q) { return this.get(`/search?q=${encodeURIComponent(q || '')}`, { skipAuthRedirect: true }); },
 
-    /* Администрирование (роль ADMIN на бэкенде) */
-    adminUsers()     { return this.get('/admin/users'); },
-    adminEvents()    { return this.get('/admin/events'); },
+    /* Документы-источники и импорт РСОШ (администратор) */
+    uploadDoc(formData) { return this.postForm('/docs/upload', formData); },
+    docFileUrl(id)      { return `${API_BASE}/docs/${id}/file`; },
+
+    listImports()             { return this.get('/imports'); },
+    startRsoshImport(docId)   { return this.post('/imports/rsosh', { doc_id: docId }); },
+    importPreview(id)         { return this.get(`/imports/${id}/preview`); },
+    confirmImport(id, body)   { return this.post(`/imports/${id}/confirm`, body || {}); },
+    rejectImport(id)          { return this.post(`/imports/${id}/reject`); },
+
+    /* Администрирование */
+    adminUsers()         { return this.get('/admin/users'); },
+    adminOlympiads()     { return this.get('/admin/olympiads'); },
+    adminBviLinks(status) {
+        const query = status ? `?status=${encodeURIComponent(status)}` : '';
+        return this.get(`/admin/bvi${query}`);
+    },
     banUser(id)      { return this.post(`/admin/ban/${id}`); },
     unbanUser(id)    { return this.post(`/admin/unban/${id}`); },
     grantAdmin(id)   { return this.post(`/admin/grant_admin/${id}`); },
     demoteAdmin(id)  { return this.post(`/admin/demote_admin/${id}`); },
-    archiveEvent(id) { return this.post(`/admin/archive_event/${id}`); },
+    assignUniversity(id, universityId) {
+        return this.post(`/admin/university/${id}`, { university_id: universityId || null });
+    },
+    setBviStatus(universityId, olympiadId, status) {
+        return this.post(`/universities/${universityId}/bvi/${olympiadId}/status`, { status });
+    },
+    archiveOlympiad(id, archived) {
+        return this.post(`/admin/archive_olympiad/${id}?archived=${archived === false ? 'false' : 'true'}`);
+    },
 };

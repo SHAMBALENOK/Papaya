@@ -54,12 +54,40 @@ async def _db_state() -> tuple[bool, bool]:
 
     url = os.environ['DATABASE_URL']
     dsn = url.replace(SCHEME, 'postgresql://', 1)
+    await _ensure_database(dsn)
     conn = await asyncpg.connect(dsn)
     try:
         has_version = await _table_exists(conn, 'alembic_version')
         has_users = await _table_exists(conn, 'users')
-        has_events = await _table_exists(conn, 'events')
-        return has_version, has_users or has_events
+        has_olympiads = await _table_exists(conn, 'olympiads')
+        return has_version, has_users or has_olympiads
+    finally:
+        await conn.close()
+
+
+async def _ensure_database(dsn: str) -> None:
+    """Создать целевую базу, если её ещё нет.
+
+    Alembic умеет создавать схему в пустой базе, но не саму базу: без этого
+    шага запуск на чистой машине (и на удалённой тестовой БД) падал бы с
+    «database does not exist» ещё до первой миграции.
+    """
+    import asyncpg
+
+    database = dsn.rsplit('/', 1)[-1].split('?')[0]
+    if not database or not database.replace('_', '').isalnum():
+        print('WARN: cannot parse database name from DATABASE_URL', file=sys.stderr)
+        return
+
+    admin_dsn = dsn.rsplit('/', 1)[0] + '/postgres'
+    conn = await asyncpg.connect(admin_dsn)
+    try:
+        exists = await conn.fetchval(
+            'SELECT 1 FROM pg_database WHERE datname = $1', database
+        )
+        if not exists:
+            print(f'INFO: creating database {database}')
+            await conn.execute(f'CREATE DATABASE "{database}"')
     finally:
         await conn.close()
 

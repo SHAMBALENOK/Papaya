@@ -72,7 +72,7 @@ async def find_user_by_id(user_id: str):
 # id, createdAt и updatedAt задаёт сервер.
 _USER_EDITABLE_FIELDS = frozenset({
     'name', 'surname', 'email', 'gender', 'bday', 'bio', 'phone',
-    'country', 'region', 'status', 'role', 'isActive',
+    'country', 'region', 'status', 'role', 'isActive', 'university_id',
 })
 
 
@@ -127,14 +127,9 @@ async def list_users(
 
 
 async def get_amount_of_users() -> int:
-    """Вернуть общее количество пользователей."""
+    """Количество пользователей в платформе."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(func.count()).select_from(Users)
         )
         return result.scalar()
-
-
-async def show_random_users(quantity: int):
-    """Обратная совместимость: вернуть активных пользователей."""
-    return await list_users(include_inactive=False, limit=quantity)

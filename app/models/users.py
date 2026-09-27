@@ -2,14 +2,26 @@ import uuid
 from datetime import datetime, timezone
 from app.database.base import Base
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import DateTime, Column, String, Boolean
+from sqlalchemy import DateTime, Column, ForeignKey, String, Boolean
 
 
 class Users(Base):
     """Пользователь Papaya.
 
-    Роль может быть одной из: USER (обычный школьник), EDITOR (создаёт и
-    правит события) или ADMIN (администратор платформы).
+    Роли платформы:
+
+    - ``USER`` — обычный посетитель: каталоги, поиск и страницы сущностей
+      доступны и без записи о каталоге;
+    - ``EDITOR`` — представитель университета: управляет связями своего
+      университета с олимпиадами каталога (поле ``university_id``). Создавать
+      новые олимпиады представитель не может;
+    - ``ADMIN`` — администратор Papaya: каталог олимпиад и университетов,
+      импорт документов РСОШ, модерация связей и пользователей.
+
+    ``university_id`` связывает пользователя максимум с одним университетом и
+    может быть NULL (у обычного пользователя и у администратора). Для роли
+    ``EDITOR`` поле обязательно: именно оно определяет, чьи связи БВИ
+    представитель вправе менять (object-level доступ).
     """
 
     __tablename__ = 'users'
@@ -27,6 +39,12 @@ class Users(Base):
     region = Column(String, nullable=True)
     status = Column(String, nullable=True)
     role = Column(String, default='USER')
+    university_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('universities.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
     isActive = Column(Boolean, default=True)
     # Индекс помогает сортировке списков пользователей по дате создания.
     # Timezone-aware, как и в events, чтобы обе таблицы имели общий контракт

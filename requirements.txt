@@ -1,26 +1,38 @@
-# Закреплённые версии зависимостей: контейнер собирается воспроизводимо,
-# без «плавающих» мажоров поверх свежей версии пакета каждый раз.
+# Зависимости backend-сервиса Papaya.
+# Комментарии на русском — файл открывают вручную, поэтому приоритет у читаемости.
+# Версии зафиксированы, чтобы сборка образа и тесты были воспроизводимы.
+
+# --- Web и API ---
 fastapi==0.141.1
 uvicorn==0.52.4
+gunicorn==21.2.0
+python-multipart==0.0.32
 werkzeug==3.1.8
+pydantic[email]==2.13.5
+
+# --- Аутентификация ---
+pyjwt==2.13.0
+bcrypt==5.0.0
+
+# --- База данных и схема ---
 sqlalchemy==2.0.52
 asyncpg==0.31.0
-python-dotenv==1.2.3
-gunicorn==21.2.0
-img2table==2.0.0
-openpyxl==3.1.5
-pyjwt==2.13.0
-pydantic[email]==2.13.5
-bcrypt==5.0.0
-pandas==3.0.5
-numpy==1.26.4
-opencv-python-headless==4.11.0.86
-python-multipart==0.0.32
-redis==6.4.0
-celery[redis]==5.6.3
-ddgs==9.16.0
 alembic==1.20.0
 
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2+cpu
-torchvision==0.17.2+cpu
+# --- Redis и фоновые задачи ---
+redis==6.4.0
+celery[redis]==5.6.3
+
+# --- Импорт документов РСОШ ---
+# pdfplumber   — таблицы PDF с текстовым слоем (структура документа);
+# pypdfium2    — рендеринг страниц PDF в растр для OCR;
+# pytesseract  — OCR (tesseract ставится apt-пакетом в образ);
+# opencv       — предобработка растра, определение ориентации, реконструкция
+#                таблиц по геометрии;
+# openpyxl     — нативное чтение ячеек XLSX (без OCR).
+pdfplumber==0.11.10
+pypdfium2==5.10.1
+pytesseract==0.3.13
+opencv-python-headless==4.11.0.86
+openpyxl==3.1.5
+numpy==1.26.4

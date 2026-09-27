@@ -1,11 +1,9 @@
 import logging
 import uuid
-from typing import Annotated, List
+from typing import Annotated
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Cookie, Depends, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +11,6 @@ from app import database, schemas
 from app.caching.main import (
     cache_user_after_write,
     get_cached_user,
-    get_cached_users,
     get_redis,
 )
 from app.core.cache_guard import safe_cache_write
@@ -27,87 +24,6 @@ user_page = APIRouter(
 )
 
 logger = logging.getLogger('papaya.user')
-
-
-class UserListItem(BaseModel):
-    id: str | None = None
-    name: str | None = None
-    surname: str | None = None
-    email: str | None = None
-    gender: str | None = None
-    bday: str | None = None
-    bio: str | None = None
-    phone: str | None = None
-    country: str | None = None
-    region: str | None = None
-    status: str | None = None
-    role: str | None = None
-    isActive: bool | None = None
-    createdAt: str | None = None
-    updatedAt: str | None = None
-
-
-class UsersListResponse(BaseModel):
-    user_id: str | None = None
-    user_name: str | None = None
-    user_surname: str | None = None
-    user_email: str | None = None
-    user_role: str | None = None
-    users: List[UserListItem]
-
-
-@user_page.get(
-    '/users',
-    response_model=UsersListResponse,
-    responses={
-        200: {'description': 'Current user info and list of active users'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Invalid token'},
-        404: {'description': 'User not found'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def users(
-    db: AsyncSession = Depends(get_db),
-    r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
-    try:
-        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        sub = jwt_data.get('sub')
-        user_obj = await get_cached_user(
-            r,
-            sub,
-            lambda: database.users.find_user_by_id(sub),
-        )
-        if not user_obj:
-            raise HTTPException(status_code=404, detail='User not found')
-
-        users_list = await get_cached_users(
-            r,
-            False,
-            lambda: database.users.list_users(include_inactive=False),
-        )
-        return JSONResponse(
-            status_code=200,
-            content={
-                'user_id': str(user_obj['id']),
-                'user_name': user_obj['name'],
-                'user_surname': user_obj['surname'],
-                'user_email': user_obj['email'],
-                'user_role': user_obj['role'],
-                'users': users_list,
-            },
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
 
 
 @user_page.get(

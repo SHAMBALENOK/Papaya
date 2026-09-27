@@ -4,6 +4,12 @@ Mutable objects and collections are cached under a generation number.  A
 successful write increments the relevant generations atomically, therefore a
 reader that was already filling an old cache entry can never overwrite the
 new generation with stale data.
+
+Кэшируются только профили пользователей: роль и привязка к университету
+читаются на каждом авторизованном запросе, и здесь важна свежесть. Каталоги
+университетов и олимпиад не кэшируются — это простые выборки из PostgreSQL,
+а инвалидация кэша каталога легко дала бы пользователю устаревшую карточку
+после правки администратором.
 """
 
 import json
@@ -22,7 +28,6 @@ _MISSING = object()
 
 
 _USERS_VERSION_KEY = 'papaya:cache:users:version'
-_EVENTS_VERSION_KEY = 'papaya:cache:events:version'
 
 
 def _user_version_key(user_id: str) -> str:
@@ -33,21 +38,9 @@ def _user_data_key(user_id: str, version: int) -> str:
     return f'papaya:cache:user:{user_id}:v:{version}'
 
 
-def _event_version_key(event_id: str) -> str:
-    return f'papaya:cache:event:{event_id}:version'
-
-
-def _event_data_key(event_id: str, version: int) -> str:
-    return f'papaya:cache:event:{event_id}:v:{version}'
-
-
 def _users_data_key(include_inactive: bool, version: int) -> str:
     scope = 'all' if include_inactive else 'active'
     return f'papaya:cache:users:{scope}:v:{version}'
-
-
-def _events_data_key(scope: str, version: int) -> str:
-    return f'papaya:cache:events:{scope}:v:{version}'
 
 
 def _connection_pool() -> aioredis.ConnectionPool:
@@ -140,20 +133,6 @@ async def get_cached_user(
     )
 
 
-async def get_cached_event(
-    r: aioredis.Redis,
-    event_id: str,
-    loader: Callable[[], Awaitable[dict | None]],
-) -> dict | None:
-    event_id = str(event_id)
-    return await _get_versioned(
-        r,
-        _event_version_key(event_id),
-        lambda version: _event_data_key(event_id, version),
-        loader,
-    )
-
-
 async def get_cached_users(
     r: aioredis.Redis,
     include_inactive: bool,
@@ -167,19 +146,6 @@ async def get_cached_users(
     )
 
 
-async def get_cached_events(
-    r: aioredis.Redis,
-    scope: str,
-    loader: Callable[[], Awaitable[list[dict]]],
-) -> list[dict]:
-    return await _get_versioned(
-        r,
-        _EVENTS_VERSION_KEY,
-        lambda version: _events_data_key(scope, version),
-        loader,
-    )
-
-
 async def cache_user_after_write(r: aioredis.Redis, user: dict) -> None:
     """Publish a user write and invalidate both active and admin lists."""
     user_id = str(user['id'])
@@ -188,39 +154,3 @@ async def cache_user_after_write(r: aioredis.Redis, user: dict) -> None:
     pipe.incr(_USERS_VERSION_KEY)
     user_version, _ = await pipe.execute()
     await _write_json(r, _user_data_key(user_id, int(user_version)), user)
-
-
-async def cache_event_after_write(r: aioredis.Redis, event: dict) -> None:
-    """Publish an event write and invalidate every event-list scope."""
-    event_id = str(event['id'])
-    pipe = r.pipeline(transaction=True)
-    pipe.incr(_event_version_key(event_id))
-    pipe.incr(_EVENTS_VERSION_KEY)
-    event_version, _ = await pipe.execute()
-    await _write_json(r, _event_data_key(event_id, int(event_version)), event)
-
-
-async def cache_events_after_write(
-    r: aioredis.Redis,
-    events: list[dict],
-) -> None:
-    """Publish a table import with one collection-generation change."""
-    if not events:
-        return
-
-    event_ids = [str(event['id']) for event in events]
-    pipe = r.pipeline(transaction=True)
-    pipe.incr(_EVENTS_VERSION_KEY)
-    for event_id in event_ids:
-        pipe.incr(_event_version_key(event_id))
-    versions = await pipe.execute()
-
-    pipe = r.pipeline(transaction=True)
-    for event, event_id, version in zip(events, event_ids, versions[1:]):
-        payload = json.dumps(event, ensure_ascii=False, separators=(',', ':'))
-        pipe.set(
-            _event_data_key(event_id, int(version)),
-            payload,
-            ex=CACHE_TTL,
-        )
-    await pipe.execute()

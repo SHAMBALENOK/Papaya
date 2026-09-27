@@ -1,1 +1,1 @@
-from . import users, database, events
+from . import bvi, database, docs, olympiads, universities, users

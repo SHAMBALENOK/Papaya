@@ -2,9 +2,6 @@
  * pages/profile.js — «Мой профиль».
  * Источник: GET /api/v1/ (полный объект пользователя).
  * Запасной источник: GET /api/v1/user/{id} — тот же UserResponse.
- *
- * userProfileHtml(u, { editable }) — общий рендер карточки,
- * используется также на #/users/{id}.
  * ========================================================================== */
 
 async function renderProfile() {
@@ -48,6 +45,7 @@ async function renderProfile() {
         surname: res.data.surname,
         email: res.data.email,
         role: res.data.role || 'USER',
+        university_id: res.data.university_id || null,
     });
     renderHeader();
 
@@ -78,9 +76,9 @@ function userProfileHtml(u, { editable = false } = {}) {
 
     return `
     <div class="max-w-narrow mx-auto py-4">
-        <a href="${editable ? '#/' : '#/users'}" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        <a href="#/" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
-            ${editable ? 'К каталогу' : 'К списку пользователей'}
+            На главную
         </a>
 
         <header class="mt-12 flex flex-col sm:flex-row sm:items-center gap-8">
@@ -91,7 +89,6 @@ function userProfileHtml(u, { editable = false } = {}) {
             </div>
             ${editable ? `
             <div class="flex flex-wrap gap-3 shrink-0">
-                <a href="#/my-events" class="${UI.btn} ${UI.btnSecondary}">Мои события</a>
                 <button id="btn-edit-profile" class="${UI.btn} ${UI.btnPrimary}">Редактировать</button>
             </div>` : ''}
         </header>
