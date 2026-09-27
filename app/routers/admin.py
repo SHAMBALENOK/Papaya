@@ -1,26 +1,29 @@
+"""Администрирование Papaya.
+
+Администратор отвечает за каталог и его наполнение:
+
+- пользователи: блокировка, роли, привязка представителя к университету;
+- олимпиады: архивирование/возврат из архива, ручное создание и правка;
+- заявки БВИ: подтверждение и снятие связей университет ↔ олимпиада.
+
+Все маршруты требуют роль ``ADMIN``: проверка общая и живёт в
+``app.core.deps.require_admin``.
+"""
+
 import logging
 import uuid
-from typing import Annotated, List
+from typing import List
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Cookie, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app import database, schemas
-from app.caching.main import (
-    cache_event_after_write,
-    cache_user_after_write,
-    get_cached_events,
-    get_cached_user,
-    get_cached_users,
-    get_redis,
-)
+from app.caching.main import cache_user_after_write, get_redis
+from app.core import deps
 from app.core.cache_guard import safe_cache_write
-from app.database.database import get_db
-import app.middlewares.tokenz.main as tokenz
-
 
 admin_page = APIRouter(
     prefix='/admin',
@@ -30,30 +33,13 @@ admin_page = APIRouter(
 logger = logging.getLogger('papaya.admin')
 
 
-async def _require_admin(
-    r: aioredis.Redis,
-    access_jwt: str | None,
-    refresh_jwt: str | None,
-) -> dict:
-    """Проверить JWT и роль ADMIN, используя актуальную версию пользователя."""
-    jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-    user_id = jwt_data.get('sub')
-    admin_obj = await get_cached_user(
-        r,
-        user_id,
-        lambda: database.users.find_user_by_id(user_id),
-    )
-    if not admin_obj or admin_obj.get('role') != 'ADMIN':
-        raise HTTPException(status_code=403, detail='permission denied')
-    return admin_obj
-
-
 class AdminUserListItem(BaseModel):
     id: str | None = None
     name: str | None = None
     surname: str | None = None
     email: str | None = None
     role: str | None = None
+    university_id: str | None = None
     isActive: bool | None = None
     createdAt: str | None = None
 
@@ -62,46 +48,52 @@ class AdminUsersResponse(BaseModel):
     users: List[AdminUserListItem]
 
 
-class AdminEventListItem(BaseModel):
+class AdminOlympiadListItem(BaseModel):
     id: str | None = None
-    owner: str | None = None
     name: str | None = None
-    disc: str | None = None
-    preview_picture: str | None = None
-    picture: str | None = None
-    isActive: bool | None = None
+    status: str | None = None
+    source_doc_id: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
 
 
-class AdminEventsResponse(BaseModel):
-    events: List[AdminEventListItem]
+class AdminOlympiadsResponse(BaseModel):
+    olympiads: List[AdminOlympiadListItem]
+
+
+class AdminBviListItem(BaseModel):
+    id: str | None = None
+    university_id: str | None = None
+    university_name: str | None = None
+    olympiad_id: str | None = None
+    olympiad_name: str | None = None
+    status: str | None = None
+    createdAt: str | None = None
+
+
+class AdminBviResponse(BaseModel):
+    links: List[AdminBviListItem]
+
+
+class UniversityAssignment(BaseModel):
+    """Привязка пользователя к университету (роль представителя).
+
+    Пустой ``university_id`` отвязывает представителя от университета.
+    """
+
+    university_id: str | None = None
 
 
 def _serialize_user(user: dict) -> dict:
-    """Пользователь для админ-панели: роль и активность обязательны."""
     return {
         'id': user.get('id'),
         'name': user.get('name'),
         'surname': user.get('surname'),
         'email': user.get('email'),
         'role': user.get('role'),
+        'university_id': user.get('university_id'),
         'isActive': user.get('isActive'),
         'createdAt': user.get('createdAt'),
-    }
-
-
-def _serialize_event(event: dict) -> dict:
-    return {
-        'id': event.get('id'),
-        'owner': event.get('owner'),
-        'name': event.get('name'),
-        'disc': event.get('disc'),
-        'preview_picture': event.get('preview_picture'),
-        'picture': event.get('picture'),
-        'isActive': event.get('isActive'),
-        'createdAt': event.get('createdAt'),
-        'updatedAt': event.get('updatedAt'),
     }
 
 
@@ -115,70 +107,106 @@ def _serialize_event(event: dict) -> dict:
         500: {'description': 'Internal server error'},
     },
 )
-async def list_users(
-    db: AsyncSession = Depends(get_db),
-    r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
+async def list_users(current_user: deps.AdminUser = None):
     """Все пользователи, включая заблокированных."""
     try:
-        await _require_admin(r, access_jwt, refresh_jwt)
-        users = await get_cached_users(
-            r,
-            True,
-            lambda: database.users.list_users(include_inactive=True),
-        )
+        users = await database.users.list_users(include_inactive=True)
         return JSONResponse(
             status_code=200,
             content={'users': [_serialize_user(user) for user in users]},
         )
-    except HTTPException:
-        raise
     except Exception:
         logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 @admin_page.get(
-    '/events',
-    response_model=AdminEventsResponse,
+    '/olympiads',
+    response_model=AdminOlympiadsResponse,
     responses={
-        200: {'description': 'List of all events including archived'},
+        200: {'description': 'Полный каталог олимпиад, включая архивные'},
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         500: {'description': 'Internal server error'},
     },
 )
-async def list_events(
-    db: AsyncSession = Depends(get_db),
-    r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
-    """Все события, включая архивные."""
+async def list_olympiads(current_user: deps.AdminUser = None):
+    """Каталог олимпиад включая архивные (вне актуального перечня РСОШ)."""
     try:
-        await _require_admin(r, access_jwt, refresh_jwt)
-        events = await get_cached_events(
-            r,
-            'all',
-            lambda: database.events.list_events(active_only=False),
-        )
-        return JSONResponse(
-            status_code=200,
-            content={'events': [_serialize_event(event) for event in events]},
-        )
-    except HTTPException:
-        raise
+        olympiads = await database.olympiads.list_olympiads(status=None)
+        return {
+            'olympiads': [
+                {
+                    'id': item.get('id'),
+                    'name': item.get('name'),
+                    'status': item.get('status'),
+                    'source_doc_id': item.get('source_doc_id'),
+                    'createdAt': item.get('createdAt'),
+                    'updatedAt': item.get('updatedAt'),
+                }
+                for item in olympiads
+            ],
+        }
     except Exception:
         logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.get(
+    '/bvi',
+    response_model=AdminBviResponse,
+    responses={
+        200: {'description': 'Заявки и подтверждённые связи БВИ'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def list_bvi_links(
+    status: str | None = None,
+    current_user: deps.AdminUser = None,
+):
+    """Очередь модерации: заявки университетов на связи БВИ."""
+    try:
+        links = await database.bvi.list_links(status=status)
+        enriched: list[dict] = []
+        for link in links:
+            university = await database.universities.get_university(
+                link['university_id']
+            )
+            olympiad = await database.olympiads.get_olympiad(link['olympiad_id'])
+            enriched.append(
+                {
+                    'id': link.get('id'),
+                    'university_id': link.get('university_id'),
+                    'university_name': (university or {}).get('name'),
+                    'olympiad_id': link.get('olympiad_id'),
+                    'olympiad_name': (olympiad or {}).get('name'),
+                    'status': link.get('status'),
+                    'createdAt': link.get('createdAt'),
+                }
+            )
+        return {'links': enriched}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+async def _change_user(
+    user_id: uuid.UUID,
+    ins: dict,
+    r: aioredis.Redis,
+) -> dict:
+    """Изменить пользователя и сбросить версионный кэш ролей.
+
+    Роль читается через versioned-кэш Redis, поэтому после записи кэш обязан
+    быть инвалидирован — иначе понижение прав не действует до истечения JWT.
+    """
+    updated = await database.users.edit_user(user_id, ins)
+    if not updated:
+        raise HTTPException(status_code=404, detail='User not found')
+    await safe_cache_write(cache_user_after_write(r, updated))
+    return updated
 
 
 @admin_page.post(
@@ -194,27 +222,17 @@ async def list_events(
 )
 async def ban(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
+    current_user: deps.AdminUser = None,
 ):
     """Заблокировать пользователя (isActive = False)."""
     try:
-        await _require_admin(r, access_jwt, refresh_jwt)
-        updated_user = await database.users.edit_user(user_id, {'isActive': False})
-        if not updated_user:
-            raise HTTPException(status_code=404, detail='User not found')
-        await safe_cache_write(cache_user_after_write(r, updated_user))
-        return updated_user
+        return await _change_user(user_id, {'isActive': False}, r)
     except HTTPException:
         raise
     except Exception:
         logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 @admin_page.post(
@@ -230,165 +248,157 @@ async def ban(
 )
 async def unban(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
+    current_user: deps.AdminUser = None,
 ):
     """Разблокировать пользователя (isActive = True)."""
     try:
-        await _require_admin(r, access_jwt, refresh_jwt)
-        updated_user = await database.users.edit_user(user_id, {'isActive': True})
-        if not updated_user:
-            raise HTTPException(status_code=404, detail='User not found')
-        await safe_cache_write(cache_user_after_write(r, updated_user))
-        return updated_user
+        return await _change_user(user_id, {'isActive': True}, r)
     except HTTPException:
         raise
     except Exception:
         logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
-
-
-@admin_page.post(
-    '/archive_event/{event_id}',
-    response_model=schemas.events.EventResponse,
-    responses={
-        200: {'description': 'Event archived successfully'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
-        404: {'description': 'Event not found'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def archive_event(
-    event_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
-    """Перенести событие в архив (isActive = False)."""
-    try:
-        await _require_admin(r, access_jwt, refresh_jwt)
-        updated_event = await database.events.edit_event(
-            event_id,
-            {'isActive': False},
-        )
-        if not updated_event:
-            raise HTTPException(status_code=404, detail='Event not found')
-        # Обновляет карточку события и меняет поколение всех списков. Поэтому
-        # каталог сразу скрывает архивное событие, а админка видит его архивным.
-        await safe_cache_write(cache_event_after_write(r, updated_event))
-        return updated_event
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 @admin_page.post(
     '/grant_admin/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-200: {'description': 'Admin role granted'},
-         401: {'description': 'Access token missing'},
-         403: {'description': 'Admin role required'},
-         404: {'description': 'User not found'},
-         409: {'description': 'User is already ADMIN'},
+        200: {'description': 'Admin role granted'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'User not found'},
+        409: {'description': 'User is already ADMIN'},
         500: {'description': 'Internal server error'},
     },
 )
 async def grant_admin(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
+    current_user: deps.AdminUser = None,
 ):
     """Назначить роль ADMIN."""
     try:
-        await _require_admin(r, access_jwt, refresh_jwt)
-        to_user = await get_cached_user(
-            r,
-            user_id,
-            lambda: database.users.find_user_by_id(user_id),
-        )
+        to_user = await database.users.find_user_by_id(user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'ADMIN':
-            raise HTTPException(
-                status_code=409,
-                detail='User is already ADMIN',
-            )
-
-        updated_user = await database.users.edit_user(user_id, {'role': 'ADMIN'})
-        if not updated_user:
-            raise HTTPException(status_code=404, detail='User not found')
-        await safe_cache_write(cache_user_after_write(r, updated_user))
-        return updated_user
+            raise HTTPException(status_code=409, detail='User is already ADMIN')
+        return await _change_user(user_id, {'role': 'ADMIN'}, r)
     except HTTPException:
         raise
     except Exception:
         logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 @admin_page.post(
     '/demote_admin/{user_id}',
     response_model=schemas.users.UserResponse,
     responses={
-200: {'description': 'Admin role removed'},
-         401: {'description': 'Access token missing'},
-         403: {'description': 'Admin role required'},
-         404: {'description': 'User not found'},
-         409: {'description': 'User is already USER'},
+        200: {'description': 'Admin role removed'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'User not found'},
+        409: {'description': 'User is already USER'},
         500: {'description': 'Internal server error'},
     },
 )
 async def demote_admin(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
+    current_user: deps.AdminUser = None,
 ):
     """Снять роль ADMIN до USER."""
     try:
-        await _require_admin(r, access_jwt, refresh_jwt)
-        to_user = await get_cached_user(
-            r,
-            user_id,
-            lambda: database.users.find_user_by_id(user_id),
-        )
+        to_user = await database.users.find_user_by_id(user_id)
         if not to_user:
             raise HTTPException(status_code=404, detail='User not found')
         if to_user.get('role') == 'USER':
-            raise HTTPException(
-                status_code=409,
-                detail='User is already USER',
-            )
-
-        updated_user = await database.users.edit_user(user_id, {'role': 'USER'})
-        if not updated_user:
-            raise HTTPException(status_code=404, detail='User not found')
-        await safe_cache_write(cache_user_after_write(r, updated_user))
-        return updated_user
+            raise HTTPException(status_code=409, detail='User is already USER')
+        return await _change_user(user_id, {'role': 'USER'}, r)
     except HTTPException:
         raise
     except Exception:
         logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.post(
+    '/university/{user_id}',
+    response_model=schemas.users.UserResponse,
+    responses={
+        200: {'description': 'University representative assigned or detached'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'User or university not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def assign_university(
+    user_id: uuid.UUID,
+    payload: UniversityAssignment,
+    r: aioredis.Redis = Depends(get_redis),
+    current_user: deps.AdminUser = None,
+):
+    """Привязать пользователя к университету (роль представителя).
+
+    Пустой ``university_id`` отвязывает пользователя от университета.
+    """
+    try:
+        if payload.university_id:
+            university = await database.universities.get_university(
+                payload.university_id
+            )
+            if not university:
+                raise HTTPException(status_code=404, detail='University not found')
+        return await _change_user(
+            user_id,
+            {'university_id': payload.university_id},
+            r,
         )
+    except HTTPException:
+        raise
+    except IntegrityError:
+        logger.warning('University assignment conflict for user %s', user_id)
+        raise HTTPException(status_code=404, detail='University not found')
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.post(
+    '/archive_olympiad/{olympiad_id}',
+    response_model=schemas.olympiads.OlympiadResponse,
+    responses={
+        200: {'description': 'Olympiad archived or restored'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Olympiad not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def archive_olympiad(
+    olympiad_id: uuid.UUID,
+    archived: bool = True,
+    current_user: deps.AdminUser = None,
+):
+    """Перевести олимпиаду в архив или вернуть в актуальный каталог.
+
+    Архив означает «олимпиады нет в актуальном перечне РСОШ»: запись
+    сохраняется, но исчезает из публичного каталога.
+    """
+    try:
+        updated = await database.olympiads.edit_olympiad(
+            olympiad_id,
+            {'status': 'ARCHIVED' if archived else 'PUBLISHED'},
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail='Olympiad not found')
+        return updated
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')

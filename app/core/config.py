@@ -56,10 +56,17 @@ TABLES_DIR = os.getenv(
     'TABLES_DIR',
     os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tables')),
 )
-ALLOWED_TABLE_EXTENSIONS = {'.pdf', '.xlsx'}
-
-# --- Опциональные токены внешних сервисов ----------------------------------
-HF_TOKEN = os.getenv('HF_TOKEN') or None
+ALLOWED_TABLE_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.png', '.jpg', '.jpeg'}
+# Каталог загруженных документов-источников (PDF/XLSX/изображения РСОШ).
+# Отдельный от TABLES_DIR: загруженный документ хранится постоянно и является
+# источником данных, а во временном каталоге лежат только промежуточные файлы.
+DOCS_DIR = os.getenv('DOCS_DIR') or os.path.join(TABLES_DIR, 'docs')
+# Разрешение рендеринга PDF-страниц для OCR: 300 dpi — рабочее значение для
+# таблиц РСОШ, 600 — запас для мелкого шрифта скана.
+RSOSH_PDF_DPI = _env_int('RSOSH_PDF_DPI', 300)
+# Стратегия запуска импорта РСОШ: celery (в фоне), inline (в процессе API)
+# либо auto — celery, если брокер доступен, иначе inline.
+RSOSH_EXECUTION = os.getenv('RSOSH_EXECUTION', 'auto').strip().casefold()
 
 # Значения-заглушки, которые запрещено использовать в production
 _INSECURE_JWT_DEFAULTS = {'change_this_secret_key', 'secret', 'changeme'}

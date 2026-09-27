@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Papaya — олимпиады для школьников</title>
-    <meta name="description" content="Papaya — всероссийские и региональные олимпиады для школьников в одном месте.">
+    <title>Papaya — какие олимпиады дают БВИ в университете</title>
+    <meta name="description" content="Papaya помогает узнать, какие олимпиады дают БВИ (поступление без вступительных испытаний) в конкретных университетах.">
 
     <!--
       Шрифтовая пара: Inter (основной гротеск) + Public Sans (резерв).
@@ -21,7 +21,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
     /* ======================================================================
-       ДИЗАЙН-ТОКЕНЫ — строгий просторный минимализм (dashboard)
+       ДИЗАЙН-ТОКЕНЫ — строгий просторный минимализм
 
        БАЗОВАЯ ПАЛИТРА (чёрно-белая, максимальная читаемость):
          paper      #FFFFFF  поверхности (карточки, сайдбар, модалки)
@@ -33,37 +33,22 @@
          mist       #F5F5F5  подложки полей и вкладок
          mist.deep  #ECECEC  hover подложек
 
-       ДОПОЛНИТЕЛЬНАЯ ПАЛИТРА (по ТЗ):
-         sage       #CBE896  успех
+       ДОПОЛНИТЕЛЬНАЯ ПАЛИТРА:
+         sage       #CBE896  успех, «даёт БВИ»
          sand       #C6BFA9  нейтральные бейджи / вторичные кнопки
-         ember      #FF7F11  акцент (логотип, FAB, аватары, маркер)
+         ember      #FF7F11  акцент (логотип, маркеры, ссылки)
          crimson    #FF1B1C  ошибки / опасные действия
-
-       КОНТРАСТ на акцентах: текст всегда ink (#1A1A1A):
-         sage 14.2:1 · sand 9.5:1 · ember 6.9:1 · crimson 4.5:1 (AA).
-         Белый текст на ember/crimson не используется.
 
        ОТСТУПЫ («воздух» — единственный разделитель, border: none):
          Базовый шаг — 4px (шкала Tailwind).
          Сайдбар 240px, контент px-6…px-12 / py-12…py-16.
          Секции — вертикальные разрывы py-14…py-20.
          Гриды каталога — gap-8; списки-строки — space-y-6.
-         Карточки — p-8…p-12. Заголовок→контент mt-6…mt-8.
-
-       ТЕНИ (soft elevation вместо рамок), три уровня:
-         elev-1 — покой (карточки, сайдбар);
-         elev-2 — hover / интерактив;
-         elev-3 — модалки, тосты, FAB.
-         Alpha 0.04–0.14 от #1A1A1A — нейтральные тени.
+         Карточки — p-8…p-12.
 
        ГЕОМЕТРИЯ:
          Поверхности — 0px (rounded-none);
          интерактив (кнопки, поля, бейджи) — 4px максимум.
-
-       ТИПОГРАФИКА:
-         Заголовки — Inter 700–900, tracking-tight, leading 1.05–1.15;
-         тело — 16–18px, leading-relaxed / 1.8 для длинных текстов;
-         надзаголовки (.eyebrow) — 12px uppercase, tracking 0.18em.
        ====================================================================== */
     tailwind.config = {
         theme: {
@@ -110,7 +95,7 @@
     };
     </script>
 
-    <link rel="stylesheet" href="/frontend/css/style.css?v=2.0.0">
+    <link rel="stylesheet" href="/frontend/css/style.css?v=3.0.0">
 </head>
 <body class="bg-cream text-ink font-sans antialiased min-h-screen">
 
@@ -124,12 +109,12 @@
     <div id="sidebar-backdrop" class="hidden fixed inset-0 z-40 bg-ink/40 md:hidden" hidden></div>
 
     <!--
-      Сайдбар дашборда: белая поверхность, elev-1 вместо границы.
+      Сайдбар: белая поверхность, elev-1 вместо границы.
       Desktop — фиксированная колонка 240px; mobile — выезжающая панель.
     -->
     <aside id="sidebar"
            class="fixed inset-y-0 left-0 z-50 w-sidebar bg-white shadow-elev-1 flex-col"
-           aria-label="Навигация дашборда">
+           aria-label="Навигация">
         <div class="h-20 px-6 flex items-center justify-between shrink-0">
             <a href="#/" class="text-2xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
                 Papaya<span class="text-ember" aria-hidden="true">.</span>
@@ -145,7 +130,7 @@
     </aside>
 
     <div id="app-frame" class="min-h-screen transition-[padding] duration-200">
-        <!-- Мобильная шапка: видна только на узких экранах, когда chrome включён -->
+        <!-- Мобильная шапка -->
         <header id="header" class="hidden sticky top-0 z-30 bg-white/95 backdrop-blur shadow-elev-1 md:hidden">
             <div class="h-16 px-4 flex items-center justify-between gap-4">
                 <button type="button" id="sidebar-open" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"
@@ -166,58 +151,42 @@
           временно недоступны. После запуска SPA роутер заменяет этот HTML.
         -->
         <main id="page" class="mx-auto max-w-content px-6 md:px-10 lg:px-12 py-12 md:py-16">
-            <div class="pb-8 md:pb-12">
-                <header class="flex items-center justify-between gap-6 pb-16 md:pb-24" aria-label="Шапка визитки">
-                    <a href="#/" class="text-2xl font-extrabold tracking-tight text-ink">
-                        Papaya<span class="text-ember" aria-hidden="true">.</span>
+            <section class="max-w-3xl">
+                <p class="eyebrow">БВИ в университетах</p>
+                <h1 class="mt-6 text-4xl md:text-6xl font-black tracking-tight leading-[1.05]">
+                    Какие олимпиады дают <span class="text-ember">БВИ</span> в нужном мне университете?
+                </h1>
+                <p class="mt-8 text-lg text-ink-soft leading-relaxed">
+                    Papaya собирает официальные перечни РСОШ и связывает их с университетами:
+                    найдите университет, посмотрите олимпиады, дающие поступление без вступительных
+                    испытаний, и перейдите на сайт олимпиады.
+                </p>
+                <div class="mt-10 flex flex-wrap gap-3">
+                    <a href="#/universities" class="inline-flex items-center justify-center font-semibold rounded bg-ink text-white px-6 py-3 shadow-elev-1">
+                        Каталог университетов
                     </a>
-                    <a href="#/auth" class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-ink-soft">Войти</a>
-                </header>
-
-                <section class="grid gap-12 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)] lg:items-center pb-24 md:pb-32">
-                    <div>
-                        <p class="eyebrow">Сервис для школьников</p>
-                        <h1 class="mt-6 text-5xl md:text-7xl font-black tracking-tight leading-[1.02] max-w-4xl">
-                            Олимпиады —<br>
-                            <span class="text-ember">в одном месте.</span>
-                        </h1>
-                        <p class="mt-8 text-lg md:text-xl text-ink-soft leading-relaxed max-w-2xl">
-                            Papaya — веб-сервис, где собрана информация о всероссийских и региональных олимпиадах для школьников.
-                        </p>
-                        <div class="mt-10">
-                            <a href="#/auth" class="inline-flex items-center justify-center font-semibold rounded bg-ink text-white px-6 py-3 shadow-elev-1">
-                                Войти или зарегистрироваться
-                            </a>
-                        </div>
-                    </div>
-
-                    <div class="bg-white shadow-elev-2 p-8 md:p-10" aria-label="Основные возможности Papaya">
-                        <p class="text-xs font-semibold text-ink-soft uppercase tracking-[0.14em]">Papaya</p>
-                        <ul class="mt-8 space-y-5 text-ink-soft leading-relaxed">
-                            <li><strong class="text-ink">Каталог олимпиад</strong><br>Всероссийские и региональные мероприятия.</li>
-                            <li><strong class="text-ink">Личный профиль</strong><br>Регистрация, вход и управление данными профиля.</li>
-                            <li><strong class="text-ink">Работа с событиями</strong><br>Добавление, изменение и импорт данных из PDF-таблиц.</li>
-                        </ul>
-                    </div>
-                </section>
-            </div>
+                    <a href="#/olympiads" class="inline-flex items-center justify-center font-semibold rounded bg-sand text-ink px-6 py-3 shadow-elev-1">
+                        Каталог олимпиад
+                    </a>
+                </div>
+            </section>
         </main>
     </div>
 
     <div id="toast-container" aria-live="polite"
          class="fixed top-6 right-6 z-[60] flex flex-col gap-3 pointer-events-none"></div>
 
-    <script src="/frontend/js/store.js?v=2.0.0"></script>
-    <script src="/frontend/js/api.js?v=2.1.0"></script>
-    <script src="/frontend/js/pages/auth.js?v=2.1.0"></script>
-    <script src="/frontend/js/pages/welcome.js?v=2.1.0"></script>
-    <script src="/frontend/js/pages/dashboard.js?v=2.0.0"></script>
-    <script src="/frontend/js/pages/event.js?v=2.0.0"></script>
-    <script src="/frontend/js/pages/profile.js?v=2.0.0"></script>
-    <script src="/frontend/js/pages/users.js?v=2.0.0"></script>
-    <script src="/frontend/js/pages/myevents.js?v=2.0.0"></script>
-    <script src="/frontend/js/pages/admin.js?v=2.0.0"></script>
-    <script src="/frontend/js/router.js?v=2.1.0"></script>
-    <script src="/frontend/js/app.js?v=2.1.1"></script>
+    <script src="/frontend/js/store.js?v=3.0.0"></script>
+    <script src="/frontend/js/api.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/auth.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/home.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/universities.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/olympiads.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/search.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/myuniversity.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/profile.js?v=3.0.0"></script>
+    <script src="/frontend/js/pages/admin.js?v=3.0.0"></script>
+    <script src="/frontend/js/router.js?v=3.0.0"></script>
+    <script src="/frontend/js/app.js?v=3.0.0"></script>
 </body>
 </html>

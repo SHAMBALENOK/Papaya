@@ -1,5 +1,5 @@
-# Базовый образ закреплён по digest: тег python:3.11-slim-bookworm мутабелен,
-# а digest гарантирует воспроизводимый результат.
+# Базовый образ python:3.11-slim-bookworm (@digest — зафиксированный образ).
+# В образ ставится Tesseract OCR: без него не читаются сканы документов РСОШ.
 FROM python:3.11-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
 
 WORKDIR /app
@@ -7,19 +7,15 @@ WORKDIR /app
 RUN apt-get update -o Acquire::Retries=10 -o Acquire::http::Timeout="60" -o Acquire::https::Timeout="60" && \
     apt-get install -y --fix-missing --no-install-recommends \
     ca-certificates curl wget unzip libgl1 libglib2.0-0 libgomp1 \
-    gcc python3-dev tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng \
+    tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng tesseract-ocr-osd \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    torch==2.2.2+cpu torchvision==0.17.2+cpu \
-    --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r requirements.txt
-
-RUN apt-get purge -y --auto-remove gcc python3-dev && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apt-get purge -y --auto-remove && \
     rm -rf /root/.cache /tmp/*
 
 COPY . .

@@ -15,12 +15,12 @@ task_queue.conf.update(
     task_serializer='json',
     result_serializer='json',
     accept_content=['json'],
-    # Время обработки пользовательского PDF зависит от его размера. На уровне
-    # Celery нет ни hard-, ни soft-limit; HTTP-маршрут также ждёт без timeout.
+    # Время обработки документа РСОШ зависит от количества страниц и от того,
+    # потребуется ли OCR. На уровне Celery нет ни hard-, ни soft-limit.
     task_time_limit=None,
     task_soft_time_limit=None,
     imports=(
-        'app.middlewares.parse_tables.pdf_processing',
+        'app.rsosh.worker',
     ),
 )
 

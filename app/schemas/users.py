@@ -32,7 +32,8 @@ class LoginRequest(BaseModel):
     password: str
 
 class UserUpdate(BaseModel):
-    """Частичное обновление профиля. role и isActive нельзя менять через этот endpoint."""
+    """Частичное обновление профиля. role, isActive и university_id нельзя
+    менять через этот endpoint — это делает администратор."""
     name: Optional[str] = None
     surname: Optional[str] = None
     email: Optional[EmailStr] = None
@@ -53,6 +54,7 @@ class UserResponse(UserBase):
     region: Optional[str] = None
     status: Optional[str] = None
     role: str = 'USER'
+    university_id: Optional[UUID] = None
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 

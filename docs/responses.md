@@ -1,248 +1,379 @@
-# Papaya API — Responses Reference
+# Papaya API — справочник ответов
 
-> Branch: `patch0.5` | Base path: `/api/v1`
+> Базовый путь: `/api/v1`. Полная интерактивная схема: http://localhost:5000/docs
+>
+> Документ описывает фактические ответы API: состав полей, коды и смысл.
+> Примеры сокращены до существенных полей.
+
+## Общие правила
+
+- Ошибка всегда в формате `{"detail": ...}`; внутренние детали исключений
+  наружу не отдаются.
+- Неизвестный путь под `/api/v1/` → `404 {"detail": "Not found"}` (не HTML SPA).
+- Каталоги и поиск публичные: авторизация не требуется.
+- Авторизация — JWT в HttpOnly-cookies (`access_jwt`, `refresh_jwt`).
+- Роль читается из актуальной версии пользователя (кэш с версионированием),
+  поэтому понижение прав действует сразу.
 
 ---
 
 ## GET /
 
-**Суть:** Главная страница приложения. Проверяет авторизацию пользователя через JWT-токены (access + refresh в cookies), извлекает профиль из БД и возвращает данные пользователя вместе со списком случайных событий (до 10 записей из таблицы `event`). Служит точкой входа в приложение после авторизации.
+Текущий пользователь по cookie-токенам.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | OK | `{"user_id": str, "user_name": str, "user_surname": str, "user_email": str, "events": [{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}, ...]}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid refresh or access token | `{"detail": "..."}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## GET /auth/
-
-**Суть:** Страница авторизации/регистрации. Проверяет, есть ли у пользователя валидные JWT-токены. Если пользователь уже авторизован — возвращает 403 (повторный вход не требуется). Если токены отсутствуют или невалидны — страница доступна для ввода данных. По сути это gate-маршрут, определяющий, показывать ли форму входа или редиректить в приложение.
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | OK (пользователь не авторизован — страница доступна) | `null` |
-| 403 | Already signed in | `{"detail": "Already signed in"}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
+| 200 | Профиль текущего пользователя | `{"id", "email", "name", "surname", "role", "university_id", "isActive", "gender", "bday", "bio", "phone", "country", "region", "status", "createdAt", "updatedAt"}` |
+| 401 | Access token missing | `{"detail": "Access token missing"}` |
+| 403 | Invalid token | `{"detail": "Invalid access token"}` |
+| 404 | Пользователь не найден | `{"detail": "User not found"}` |
+| 500 | Внутренняя ошибка | `{"detail": "Internal server error"}` |
 
 ---
 
 ## POST /auth/register
 
-**Суть:** Регистрация нового пользователя. Принимает данные профиля и пароль, валидирует пароль через регулярное выражение (`re_check`), хеширует его, создаёт запись в таблице `user` в PostgreSQL. При успехе генерирует пару JWT-токенов (access — 600s, refresh — 1209600s / 14 дней) и устанавливает их в httpOnly cookies. Возвращает полный профиль пользователя.
+**Request body:** `{"name": str, "surname": str, "email": str, "password": str}`
 
-**Request body:** `UserCreate`
-```json
-{
-  "id": "str",
-  "name": "str",
-  "surname": "str",
-  "email": "str",
-  "isActive": true,
-  "password": "str"
-}
-```
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Успешная регистрация, токены установлены в cookies | `UserResponse`: `{"id": str, "name": str, "surname": str, "email": str, "isActive": bool, "gender": str|null, "bday": str|null, "bio": str|null, "phone": str|null, "country": str|null, "region": str|null, "status": str|null}` |
-| 400 | Пароль не соответствует требованиям (длина, символы и т.д.) | `{"detail": "<reason from re_check>"}` |
-| 409 | Пользователь с таким email уже существует | `{"detail": "You already have account"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
+| 201 | Пользователь создан, cookies установлены | `UserResponse` (см. `GET /`) |
+| 400 | Пароль не проходит проверку | `{"detail": "Пароль должен содержать минимум 8 символов"}` |
+| 409 | Email уже занят | `{"detail": "You already have account"}` |
+| 422 | Ошибка валидации | `{"detail": [...]}` |
 
 ---
 
 ## POST /auth/login
 
-**Суть:** Вход в систему. Принимает email и пароль, ищет пользователя в БД по email, сравнивает хеш пароля. При успехе генерирует пару JWT-токенов и устанавливает их в httpOnly cookies. Возвращает полный профиль пользователя. Не создаёт нового пользователя — только аутентифицирует существующего.
-
-**Request body:** `UserCreate`
-```json
-{
-  "id": "str",
-  "name": "str",
-  "surname": "str",
-  "email": "str",
-  "isActive": true,
-  "password": "str"
-}
-```
+**Request body:** `{"email": str, "password": str}`
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Успешный вход, токены установлены в cookies | `UserResponse`: `{"id": str, "name": str, "surname": str, "email": str, "isActive": bool, "gender": str|null, ...}` |
-| 404 | Email не найден в базе данных | `{"detail": "your email is not in database, try to register"}` |
-| 401 | Неверный пароль | `{"detail": "incorrect email or password"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## GET /auth/logout
-
-**Суть:** Выход из системы. Валидирует текущие JWT-токены, после чего удаляет cookies `access_jwt` и `refresh_jwt`, завершая сессию. Не инвалидирует токены на стороне сервера (stateless JWT) — просто убирает их из браузера.
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Успешный выход, cookies удалены | `null` |
-| 403 | Invalid refresh or access token | `{"detail": "..."}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## GET /event/{event_id}
-
-**Суть:** Получение информации о конкретном событии по его ID. Извлекает запись из таблицы `event` в PostgreSQL. Возвращает название, описание, изображения и статус активности события. Используется для просмотра деталей мероприятия.
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | OK | `EventResponse`: `{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid refresh or access token | `{"detail": "..."}` |
-| 404 | Событие с таким ID не найдено | `{"detail": "Page is missing"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## POST /event/add_event
-
-**Суть:** Создание нового события. Принимает данные пользователя (для проверки прав) и данные события. Проверяет, что запрос делает владелец профиля (сверяет user_id из токена с user_id в теле). Создаёт запись в таблице `event` с привязкой к владельцу. Возвращает созданное событие.
-
-**Request body:** `UserBase` + `EventCreate`
-```json
-{
-  "user": {"id": "str", "name": "str", "surname": "str", "email": "str", "isActive": true},
-  "event": {
-    "id": "str",
-    "name": "str",
-    "disc": "str|null",
-    "preview_picture": "str|null",
-    "picture": "str|null",
-    "isActive": true,
-    "owner": "str",
-    "createdAt": "datetime",
-    "updatedAt": "datetime"
-  }
-}
-```
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Событие создано | `EventResponse`: `{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid token / попытка создать событие от чужого имени | `{"detail": "..."}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## POST /event/edit_event
-
-**Суть:** Редактирование существующего события. Принимает обновлённые данные; поля со значением `"null"` (строка) игнорируются — сохраняется прежнее значение. Проверяет права владельца. Обновляет запись в таблице `event`. Возвращает обновлённое событие.
-
-**Request body:** `UserBase` + `EventCreate` (аналогично add_event)
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Событие обновлено | `EventResponse`: `{"id": str, "name": str, "disc": str|null, "preview_picture": str|null, "picture": str|null, "isActive": bool}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Invalid token / не ваш профиль | `{"detail": "..."}` |
-| 404 | Событие не найдено в БД | `{"detail": "Event not found"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
-
----
-
-## POST /event/add_events_via_pdf_tables
-
-**Суть:** Массовое добавление событий через загрузку PDF-файла, содержащего таблицы с данными. Парсит PDF, извлекает табличные строки и создаёт события в БД. Проверяет, что загрузку выполняет владелец профиля. Возвращает профиль пользователя после обработки.
-
-**Request body:** `multipart/form-data`
-- `user` — JSON (UserBase)
-- `event` — JSON (EventCreate)
-- `file` — PDF-файл
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | События из PDF добавлены | `UserResponse`: `{"id": str, "name": str, "surname": str, "email": str, "isActive": bool, ...}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Попытка загрузить от чужого профиля | `{"detail": "It looks like you are trying to use not your profile"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
+| 200 | Вход выполнен, cookies установлены | `UserResponse` |
+| 401 | Неверный email или пароль | `{"detail": "Invalid email or password"}` |
+| 422 | Ошибка валидации | `{"detail": [...]}` |
 
 ---
 
 ## GET /user/{user_id}
 
-**Суть:** Получение полного профиля пользователя по ID. Доступ строго ограничен: пользователь может просматривать только свой собственный профиль (user_id из токена должен совпадать с user_id в пути). Возвращает все поля профиля, включая необязательные (gender, bday, bio, phone, country, region, status).
+Профиль пользователя по id (страница профиля и запасной путь клиента).
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | OK | `UserResponse`: `{"id": str, "name": str, "surname": str, "email": str, "isActive": bool, "gender": str|null, "bday": str|null, "bio": str|null, "phone": str|null, "country": str|null, "region": str|null, "status": str|null}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Попытка просмотра чужого профиля | `{"detail": "It looks like you are trying to look on not your profile"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
+| 200 | Профиль | `UserResponse` |
+| 401 / 403 | Токен отсутствует или невалиден | `{"detail": "..."}` |
+| 404 | Пользователь не найден | `{"detail": "User not found"}` |
 
 ---
 
 ## POST /user/{user_id}/edit_info
 
-**Суть:** Редактирование профиля пользователя. Принимает объект `UserUpdate`; поля со значением `null` игнорируются (сохраняется текущее значение). Проверяет, что редактируется собственный профиль. Обновляет запись в таблице `user`. Возвращает обновлённый профиль.
-
-**Request body:** `UserUpdate`
-```json
-{
-  "id": "str",
-  "name": "str",
-  "surname": "str",
-  "email": "str",
-  "isActive": true,
-  "gender": "str|null",
-  "bday": "str|null",
-  "bio": "str|null",
-  "phone": "str|null",
-  "country": "str|null",
-  "region": "str|null",
-  "status": "str|null",
-  "role": "str"
-}
-```
+Изменение собственного профиля. Роль и привязка к университету здесь не
+меняются — это делает администратор.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Профиль обновлён | `UserResponse`: `{"id": str, "name": str, "surname": str, "email": str, "isActive": bool, ...}` |
-| 401 | Access or refresh token missing | `{"detail": "..."}` |
-| 403 | Попытка редактирования чужого профиля | `{"detail": "It looks like you are trying to change not your profile"}` |
-| 404 | Пользователь не найден в БД | `{"detail": "Cannot find this user in database, try something else)"}` |
-| 500 | Something has broken | `{"detail": "App has broken caused by error\n{e}\n ¯\\_(ツ)_/¯"}` |
+| 200 | Профиль обновлён | `UserResponse` |
+| 400 | Пустое тело | `{"detail": "No fields to update"}` |
+| 403 | Чужой профиль или занятый email | `{"detail": "You can only edit your own profile"}` |
+| 404 | Пользователь не найден | `{"detail": "User not found"}` |
+| 409 | Email занят другим пользователем | `{"detail": "Email is already taken by another user"}` |
 
 ---
 
-## Сводка кодов ответов
+## POST /auth/logout
 
-| Code | Значение |
-|------|----------|
-| 200 | Успех |
-| 400 | Неверный формат данных (валидация пароля) |
-| 401 | Отсутствует access/refresh токен в cookies |
-| 403 | Невалидный токен / чужой профиль / уже авторизован |
-| 404 | Ресурс не найден в БД |
-| 409 | Конфликт (аккаунт с таким email уже существует) |
-| 500 | Внутренняя ошибка сервера |
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Cookies удалены | `null` |
+| 401 / 403 | Токен отсутствует или невалиден | `{"detail": "..."}` |
 
 ---
 
-## Сводка маршрутов
+## GET /universities
 
-| Метод | Путь | Назначение |
-|-------|------|------------|
-| GET | `/` | Главная: профиль + случайные события |
-| GET | `/auth/` | Gate авторизации |
-| POST | `/auth/register` | Регистрация |
-| POST | `/auth/login` | Вход |
-| GET | `/auth/logout` | Выход |
-| GET | `/event/{event_id}` | Просмотр события |
-| POST | `/event/add_event` | Создание события |
-| POST | `/event/edit_event` | Редактирование события |
-| POST | `/event/add_events_via_pdf_tables` | Импорт событий из PDF |
-| GET | `/user/{user_id}` | Просмотр профиля |
-| POST | `/user/{user_id}/edit_info` | Редактирование профиля |
+Каталог университетов. Публично.
+
+**Query:** `search` (по названию, краткому названию, описанию), `limit`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Список вузов | `{"universities": [{"id", "name", "short_name", "description", "website", "image"}]}` |
+| 500 | Внутренняя ошибка | `{"detail": "Internal server error"}` |
+
+---
+
+## GET /universities/{university_id}
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Карточка университета | `{"id", "name", "name_norm", "short_name", "description", "website", "image", "createdAt", "updatedAt"}` |
+| 404 | Вуз не найден | `{"detail": "University not found"}` |
+
+---
+
+## GET /universities/{university_id}/olympiads
+
+**Query:** `include_pending` (требует входа и прав на этот вуз).
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Олимпиады с БВИ | `{"olympiads": [OlympiadResponse + "bvi_status"]}` |
+| 401 | `include_pending` без входа | `{"detail": "Access token required to view pending requests"}` |
+| 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
+| 404 | Вуз не найден | `{"detail": "University not found"}` |
+
+Публично видны только подтверждённые (`CONFIRMED`) связи.
+
+---
+
+## POST /universities/add_university
+
+**Request body:** `{"name": str, "short_name"?, "description"?, "website"?, "image"?}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 201 | Вуз создан | `UniversityResponse` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 409 | Такой вуз уже есть | `{"detail": "University with this name already exists"}` |
+| 422 | Ошибка валидации | `{"detail": [...]}` |
+
+---
+
+## POST /universities/edit_university/{university_id}
+
+**Request body:** любое подмножество `{"name", "short_name", "description", "website", "image"}`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Вуз обновлён | `UniversityResponse` |
+| 400 | Пустое тело | `{"detail": "No fields to update"}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Вуз не найден | `{"detail": "University not found"}` |
+| 409 | Название занято другим вузом | `{"detail": "University with this name already exists"}` |
+
+---
+
+## POST /universities/{university_id}/bvi
+
+Заявка: «этот университет даёт БВИ за эту олимпиаду». Связь создаётся в
+статусе `PENDING`; повторная заявка возвращает существующую связь.
+
+**Request body:** `{"olympiad_id": str}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 201 | Заявка создана или уже существует | `{"id", "university_id", "olympiad_id", "status", "createdBy", "confirmedBy", "createdAt", "updatedAt"}` |
+| 403 | Не администратор и не представитель этого вуза | `{"detail": "You can only manage your own university"}` |
+| 404 | Вуз или олимпиада не найдены | `{"detail": "University not found"}` / `{"detail": "Olympiad not found"}` |
+
+---
+
+## POST /universities/{university_id}/bvi/remove
+
+**Request body:** `{"olympiad_id": str}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Связь удалена | `{"status": "removed", "olympiad_id": str}` |
+| 403 | Нет прав на этот вуз | `{"detail": "You can only manage your own university"}` |
+| 404 | Связи нет | `{"detail": "BVI link not found"}` |
+
+---
+
+## POST /universities/{university_id}/bvi/{olympiad_id}/status
+
+Модерация: подтверждение или снятие связи.
+
+**Request body:** `{"status": "PENDING" | "CONFIRMED"}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Статус изменён | `BviLinkResponse` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Связи нет | `{"detail": "BVI link not found"}` |
+| 422 | Неверный статус | `{"detail": [...]}` |
+
+---
+
+## GET /olympiads
+
+Каталог олимпиад. Публично.
+
+**Query:** `search` (по названию и описанию), `include_archived` (показать
+олимпиады вне актуального перечня РСОШ), `limit`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "image", "source_url", "source_doc_id", "status"}]}` |
+
+`status`: `PUBLISHED` — в актуальном перечне РСОШ, `ARCHIVED` — больше нет
+в перечне (запись сохранена исторически).
+
+---
+
+## GET /olympiads/{olympiad_id}
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Карточка олимпиады | `{"id", "name", "name_norm", "description", "official_url", "image", "source_url", "source_doc_id", "status", "createdAt", "updatedAt"}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+
+---
+
+## GET /olympiads/{olympiad_id}/universities
+
+Вузы, дающие БВИ за олимпиаду (обратная сторона связи). Публично, только
+подтверждённые связи.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Список вузов | `{"universities": [UniversityResponse + "bvi_status"]}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+
+---
+
+## POST /olympiads/add_olympiad
+
+Ручное создание олимпиады (резервный путь; основной — импорт РСОШ).
+
+**Request body:** `{"name": str, "description"?, "official_url"?, "image"?, "source_url"?}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 201 | Олимпиада создана | `OlympiadResponse` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 409 | Такая олимпиада уже есть | `{"detail": "Olympiad with this name already exists"}` |
+
+---
+
+## POST /olympiads/edit_olympiad/{olympiad_id}
+
+**Request body:** любое подмножество `{"name", "description", "official_url", "image", "source_url", "status"}`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Олимпиада обновлена | `OlympiadResponse` |
+| 400 | Пустое тело | `{"detail": "No fields to update"}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+| 409 | Название занято | `{"detail": "Olympiad with this name already exists"}` |
+
+---
+
+## GET /search
+
+Единый поиск по обоим каталогам.
+
+**Query:** `q` (обязательный смысл поиска), `limit`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Найденные сущности | `{"query": str, "universities": [...], "olympiads": [...]}` |
+| 200 (пустой `q`) | Ничего не искали | `{"query": "", "universities": [], "olympiads": []}` |
+
+---
+
+## POST /docs/upload
+
+Загрузка документа-источника. **Администратор.**
+
+**Form data:** `file` (PDF/XLSX/PNG/JPG/JPEG), `type`
+(`RSOSH_LIST` | `UNIVERSITY_ORDER` | `OTHER`), `name?`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 201 | Документ загружен | `{"id", "name", "type", "status", "storage_key", "mime_type", "checksum", "createdAt", ...}` |
+| 400 | Формат не поддерживается или содержимое не совпадает с расширением | `{"detail": "Unsupported file format. Allowed: ..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 413 | Файл больше лимита | `{"detail": "File exceeds the 30 MB limit"}` |
+| 422 | Неверный тип документа | `{"detail": "Invalid document type. Allowed: ..."}` |
+
+---
+
+## POST /imports/rsosh
+
+Запуск импорта РСОШ. **Администратор.**
+
+**Request body:** `{"doc_id": str}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 202 | Импорт запущен | `{"id", "name", "type", "status", "state", "summary", "warnings", "error", "execution": "celery"｜"inline"}` |
+| 400 | Документ не подходит или импорт не стартует из текущего состояния | `{"detail": "Only RSOSH_LIST documents can be imported"}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+
+В фоновом режиме сразу после ответа `state` = `processing`: состояние нужно
+полярно опрашивать до `review` или `failed`.
+
+---
+
+## GET /imports/{import_id}
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Состояние импорта | `{"state": "processing｜review｜approved｜rejected｜failed", "summary": {"total", "new", "merge", "review"}, "warnings": [...], "error": str｜null}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+
+---
+
+## GET /imports/{import_id}/preview
+
+Кандидаты импорта: что будет создано, что обновлено, что требует проверки.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Preview | `{"import": {...}, "pages": [{"page", "method", "orientation", "tables", "rows", "chars", "confidence", "issues"}], "candidates": [{"name", "name_norm", "description", "action": "create｜merge｜skip", "matched_olympiad_id", "match_score", "confidence": "ok｜review", "page", "issues"}]}` |
+| 409 | Импорт ещё обрабатывается | `{"detail": "Import is still processing"}` |
+
+Кандидаты с `confidence: "review"` требуют решения администратора: сомнительное
+сопоставление с существующей олимпиадой нельзя принять автоматически.
+
+---
+
+## POST /imports/{import_id}/confirm
+
+**Request body:** `{"skip": [name_norm, ...], "archive_missing": bool}`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Импорт применён | `{"import": {...}, "result": {"created": [...], "updated": [...], "archived": [...], "skipped": [...], "errors": [...]}}` |
+| 400 | Импорт нельзя подтвердить или неизвестные `skip` | `{"detail": "Import state approved is not confirmable; start a new import first"}` |
+
+---
+
+## POST /imports/{import_id}/reject
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Результаты отклонены, в каталог ничего не записано | `{"state": "rejected", ...}` |
+| 400 | Отклонить нельзя | `{"detail": "Import state approved is not rejectable"}` |
+
+---
+
+## GET /admin/users, /admin/olympiads, /admin/bvi
+
+**Администратор.** Списки для панели: пользователи (с ролью и привязкой к
+вузу), полный каталог олимпиад включая архивные, очередь заявок БВИ.
+
+---
+
+## POST /admin/archive_olympiad/{olympiad_id}?archived=true|false
+
+Архивирование или возврат олимпиады в каталог. **Администратор.**
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Статус изменён | `OlympiadResponse` со `status: "ARCHIVED"｜"PUBLISHED"` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+
+---
+
+## GET /health, GET /ready
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Сервис жив / готов | `{"status": "ok"}` / `{"status": "ready"}` |
+| 503 | Зависимость недоступна | `{"status": "degraded", "component": "database"｜"redis"}` |

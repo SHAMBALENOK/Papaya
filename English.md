@@ -1,6 +1,6 @@
 # Papaya
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: GPL](https://img.shields.io/badge/License-GPL-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 
@@ -10,53 +10,144 @@
 
 ## Content
 
-- [Changelog](#changelog)
-- [Coming Soon](#coming-soon)
-- [Technology Stack](#technology-stack)
+- [What Papaya is](#what-papaya-is)
+- [User flow](#user-flow)
+- [Data model](#data-model)
+- [Roles and permissions](#roles-and-permissions)
+- [RSOSH document import](#rsosh-document-import)
+- [Technology stack](#technology-stack)
 - [Prerequisites](#prerequisites)
-- [Local Setup](#local-setup)
-- [API and Routes](#api-and-routes)
+- [Local setup](#local-setup)
+- [Tests](#tests)
+- [API and routes](#api-and-routes)
 
-Papaya is a web service for school students that brings information about nationwide and regional academic competitions together in one place. Users can register, manage their profiles, and browse educational events.
+## What Papaya is
 
-## Changelog
+Papaya answers one question: **which olympiads grant BVI (admission without entrance exams) at the university I want?**
 
-### Current version
+It aggregates official RSOSH olympiad lists and links them to universities. A school student finds their university in the catalog, sees the olympiads that grant admission without entrance exams, opens an olympiad and follows the link to its official website. No more browsing university websites and orders by hand.
 
-- Authentication now uses access and refresh JWT cookies; registration and login include password hashing and data validation.
-- Added the active olympiad catalog, event pages, a user's own event list, list of users and profile editing.
-- Users with the `EDITOR` or `ADMIN` role can create and update events through the application interface.
-- Added olympiad imports from PDF and XLSX tables. PDFs are processed with Tesseract OCR in the Celery queue, and extra table columns are preserved in the event description.
-- Added the `USER`, `EDITOR`, and `ADMIN` roles, together with a dedicated administration panel for users and events.
-- The welcome, login, and registration pages are available without authentication.
-- Added Redis caching and a Celery queue for resource-intensive PDF processing.
-- Added a containerized environment with PostgreSQL, Redis, the web application, Celery, and pgAdmin. `setup.sh` runs automatically inside the containers and verifies Tesseract OCR.
+The whole product is described by one chain:
 
-## Coming Soon
+```text
+University → olympiads that grant BVI → olympiad details → official website
+```
 
-- School student, university student, teacher, and educational organization roles with different capabilities.
-- Categorized olympiad tabs and improved event grouping.
-- Direct import of tables from photos in addition to PDF and XLSX.
-- More pages available without authentication.
-- A dedicated, improved workflow for adding and editing events.
-- Automated tests.
-- Tabs for Olympiads that provide admission rights (BVI) for a specific educational institution.
-- Search.
-- Olympiad tags by category.
+Anything that does not support this chain is intentionally absent: no olympiad calendar, no stage schedule, no deadlines, no organizers, no recommendation algorithms. Papaya is an aggregator and a catalog, not an admissions system.
 
-## Technology Stack
+## User flow
 
-- **Backend:** Python 3.11, FastAPI, Gunicorn, Uvicorn
-- **Frontend:** HTML, CSS, JavaScript SPA, Tailwind CSS
-- **Database:** PostgreSQL 16, SQLAlchemy (async ORM), asyncpg
+| Role | What they do |
+|------|--------------|
+| **Student** (guest or registered) | Searches universities and olympiads, browses catalogs and entity pages. Registration is not required. |
+| **University representative** | Manages BVI links of **their own** university: picks existing olympiads from the catalog and claims the university grants BVI for them. They never create olympiads. |
+| **Papaya administrator** | Maintains the olympiad and university catalogs, uploads RSOSH documents and confirms imports, moderates BVI requests, manages users and roles. |
+
+End-to-end flow:
+
+```text
+Open Papaya
+      ↓
+Find a university
+      ↓
+Open the university
+      ↓
+See the olympiads that grant BVI
+      ↓
+Open an olympiad
+      ↓
+Read its details and follow the link to the official website
+```
+
+The olympiad page also shows the reverse path: the universities that grant BVI for it.
+
+## Data model
+
+```text
+University ──(university_olympiads)── Olympiad ──(source_doc_id)── Docs
+        │                                 │
+        └──── PENDING / CONFIRMED ────────┘
+```
+
+Key decisions:
+
+- **An olympiad is a single canonical entity.** There are no "olympiad 2026" and "olympiad 2027" records: one entry per olympiad, independent of the year.
+- **A university never creates a copy of an olympiad.** A link references an existing catalog entry, and a unique index on the pair makes duplicate links impossible even at the database level.
+- **A request is not a public fact.** `PENDING` links are visible to the university's own representative and to the administrator; public lists contain confirmed links only.
+- **Archive, not delete.** An olympiad that disappears from the RSOSH list moves to `ARCHIVED`: the record is kept and the interface states that it is no longer in the current list.
+- **Documents are data sources.** Each olympiad stores `source_doc_id`, so it is always clear where the information came from.
+- **There is no generic "organization" entity.** Papaya models neither olympiad organizers nor schools: that would be an extra abstraction level for a single participant type.
+
+## Roles and permissions
+
+| Action | Student / guest | University representative | Administrator |
+|--------|-----------------|---------------------------|---------------|
+| Catalogs, search, university and olympiad pages | ✅ | ✅ | ✅ |
+| Link own university to an existing olympiad | ❌ | ✅ (own university only) | ✅ (any university) |
+| Confirm or revoke a BVI link | ❌ | ❌ | ✅ |
+| Create or edit an olympiad | ❌ | ❌ | ✅ |
+| Create or edit a university | ❌ | ❌ | ✅ |
+| Upload RSOSH documents and run an import | ❌ | ❌ | ✅ |
+| Manage users and roles | ❌ | ❌ | ✅ |
+
+The rules live in one place, `app/core/deps.py`, including the object-level check "is this your own university".
+
+## RSOSH document import
+
+An olympiad enters the catalog in exactly two ways:
+
+1. **Import of an official RSOSH document** — the primary path;
+2. **Manual creation by an administrator** — the fallback.
+
+The old bulk table import (`POST /api/v1/events/add_events_via_tables`) is gone: no route, no code, no button in the interface.
+
+```text
+Document
+    ↓ file type detection (by signature, not only by extension)
+Image preprocessing + orientation detection (0/90/180/270)
+    ↓
+Extraction: native XLSX reading → PDF text-layer tables → OCR for scans/images
+    ↓
+Table detection and reconstruction (borders, merged and multi-line cells)
+    ↓
+Cell normalization (line breaks, quotes, "ё", mirrored RSOSH headers)
+    ↓
+Olympiad extraction (name column detection, boilerplate removal)
+    ↓
+Validation (name length, junk, recognition confidence)
+    ↓
+Deduplication: exact → merge, close → merge, uncertain → human review
+    ↓
+Import preview (nothing is written yet)
+    ↓ administrator confirmation
+Create/update olympiads + archive the ones missing from the list
+```
+
+What the importer accounts for:
+
+- **XLSX** is read natively (openpyxl): multi-line cells, vertically merged ranges, several sheets;
+- **PDF with a text layer** is parsed from the document structure (pdfplumber) — no needless OCR;
+- **scans without a text layer** are rasterized (300 dpi) and recognized by Tesseract (`rus+eng`) with word coordinates;
+- **rotated pages** (90/180/270) are detected through Tesseract OSD, with a trial-OCR comparison as a fallback;
+- **skewed scans** are straightened by the estimated skew angle;
+- **tables spanning several pages** are joined, repeated headers are dropped, and the first page's header defines the columns for all following pages;
+- **mirrored headers** (a quirk of some RSOSH documents) are recognized and un-reversed;
+- **boilerplate rows** (letterheads, order details, signatures) never reach the catalog;
+- **an empty or unreadable document** is never imported silently: the run ends in `failed` with a readable reason.
+
+Import state lives in `docs.metadata['rsosh']` (`processing` / `review` / `approved` / `rejected` / `failed`) — a separate table for runs is unnecessary because a run always belongs to a concrete document. Imports run in a Celery task by default and fall back to in-process execution when the broker is unavailable (`RSOSH_EXECUTION=auto|celery|inline`).
+
+## Technology stack
+
+- **Backend:** Python 3.11, FastAPI, Gunicorn, Uvicorn, Pydantic, PyJWT, bcrypt, Werkzeug
+- **Frontend:** HTML, CSS, Vanilla JS SPA, Tailwind CSS
+- **Database:** PostgreSQL 16, SQLAlchemy (async ORM), asyncpg, Alembic
 - **Authentication:** JWT cookies, bcrypt, Pydantic validation
 - **Caching and background jobs:** Redis 7, Celery
-- **Table import:** pandas, OpenPyXL, img2table, Tesseract OCR
-- **Containerization:** Docker, Docker Compose
+- **RSOSH import:** pdfplumber, pypdfium2, pytesseract (Tesseract `rus`/`eng`/`osd`), OpenCV, openpyxl, NumPy
+- **Containerization:** Docker, Docker Compose, Render
 
 ## Prerequisites
-
-Install the following before starting:
 
 - **Git**;
 - **Docker Desktop** or Docker Engine;
@@ -65,112 +156,84 @@ Install the following before starting:
 
 You do not need to install Python, PostgreSQL, Redis, or Tesseract separately; they run inside Docker containers.
 
-## Local Setup
-
-### 1. Clone the Repository
+## Local setup
 
 ```bash
 git clone https://github.com/SHAMBALENOK/Papaya.git
 cd Papaya
+cp .env.example .env      # optional: the defaults work as is
+docker compose up -d --build
 ```
 
-Start Docker Desktop if you use it.
+After startup:
 
-### 2. Configure the Environment
+- application — [http://localhost:5000](http://localhost:5000)
+- interactive API documentation — [http://localhost:5000/docs](http://localhost:5000/docs)
+- pgAdmin — [http://localhost:5050](http://localhost:5050) (`postgres@postgres.com` / `postgres`, host `postgres`, port `5432`, database `postgres`)
 
-Copy `.env.example` to `.env` and fill it in if needed:
+Main environment variables (details in `.env.example`):
 
-```bash
-cp .env.example .env
-```
+- `JWT_KEY` — the JWT signing secret; in production use a long random string (`python -c "import secrets; print(secrets.token_hex(32))"`);
+- `ENVIRONMENT` — `development` (default) or `production` (enables the `Secure` cookie flag and rejects placeholder secrets);
+- `DATABASE_URL` — PostgreSQL connection (Alembic migrations are applied automatically on container start);
+- `MAX_UPLOAD_MB` — maximum uploaded document size, `30` by default;
+- `DOCS_DIR` — storage directory for uploaded source documents;
+- `RSOSH_EXECUTION` — `auto` (default), `celery`, or `inline`;
+- `RSOSH_PDF_DPI` — PDF page rasterization DPI for OCR, `300` by default.
 
-All tokens and secrets are passed through environment variables (the `.env` file
-or the `environment` section of `docker-compose.yml`) — never commit a real
-secret to the repository.
+> In development mode the `web`, `celery`, and `test` services mount the working tree (`./app`, `./migrations`, `./scripts`), so code changes are picked up without rebuilding the image. Changing `requirements.txt` requires `docker compose build`.
 
-Main variables:
-
-- `JWT_KEY` — the JWT signing secret. In production use a long random string
-  (e.g. from `python -c "import secrets; print(secrets.token_hex(32))"`).
-  Use the same value in both the `web` and `celery` services;
-- `ENVIRONMENT` — `development` (default) or `production` (enables the `Secure`
-  cookie flag and rejects placeholder secrets);
-- `DATABASE_URL` — PostgreSQL connection (the schema is managed by Alembic
-  migrations, applied automatically when the container starts);
-- `MAX_UPLOAD_MB` — maximum size of an uploaded table, `30` by default;
-- `HF_TOKEN` — optional read-access Hugging Face token for model downloads,
-  available from the [token settings page](https://huggingface.co/settings/tokens).
-
-Do not publish real tokens or commit them to a public repository.
-
-### 3. Build and Start the Application
-
-Run this command from the repository root:
-
-```bash
-docker compose up --build -d
-```
-
-The first build may take several minutes while Docker downloads images, Python dependencies, and OCR components. The `setup.sh` script is the container entrypoint and runs automatically; do not run it manually.
-
-Check the service status:
-
-```bash
-docker compose ps
-```
-
-After startup, the following services are available:
-
-- application — [http://localhost:5000](http://localhost:5000);
-- interactive API documentation — [http://localhost:5000/docs](http://localhost:5000/docs);
-- pgAdmin — [http://localhost:5050](http://localhost:5050).
-
-The local pgAdmin credentials from `docker-compose.yml` are `postgres@postgres.com` / `postgres`. To connect from pgAdmin to PostgreSQL, use host `postgres`, port `5432`, database `postgres`, username `postgres`, and password `postgres`. These credentials are intended for local development only.
-
-Follow the web application and task worker logs with:
+Logs and shutdown:
 
 ```bash
 docker compose logs -f web celery
+docker compose down        # keeps volumes
+docker compose down -v     # removes the database and Redis volumes
 ```
 
-Run `docker compose logs -f` to follow every service.
+## Tests
 
-### 4. Stop and Clean Up
-
-Stop the services while preserving their Docker volumes:
+Tests run in an isolated container of the `testing` profile and never touch the working database: a separate `papaya_test` database is created, migrations are applied, Redis is flushed, and the catalogs are emptied before every test.
 
 ```bash
-docker compose down
+docker compose --profile testing run --rm test
 ```
 
-Stop the services and remove the PostgreSQL, Redis, pgAdmin, and model-cache volumes:
+Covered scenarios: catalogs and search, BVI links on both sides, moderation, role boundaries (student / representative / administrator), and the importer — XLSX, PDF with a text layer, scanned PDF, pages rotated by 90/180/270, PNG/JPEG images, multi-line and merged cells, repeated import of the same document, archiving of missing olympiads, unreadable documents, and permissions.
 
-```bash
-docker compose down -v
-```
+## API and routes
 
-> [!WARNING]
-> The command with `-v` permanently deletes the local database. Files uploaded to `app/tables` are stored in the project directory and are not removed by this command.
-
-## API and Routes
-
-Every API route uses the `/api/v1` prefix. The complete interactive schema is available at `/docs` while the application is running.
+Every route uses the `/api/v1` prefix. The complete interactive schema is available at `/docs` while the application is running. Catalogs and search are public.
 
 | Method | Path | Description | Access |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/welcome` | Check the session for the public page | Public |
-| `GET` | `/api/v1/auth/` | Authentication page state | Public |
+| `GET` | `/api/v1/universities?search=` | University catalog | Public |
+| `GET` | `/api/v1/universities/<id>` | University page | Public |
+| `GET` | `/api/v1/universities/<id>/olympiads` | Olympiads granting BVI (`?include_pending=true` for own requests) | Public / own requests |
+| `POST` | `/api/v1/universities/add_university` | Create a university | `ADMIN` |
+| `POST` | `/api/v1/universities/edit_university/<id>` | Update a university | `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/bvi` | Request a BVI link to an existing olympiad | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/bvi/remove` | Remove a BVI link | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/bvi/<olympiad_id>/status` | Confirm or revoke a BVI link | `ADMIN` |
+| `GET` | `/api/v1/olympiads?search=&include_archived=` | Olympiad catalog | Public |
+| `GET` | `/api/v1/olympiads/<id>` | Olympiad page | Public |
+| `GET` | `/api/v1/olympiads/<id>/universities` | Universities granting BVI for this olympiad | Public |
+| `POST` | `/api/v1/olympiads/add_olympiad` | Create an olympiad manually | `ADMIN` |
+| `POST` | `/api/v1/olympiads/edit_olympiad/<id>` | Update an olympiad | `ADMIN` |
+| `GET` | `/api/v1/search?q=` | Search both catalogs | Public |
+| `POST` | `/api/v1/docs/upload` | Upload a source document (RSOSH list, order, other) | `ADMIN` |
+| `POST` | `/api/v1/imports/rsosh` | Start an RSOSH import | `ADMIN` |
+| `GET` | `/api/v1/imports` | List of import runs | `ADMIN` |
+| `GET` | `/api/v1/imports/<id>` | Import state and summary | `ADMIN` |
+| `GET` | `/api/v1/imports/<id>/preview` | Import preview (candidates) | `ADMIN` |
+| `POST` | `/api/v1/imports/<id>/confirm` | Apply the import | `ADMIN` |
+| `POST` | `/api/v1/imports/<id>/reject` | Reject the import results | `ADMIN` |
+| `POST` | `/api/v1/admin/archive_olympiad/<id>` | Archive or restore an olympiad | `ADMIN` |
+| `GET` | `/api/v1/admin/users` | Manage users and roles | `ADMIN` |
+| `GET` | `/api/v1/admin/bvi` | BVI request moderation queue | `ADMIN` |
 | `POST` | `/api/v1/auth/register` | Register a user | Public |
 | `POST` | `/api/v1/auth/login` | Log in and set JWT cookies | Public |
-| `GET` | `/api/v1/auth/logout` | Log out and remove JWT cookies | Authenticated |
-| `GET` | `/api/v1/events/dashboard` | Active olympiad catalog | Authenticated |
-| `GET` | `/api/v1/events/dashboard/my_events` | Current user's events | Authenticated |
-| `GET` | `/api/v1/events/<event_id>` | Event details | Authenticated |
-| `POST` | `/api/v1/events/add_event` | Create an event | `EDITOR` or `ADMIN` |
-| `POST` | `/api/v1/events/edit_event/<event_id>` | Update an event | `EDITOR` or `ADMIN` |
-| `POST` | `/api/v1/events/add_events_via_tables` | Import events from PDF or XLSX | `EDITOR` or `ADMIN` |
-| `GET` | `/api/v1/user/users` | List active users | Authenticated |
-| `GET` | `/api/v1/user/<user_id>` | User profile | Authenticated |
-| `POST` | `/api/v1/user/<user_id>/edit_info` | Update the current user's profile | Profile owner |
-| `GET` | `/api/v1/admin/users` | Manage users | `ADMIN` |
-| `GET` | `/api/v1/admin/events` | Manage events and the archive | `ADMIN` |
+| `POST` | `/api/v1/auth/logout` | Log out and remove JWT cookies | Authenticated |
+| `GET` | `/api/v1/health`, `/api/v1/ready` | Liveness and readiness probes | Public |
+
+Unknown paths under `/api/v1/` return a JSON 404 instead of the SPA HTML shell.

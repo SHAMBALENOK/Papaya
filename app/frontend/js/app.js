@@ -1,5 +1,5 @@
 /* ==========================================================================
- * app.js — утилиты, дизайн-система UI, chrome дашборда, модалки, FAB.
+ * app.js — утилиты, дизайн-система UI, chrome сайта, модалки, тосты.
  *
  * Принципы разделения блоков:
  *   - border: none;
@@ -47,10 +47,19 @@ const UI = {
     badgeSuccess: 'bg-sage text-ink',
     badgeDanger: 'bg-crimson text-ink',
     badgeAdmin: 'bg-ink text-white',
+    badgePending: 'bg-mist text-ink-soft',
 };
 
 function loadingHtml(text = 'Загрузка…') {
     return `<div class="py-32 text-center" role="status"><p class="text-lg text-ink-soft animate-pulse">${escHtml(text)}</p></div>`;
+}
+
+function emptyHtml(title, text, actionHtml = '') {
+    return `<div class="py-24 text-center max-w-md mx-auto">
+        <h2 class="text-2xl font-bold tracking-tight">${escHtml(title)}</h2>
+        <p class="mt-4 text-ink-soft leading-relaxed">${escHtml(text)}</p>
+        ${actionHtml ? `<div class="flex flex-wrap justify-center gap-3 mt-10">${actionHtml}</div>` : ''}
+    </div>`;
 }
 
 function alertHtml(msg, kind = 'error') {
@@ -79,21 +88,27 @@ function formatDate(iso) {
     return d.toLocaleDateString('ru-RU');
 }
 
-function userFromDashboard(d) {
-    return {
-        id: d.user_id,
-        name: d.user_name,
-        surname: d.user_surname,
-        email: d.user_email,
-        role: d.user_role || 'USER',
-    };
-}
-
 function userInitials(user) {
     if (!user) return '?';
     const a = (user.name || '?')[0] || '?';
     const b = (user.surname || '')[0] || '';
     return (a + b).toUpperCase();
+}
+
+function olympiadStatusBadge(status) {
+    if (status === 'ARCHIVED') {
+        return `<span class="${UI.badge} ${UI.badgeNeutral}">Нет в перечне РСОШ</span>`;
+    }
+    return `<span class="${UI.badge} ${UI.badgeSuccess}">
+        <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>В перечне РСОШ
+    </span>`;
+}
+
+function bviStatusBadge(status) {
+    if (status === 'CONFIRMED') {
+        return `<span class="${UI.badge} ${UI.badgeSuccess}">Подтверждено</span>`;
+    }
+    return `<span class="${UI.badge} ${UI.badgePending}">Ждёт подтверждения</span>`;
 }
 
 /* ---------- Поля форм ---------- */
@@ -132,10 +147,10 @@ function openModal(title, bodyHtml, { wide = false } = {}) {
     overlay.className = 'fixed inset-0 z-50 bg-ink/40 flex items-center justify-center p-4 md:p-8';
     overlay.innerHTML = `
     <div role="dialog" aria-modal="true" aria-label="${escAttr(title)}"
-         class="bg-white shadow-elev-3 w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[85vh] overflow-y-auto modal-scroll">
+         class="bg-white shadow-elev-3 w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} max-h-[85vh] overflow-y-auto modal-scroll">
         <div class="p-8 md:p-12">
             <div class="flex items-start justify-between gap-6 mb-10">
-                <h2 class="text-2xl font-bold tracking-tight text-ink">${title}</h2>
+                <h2 class="text-2xl font-bold tracking-tight text-ink">${escHtml(title)}</h2>
                 <button type="button" data-modal-close aria-label="Закрыть окно"
                         class="shrink-0 w-10 h-10 rounded bg-mist hover:bg-mist-deep text-ink-soft hover:text-ink flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">&times;</button>
             </div>
@@ -181,49 +196,49 @@ function showToast(message, type = 'info', duration = 3500) {
     }, duration);
 }
 
-/* ---------- Модалки событий ---------- */
+/* ---------- Модалки каталога ---------- */
 
-function openAddEventModal(onDone) {
+function openUniversityFormModal(university, onDone) {
+    const isEdit = !!university;
     const body = `
         <div id="modal-alert"></div>
-        <form id="add-event-form">
-            ${inputField({ id: 'ev-name', name: 'name', label: 'Название', required: true })}
-            ${textareaField({ id: 'ev-disc', name: 'disc', label: 'Описание', placeholder: 'Описание олимпиады…' })}
-            ${inputField({ id: 'ev-preview', name: 'preview_picture', label: 'URL превью', type: 'url', placeholder: 'https://…' })}
-            ${inputField({ id: 'ev-picture', name: 'picture', label: 'URL полного фото', type: 'url', placeholder: 'https://…' })}
+        <form id="university-form">
+            ${inputField({ id: 'un-name', name: 'name', label: 'Полное название', required: true, value: (university || {}).name || '' })}
+            ${inputField({ id: 'un-short', name: 'short_name', label: 'Краткое название / аббревиатура', value: (university || {}).short_name || '', placeholder: 'МФТИ' })}
+            ${inputField({ id: 'un-site', name: 'website', label: 'Официальный сайт', type: 'url', value: (university || {}).website || '', placeholder: 'https://…' })}
+            ${inputField({ id: 'un-image', name: 'image', label: 'URL изображения (логотип/превью)', type: 'url', value: (university || {}).image || '', placeholder: 'https://…' })}
+            ${textareaField({ id: 'un-desc', name: 'description', label: 'Описание', value: (university || {}).description || '' })}
             <div class="flex flex-wrap justify-end gap-3 mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Создать событие</button>
+                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">${isEdit ? 'Сохранить' : 'Создать университет'}</button>
             </div>
         </form>`;
-    const { overlay, close } = openModal('Новое событие', body);
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
+    const { overlay, close } = openModal(isEdit ? 'Редактирование университета' : 'Новый университет', body);
 
-    overlay.querySelector('#add-event-form').addEventListener('submit', async e => {
+    overlay.querySelector('[data-cancel]').addEventListener('click', close);
+    overlay.querySelector('#university-form').addEventListener('submit', async e => {
         e.preventDefault();
         const fd = new FormData(e.target);
+        const payload = {
+            name: (fd.get('name') || '').trim(),
+            short_name: (fd.get('short_name') || '').trim() || null,
+            website: (fd.get('website') || '').trim() || null,
+            image: (fd.get('image') || '').trim() || null,
+            description: (fd.get('description') || '').trim() || null,
+        };
         const btn = e.target.querySelector('button[type="submit"]');
         btn.disabled = true;
-        const now = new Date().toISOString();
         try {
-            const res = await api.addEvent({
-                id: '',
-                owner: store.user.id,
-                name: fd.get('name'),
-                disc: fd.get('disc') || null,
-                preview_picture: fd.get('preview_picture') || null,
-                picture: fd.get('picture') || null,
-                isActive: true,
-                createdAt: now,
-                updatedAt: now,
-            });
+            const res = isEdit
+                ? await api.editUniversity(university.id, payload)
+                : await api.addUniversity(payload);
             if (res.ok) {
                 close();
-                showToast('Событие создано', 'success');
+                showToast(isEdit ? 'Университет обновлён' : 'Университет создан', 'success');
                 if (onDone) onDone();
-            } else {
-                showModalError(overlay, res);
+                return;
             }
+            showModalError(overlay, res);
         } catch {
             showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
         }
@@ -231,87 +246,51 @@ function openAddEventModal(onDone) {
     });
 }
 
-function openPdfModal(onDone) {
+function openOlympiadFormModal(olympiad, onDone) {
+    const isEdit = !!olympiad;
     const body = `
         <div id="modal-alert"></div>
-        <form id="pdf-form">
-            <div class="${UI.field}">
-                <label for="pdf-file" class="${UI.label}">Файл таблицы мероприятий <span class="text-crimson" aria-hidden="true">*</span></label>
-                <input id="pdf-file" name="file" type="file" accept=".pdf,.xlsx" required
-                       class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-ink file:text-white hover:file:bg-ink-deep file:transition-colors file:cursor-pointer">
-                <p class="mt-2 text-sm text-ink-soft leading-relaxed">Поддерживаются PDF и XLSX — как принимает маршрут /events/add_events_via_tables.</p>
-            </div>
+        <form id="olympiad-form">
+            ${inputField({ id: 'ol-name', name: 'name', label: 'Название олимпиады', required: true, value: (olympiad || {}).name || '' })}
+            ${inputField({ id: 'ol-site', name: 'official_url', label: 'Официальный сайт', type: 'url', value: (olympiad || {}).official_url || '', placeholder: 'https://…' })}
+            ${inputField({ id: 'ol-image', name: 'image', label: 'URL изображения', type: 'url', value: (olympiad || {}).image || '', placeholder: 'https://…' })}
+            ${inputField({ id: 'ol-source', name: 'source_url', label: 'Источник информации (ссылка)', type: 'url', value: (olympiad || {}).source_url || '', placeholder: 'https://…' })}
+            ${textareaField({ id: 'ol-desc', name: 'description', label: 'Описание', value: (olympiad || {}).description || '' })}
             <div class="flex flex-wrap justify-end gap-3 mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Загрузить</button>
+                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">${isEdit ? 'Сохранить' : 'Создать олимпиаду'}</button>
             </div>
-        </form>`;
-    const { overlay, close } = openModal('Импорт из таблицы', body);
+        </form>
+        <p class="mt-8 text-sm text-ink-soft leading-relaxed">
+            Ручное создание — резервный способ. Основной путь наполнения каталога —
+            импорт официальных документов РСОШ (вкладка «Импорт РСОШ»).
+        </p>`;
+    const { overlay, close } = openModal(isEdit ? 'Редактирование олимпиады' : 'Новая олимпиада', body);
+
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
-
-    overlay.querySelector('#pdf-form').addEventListener('submit', async e => {
-        e.preventDefault();
-        const btn = e.target.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        btn.textContent = 'Обработка файла…';
-        try {
-            const fd = new FormData(e.target);
-            const res = await api.addEventsPdf(fd);
-            if (res.ok && Array.isArray(res.data)) {
-                close();
-                showToast(`Добавлено событий: ${res.data.length}`, 'success');
-                if (onDone) onDone();
-            } else {
-                showModalError(overlay, res);
-            }
-        } catch {
-            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
-        }
-        btn.disabled = false;
-        btn.textContent = 'Загрузить';
-    });
-}
-
-function openEditEventModal(ev, onDone) {
-    const body = `
-        <div id="modal-alert"></div>
-        <form id="edit-event-form">
-            ${inputField({ id: 'ee-name', name: 'name', label: 'Название', required: true, value: ev.name || '' })}
-            ${textareaField({ id: 'ee-disc', name: 'disc', label: 'Описание', value: ev.disc || '' })}
-            ${inputField({ id: 'ee-preview', name: 'preview_picture', label: 'URL превью', type: 'url', value: ev.preview_picture || '' })}
-            ${inputField({ id: 'ee-picture', name: 'picture', label: 'URL полного фото', type: 'url', value: ev.picture || '' })}
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
-                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Сохранить</button>
-            </div>
-        </form>`;
-    const { overlay, close } = openModal('Редактирование события', body);
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
-
-    overlay.querySelector('#edit-event-form').addEventListener('submit', async e => {
+    overlay.querySelector('#olympiad-form').addEventListener('submit', async e => {
         e.preventDefault();
         const fd = new FormData(e.target);
+        const payload = {
+            name: (fd.get('name') || '').trim(),
+            official_url: (fd.get('official_url') || '').trim() || null,
+            image: (fd.get('image') || '').trim() || null,
+            source_url: (fd.get('source_url') || '').trim() || null,
+            description: (fd.get('description') || '').trim() || null,
+        };
         const btn = e.target.querySelector('button[type="submit"]');
         btn.disabled = true;
         try {
-            const res = await api.editEvent({
-                id: ev.id,
-                owner: ev.owner || store.user.id,
-                name: fd.get('name'),
-                disc: fd.get('disc') || null,
-                preview_picture: fd.get('preview_picture') || null,
-                picture: fd.get('picture') || null,
-                isActive: ev.isActive !== false,
-                createdAt: ev.createdAt || new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            });
+            const res = isEdit
+                ? await api.editOlympiad(olympiad.id, payload)
+                : await api.addOlympiad(payload);
             if (res.ok) {
                 close();
-                showToast('Событие обновлено', 'success');
+                showToast(isEdit ? 'Олимпиада обновлена' : 'Олимпиада создана', 'success');
                 if (onDone) onDone();
-            } else {
-                showModalError(overlay, res);
+                return;
             }
+            showModalError(overlay, res);
         } catch {
             showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
         }
@@ -319,140 +298,23 @@ function openEditEventModal(ev, onDone) {
     });
 }
 
-async function openUpdateEventModal(onDone) {
-    if (!store.myEvents.length) {
-        try {
-            const res = await api.getMyEvents();
-            if (res.ok && res.data) store.setMyEvents(res.data.events);
-        } catch (err) {
-            console.error('[update-event] ошибка загрузки:', err);
-        }
-    }
-    const events = store.myEvents;
-
-    if (!events.length) {
-        const { overlay } = openModal('Обновить событие', `
-            <p class="text-ink-soft leading-relaxed">У вас пока нет собственных событий — обновлять нечего.</p>
-            <div class="flex justify-end mt-10">
-                <button type="button" data-cancel class="${UI.btn} ${UI.btnPrimary}">Понятно</button>
-            </div>`);
-        overlay.querySelector('[data-cancel]').addEventListener('click', () => overlay.remove());
-        return;
-    }
-
-    const listHtml = `
-        <p class="text-sm text-ink-soft leading-relaxed mb-6">Выберите событие, данные которого нужно обновить.</p>
-        <div class="space-y-3">
-            ${events.map(ev => `
-            <button type="button" data-pick="${escAttr(ev.id)}"
-                    class="w-full text-left bg-mist/60 hover:bg-mist rounded px-6 py-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                <span class="block font-semibold text-ink truncate">${escHtml(ev.name)}</span>
-                <span class="block mt-1 text-sm text-ink-soft">Обновлено ${formatDate(ev.updatedAt)}</span>
-            </button>`).join('')}
-        </div>`;
-
-    const { overlay, close } = openModal('Обновить событие', listHtml);
-    overlay.querySelectorAll('[data-pick]').forEach(btn =>
-        btn.addEventListener('click', () => {
-            const ev = events.find(e => e.id === btn.dataset.pick);
-            if (ev) { close(); openEditEventModal(ev, onDone); }
-        }));
-}
-
-/* ---------- FAB ---------- */
-
-function setFab(visible) {
-    const existing = document.getElementById('fab');
-    if (visible) {
-        if (!existing) mountFab();
-        else existing.classList.remove('hidden');
-    } else if (existing) {
-        closeFabMenu();
-        existing.classList.add('hidden');
-    }
-}
-
-function mountFab() {
-    const wrap = document.createElement('div');
-    wrap.id = 'fab';
-    wrap.className = 'fixed bottom-6 right-6 md:bottom-10 md:right-10 z-40 flex flex-col items-end gap-4';
-    wrap.innerHTML = `
-        <div id="fab-menu" role="menu" aria-label="Действия со событиями"
-             class="flex flex-col items-stretch gap-3 opacity-0 translate-y-2 pointer-events-none transition-all duration-200">
-            <button type="button" role="menuitem" data-fab="pdf"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                Импорт из таблицы
-            </button>
-            <button type="button" role="menuitem" data-fab="add"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                Добавить событие
-            </button>
-            <button type="button" role="menuitem" data-fab="edit"
-                    class="flex items-center gap-3 whitespace-nowrap text-left bg-white shadow-elev-2 hover:shadow-elev-3 hover:bg-mist/60 px-5 py-3.5 text-sm font-semibold text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                Обновить событие
-            </button>
+function renderForbidden(title, text) {
+    const page = document.getElementById('page');
+    page.innerHTML = `
+    <div class="max-w-narrow mx-auto py-24 md:py-32 text-center">
+        <div class="mx-auto w-16 h-16 rounded bg-mist flex items-center justify-center mb-10" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FF7F11" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="11" width="16" height="10"></rect>
+                <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+            </svg>
         </div>
-        <button type="button" id="fab-toggle" aria-expanded="false" aria-controls="fab-menu" aria-label="Действия со событиями"
-                class="w-14 h-14 rounded bg-ember text-ink shadow-elev-2 hover:brightness-95 hover:shadow-elev-3 hover:-translate-y-0.5 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60 focus-visible:ring-offset-2">
-            <svg id="fab-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="transition-transform duration-200" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
-        </button>`;
-    document.body.appendChild(wrap);
-
-    wrap.querySelector('#fab-toggle').addEventListener('click', () => {
-        fabIsOpen() ? closeFabMenu() : openFabMenu();
-    });
-
-    wrap.querySelectorAll('[data-fab]').forEach(btn =>
-        btn.addEventListener('click', () => {
-            closeFabMenu();
-            if (btn.dataset.fab === 'pdf') openPdfModal(fabRefresh);
-            else if (btn.dataset.fab === 'add') openAddEventModal(fabRefresh);
-            else openUpdateEventModal(fabRefresh);
-        }));
-
-    document.addEventListener('click', e => { if (!wrap.contains(e.target)) closeFabMenu(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFabMenu(); });
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">${escHtml(title)}</h1>
+        <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-md mx-auto">${escHtml(text)}</p>
+        <a href="#/" class="${UI.btn} ${UI.btnPrimary} mt-10">На главную</a>
+    </div>`;
 }
 
-function fabIsOpen() {
-    const t = document.getElementById('fab-toggle');
-    return !!t && t.getAttribute('aria-expanded') === 'true';
-}
-
-function openFabMenu() {
-    const menu = document.getElementById('fab-menu');
-    const toggle = document.getElementById('fab-toggle');
-    const icon = document.getElementById('fab-icon');
-    if (!menu || !toggle) return;
-    menu.classList.remove('opacity-0', 'translate-y-2', 'pointer-events-none');
-    menu.classList.add('opacity-100', 'translate-y-0', 'pointer-events-auto');
-    toggle.setAttribute('aria-expanded', 'true');
-    if (icon) icon.classList.add('rotate-45');
-    const first = menu.querySelector('[data-fab]');
-    if (first) first.focus();
-}
-
-function closeFabMenu() {
-    const menu = document.getElementById('fab-menu');
-    const toggle = document.getElementById('fab-toggle');
-    const icon = document.getElementById('fab-icon');
-    if (!menu || !toggle) return;
-    menu.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
-    menu.classList.add('opacity-0', 'translate-y-2', 'pointer-events-none');
-    toggle.setAttribute('aria-expanded', 'false');
-    if (icon) icon.classList.remove('rotate-45');
-}
-
-function fabRefresh() {
-    if (getRoute() === '/my-events') { renderMyEvents(); return; }
-    (async () => {
-        try { await loadDashboardData(); }
-        catch (err) { console.error('[fab] ошибка обновления:', err); }
-        drawDashboard();
-    })();
-}
-
-/* ---------- Chrome: сайдбар дашборда ---------- */
+/* ---------- Chrome: сайдбар ---------- */
 
 function setChrome(visible) {
     const sidebar = document.getElementById('sidebar');
@@ -505,54 +367,69 @@ function navLinkClass(active) {
         : `${base} text-ink-soft hover:text-ink hover:bg-mist`;
 }
 
+function navLinks() {
+    const links = [
+        { href: '#/', route: '/', label: 'Главная' },
+        { href: '#/universities', route: '/universities', label: 'Университеты' },
+        { href: '#/olympiads', route: '/olympiads', label: 'Олимпиады' },
+    ];
+    if (store.user) {
+        if (store.canManageUniversity()) {
+            links.push({ href: '#/my-university', route: '/my-university', label: 'Мой университет' });
+        }
+        links.push({ href: '#/profile', route: '/profile', label: 'Профиль' });
+    }
+    if (store.isAdmin()) {
+        links.push({ href: '#/admin/users', route: '/admin', label: 'Администрирование' });
+    }
+    return links;
+}
+
 function renderHeader() {
     const nav = document.getElementById('nav');
     const userBox = document.getElementById('sidebar-user');
     if (!nav) return;
-    if (!store.user) {
-        nav.innerHTML = '';
-        if (userBox) userBox.innerHTML = '';
-        return;
-    }
 
-    const links = [
-        { href: '#/', route: '/', label: 'Олимпиады' },
-        { href: '#/my-events', route: '/my-events', label: 'Мои события' },
-        { href: '#/users', route: '/users', label: 'Пользователи' },
-        { href: '#/profile', route: '/profile', label: 'Профиль' },
-    ];
-    if (store.isAdmin()) {
-        links.push({ href: '#/admin/users', route: '/admin', label: 'Админ' });
-    }
-
-    nav.innerHTML = links.map(l =>
+    nav.innerHTML = navLinks().map(l =>
         `<a href="${l.href}" data-route="${l.route}" class="${navLinkClass(false)}">${l.label}</a>`
     ).join('');
 
     if (userBox) {
-        const initials = userInitials(store.user);
-        userBox.innerHTML = `
-        <div class="bg-mist rounded p-4">
-            <div class="flex items-center gap-3 min-w-0">
-                <div class="w-10 h-10 rounded bg-ember text-ink text-sm font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
-                <div class="min-w-0">
-                    <p class="font-semibold text-sm truncate">${escHtml(store.user.name)} ${escHtml(store.user.surname)}</p>
-                    <p class="text-xs text-ink-soft truncate">${escHtml(store.user.email || '')}</p>
+        if (!store.user) {
+            userBox.innerHTML = `
+            <div class="bg-mist rounded p-4">
+                <p class="text-sm text-ink-soft leading-relaxed">
+                    Каталоги и поиск открыты без входа. Войдите, чтобы управлять
+                    каталогом и БВИ своего университета.
+                </p>
+                <a href="#/auth" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall} w-full mt-4">Войти</a>
+            </div>`;
+        } else {
+            const initials = userInitials(store.user);
+            userBox.innerHTML = `
+            <div class="bg-mist rounded p-4">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-10 h-10 rounded bg-ember text-ink text-sm font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
+                    <div class="min-w-0">
+                        <p class="font-semibold text-sm truncate">${escHtml(store.user.name)} ${escHtml(store.user.surname)}</p>
+                        <p class="text-xs text-ink-soft truncate">${escHtml(store.roleLabel())}</p>
+                    </div>
                 </div>
-            </div>
-            <button id="btn-logout" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} w-full mt-4">Выйти</button>
-        </div>`;
-        document.getElementById('btn-logout').addEventListener('click', logout);
+                <button id="btn-logout" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} w-full mt-4">Выйти</button>
+            </div>`;
+            document.getElementById('btn-logout').addEventListener('click', logout);
+        }
     }
 
-    highlightNav(getRoute());
+    highlightNav(routePath());
 }
 
 function highlightNav(path) {
     let current = path || '/';
-    if (path.startsWith('/event/')) current = '/';
-    else if (path.startsWith('/users/')) current = '/users';
-    else if (path.startsWith('/admin')) current = '/admin';
+    if (current.startsWith('/universities')) current = '/universities';
+    else if (current.startsWith('/olympiads')) current = '/olympiads';
+    else if (current.startsWith('/admin')) current = '/admin';
+    else if (current === '/my-university') current = '/my-university';
     document.querySelectorAll('#nav a[data-route]').forEach(a => {
         const active = a.dataset.route === current;
         a.setAttribute('aria-current', active ? 'page' : 'false');
@@ -563,21 +440,21 @@ function highlightNav(path) {
 
 /* ---------- Bootstrap сессии ---------- */
 async function bootstrap() {
-    const route = getRoute() || '/';
-    const isPublicRoute = route === '/' || route === '/welcome' || route === '/auth';
-
     try {
-        /* На публичных страницах отсутствие JWT не должно уводить с визитки. */
-        const res = await api.getDashboard({ skipAuthRedirect: isPublicRoute });
-        if (res.ok && res.data && res.data.user_id) {
-            store.setUser(userFromDashboard(res.data));
-            store.setEvents(res.data.events);
-        } else if (!isPublicRoute) {
-            navigate('#/auth');
+        /* Каталоги публичны: проверка сессии не должна блокировать первый экран. */
+        const res = await api.getMe();
+        if (res.ok && res.data && res.data.id) {
+            store.setUser({
+                id: res.data.id,
+                name: res.data.name,
+                surname: res.data.surname,
+                email: res.data.email,
+                role: res.data.role || 'USER',
+                university_id: res.data.university_id || null,
+            });
         }
     } catch (err) {
         console.error('[bootstrap] ошибка проверки сессии:', err);
-        if (!isPublicRoute) navigate('#/auth');
     }
     renderHeader();
 }
@@ -585,9 +462,7 @@ async function bootstrap() {
 async function logout() {
     try { await api.logout(); } catch { /* сессия истечёт сама */ }
     store.clear();
-    setChrome(false);
-    setFab(false);
-    navigate('#/auth');
+    navigate('#/');
 }
 
 function bindChromeControls() {
@@ -605,21 +480,10 @@ function bindChromeControls() {
 /* ---------- Запуск приложения ---------- */
 (async function init() {
     bindChromeControls();
-
-    const route = getRoute() || '/';
-    const isPublicRoute = route === '/' || route === '/welcome' || route === '/auth';
-
-    /*
-     * Публичный экран не должен ждать ответа API: при недоступных БД/Redis
-     * проверка сессии может занять время, но визитка и авторизация уже видны.
-     */
-    if (isPublicRoute) {
-        router();
-    } else {
-        const page = document.getElementById('page');
-        if (page) page.innerHTML = loadingHtml('Проверяем сессию…');
+    const page = document.getElementById('page');
+    if (page && !isPublicRoute(routePath())) {
+        page.innerHTML = loadingHtml('Проверяем сессию…');
     }
-
     await bootstrap();
     router();
 })();

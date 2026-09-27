@@ -17,7 +17,17 @@ from app import database, schemas
 from app.caching.main import get_cached_user, get_redis, redis_lifespan
 from app.database.database import db_lifespan, get_db
 import app.middlewares.tokenz.main as tokenz
-from app.routers import admin, auth, events, health, user
+from app.routers import (
+    admin,
+    auth,
+    docs,
+    health,
+    imports,
+    olympiads,
+    search,
+    universities,
+    user,
+)
 
 
 logger = logging.getLogger('papaya.main')
@@ -35,8 +45,12 @@ app = FastAPI(lifespan=main_lifespan)
 install_exception_handlers(app)
 
 app.include_router(user.user_page, prefix='/api/v1')
-app.include_router(events.events_page, prefix='/api/v1')
 app.include_router(auth.auth_page, prefix='/api/v1')
+app.include_router(universities.universities_page, prefix='/api/v1')
+app.include_router(olympiads.olympiads_page, prefix='/api/v1')
+app.include_router(docs.docs_page, prefix='/api/v1')
+app.include_router(imports.imports_page, prefix='/api/v1')
+app.include_router(search.search_page, prefix='/api/v1')
 app.include_router(admin.admin_page, prefix='/api/v1')
 app.include_router(health.health_page)
 
@@ -83,40 +97,6 @@ async def main(
         return JSONResponse(status_code=200, content=user_dict)
     except HTTPException:
         raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
-
-
-@app.get('/api/v1/welcome')
-async def welcome(
-    db: AsyncSession = Depends(get_db),
-    r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
-    try:
-        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_dict = await get_user_from_cache_or_db(
-            jwt_data.get('sub'),
-            r,
-            db,
-        )
-        if not user_dict:
-            return JSONResponse(status_code=200, content={})
-        return JSONResponse(
-            status_code=200,
-            content={
-                'user_id': user_dict.get('id'),
-                'user_name': user_dict.get('name'),
-                'user_surname': user_dict.get('surname'),
-            },
-        )
-    except HTTPException:
-        return JSONResponse(status_code=200, content={})
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(
