@@ -14,8 +14,15 @@ from app.database.base import Base
 # autogenerate не увидит ни одной таблицы и сгенерирует пустую миграцию.
 import app.models  # noqa: F401, E402
 
-from dotenv import load_dotenv
-load_dotenv()
+# Подгрузка .env — удобство для локальной разработки, а не условие запуска
+# миграций: в Docker и CI переменные окружения приходят извне, и отсутствие
+# python-dotenv или самого файла .env не должно ронять `alembic upgrade head`.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:  # pragma: no cover - подстраховка на случай тонкой сборки
+    pass
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 

@@ -62,6 +62,9 @@ async function renderMyUniversity() {
         <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">
             ${escHtml(university.short_name || university.name)}
         </h1>
+        ${university.short_name && university.short_name !== university.name
+            ? `<p class="mt-3 text-lg text-ink-soft leading-snug">${escHtml(university.name)}</p>`
+            : ''}
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Выберите олимпиады из каталога, за которые университет даёт БВИ.
             Связь появится на странице университета после подтверждения администратором.

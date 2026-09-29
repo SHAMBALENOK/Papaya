@@ -138,7 +138,7 @@ async function renderOlympiad(olympiadId) {
             </div>
         </section>
 
-        ${sourceBlockHtml(source, olympiad)}
+        ${sourceBlockHtml(source)}
 
         ${isAdmin ? `
         <section class="mt-12">
@@ -166,18 +166,14 @@ async function renderOlympiad(olympiadId) {
 
 /** Блок «Откуда взялась информация».
  *
- * Источник важен для доверия к каталогу: пользователь должен видеть, что
- * перечень загружен из РСОШ, а не написан вручную. Если источник неизвестен,
- * блок не показывается — «источника нет» не то же самое, что «источник РСОШ».
+ * Источник важен для доверия к каталогу: пользователь должен видеть, что данные
+ * пришли из перечня РСОШ или что запись завели вручную. Ответ приходит всегда
+ * для существующей олимпиады, поэтому блок показывается всегда — скрывать его
+ * значило бы прятать факт ручного ввода.
  */
-function sourceBlockHtml(source, olympiad) {
+function sourceBlockHtml(source) {
     const title = (source && source.title) || '';
-    const url = (source && source.source_url) || olympiad.source_url;
-    if (!title && !url) return '';
-
-    const titleHtml = title
-        ? `<p class="mt-4 text-base font-semibold">${escHtml(title)}</p>`
-        : '<p class="mt-4 text-base text-ink-soft">Документ с перечнем олимпиад РСОШ</p>';
+    const url = (source && source.source_url) || '';
 
     const linkHtml = url
         ? `<p class="mt-3 text-sm">
@@ -189,7 +185,7 @@ function sourceBlockHtml(source, olympiad) {
     return `
         <section class="mt-14">
             <h2 class="${UI.eyebrow}">Откуда взялась информация</h2>
-            ${titleHtml}
+            <p class="mt-4 text-base font-semibold">${escHtml(title || 'Источник не указан')}</p>
             ${linkHtml}
         </section>`;
 }

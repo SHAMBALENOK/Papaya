@@ -245,6 +245,7 @@ async def edit_university(
         401: {'description': 'Access token missing'},
         403: {'description': 'You can only manage your own university'},
         404: {'description': 'University or olympiad not found'},
+        409: {'description': 'Olympiad is archived and accepts no new BVI requests'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -258,6 +259,12 @@ async def request_bvi(
     Связь создаётся в статусе ``PENDING`` и становится публичной после
     подтверждения администратором. Права проверяются для конкретного вуза:
     представитель одного университета не может заявить связь за другой.
+
+    Заявка возможна только по актуальной олимпиаде (``PUBLISHED``). Архивная
+    олимпиада — историческая запись, и новые связи за ней не создаются: её
+    уже нет в актуальном перечне РСОШ, а университет не может подтвердить БВИ
+    за олимпиаду, которой нет. Уже подтверждённые связи при этом сохраняются
+    и остаются видимыми — архив не отменяет историю.
     """
     try:
         university = await database.universities.get_university(university_id)
@@ -266,6 +273,15 @@ async def request_bvi(
         olympiad = await database.olympiads.get_olympiad(body.olympiad_id)
         if not olympiad:
             raise HTTPException(status_code=404, detail='Olympiad not found')
+        if olympiad.get('status') == 'ARCHIVED':
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    'Олимпиада архивирована: её нет в актуальном перечне РСОШ, '
+                    'новые заявки БВИ за неё не принимаются. Подтверждённые ранее '
+                    'связи сохраняются.'
+                ),
+            )
 
         link = await database.bvi.request_bvi_link(
             body.olympiad_id,
