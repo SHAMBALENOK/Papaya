@@ -86,16 +86,33 @@ async def test_import_xlsx_joins_multiline_names(client):
 
 
 async def test_import_sets_document_as_source(client):
-    """Олимпиада помнит документ-источник: пользователь видит, откуда данные."""
+    """Олимпиада помнит документ-источник: пользователь видит, откуда данные.
+
+    Внутренний ``source_doc_id`` в публичном каталоге не отдаётся, поэтому
+    проверяем два разных факта:
+
+    - пользователь видит, что данные из РСОШ, через ``/olympiads/{id}/source``;
+    - система помнит конкретный документ — это видно администратору.
+    """
     await admin_client(client)
     doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
     await run_import(client, doc['id'])
     await client.post(f"/api/v1/imports/{doc['id']}/confirm", json={})
 
-    detail = await client.get('/api/v1/olympiads?include_archived=true')
-    olympiads = detail.json()['olympiads']
+    catalog = await client.get('/api/v1/olympiads')
+    olympiads = catalog.json()['olympiads']
     assert olympiads
-    assert all(item['source_doc_id'] == doc['id'] for item in olympiads)
+    assert all('source_doc_id' not in item for item in olympiads)
+
+    source = await client.get(f"/api/v1/olympiads/{olympiads[0]['id']}/source")
+    assert source.status_code == 200
+    assert source.json()['title'], 'источник должен называться, а не быть пустым'
+
+    admin_list = await client.get('/api/v1/admin/olympiads')
+    assert admin_list.status_code == 200
+    admin_items = admin_list.json()['olympiads']
+    assert admin_items
+    assert all(item['source_doc_id'] == doc['id'] for item in admin_items)
 
 
 # ------------------------------------------------------------------- PDF

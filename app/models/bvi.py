@@ -58,6 +58,10 @@ class UniversityBvi(Base):
         nullable=False,
         index=True,
     )
+    # Связь хранит двух участников решения: кто заявил (``createdBy``) и кто
+    # подтвердил (``confirmedBy``). Инвариант: подтверждение есть только у
+    # ``CONFIRMED`` — у ``PENDING`` ``confirmedBy`` всегда NULL, иначе по записи
+    # нельзя понять, кто сейчас отвечает за связь.
     status = Column(String, nullable=False, default='PENDING', index=True)
     createdBy = Column(
         UUID(as_uuid=True),

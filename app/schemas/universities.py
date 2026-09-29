@@ -11,6 +11,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.schemas.urls import ExternalUrl
+
 
 class UniversityBase(BaseModel):
     id: Optional[UUID] = None
@@ -18,9 +20,9 @@ class UniversityBase(BaseModel):
     name_norm: Optional[str] = None
     short_name: Optional[str] = None
     description: Optional[str] = None
-    website: Optional[str] = None
-    preview_image: Optional[str] = None
-    image: Optional[str] = None
+    website: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
 
     @field_validator('id', mode='before')
     @classmethod
@@ -37,9 +39,9 @@ class UniversityCreate(BaseModel):
     name: str
     short_name: Optional[str] = None
     description: Optional[str] = None
-    website: Optional[str] = None
-    preview_image: Optional[str] = None
-    image: Optional[str] = None
+    website: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
 
     @field_validator('name')
     @classmethod
@@ -55,9 +57,9 @@ class UniversityUpdate(BaseModel):
     name: Optional[str] = None
     short_name: Optional[str] = None
     description: Optional[str] = None
-    website: Optional[str] = None
-    preview_image: Optional[str] = None
-    image: Optional[str] = None
+    website: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
 
 
 class UniversityResponse(UniversityBase):

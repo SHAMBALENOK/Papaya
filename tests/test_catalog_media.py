@@ -95,28 +95,81 @@ async def test_admin_can_change_images(client):
 # ------------------------------ Источник ------------------------------
 
 
-async def test_olympiad_source_is_public(client):
-    """Гость видит источник данных: доверие к каталогу не требует входа."""
+async def test_olympiad_source_of_manual_olympiad(client):
+    """Ручная олимпиада — нормальное состояние, а не ошибка.
+
+    У неё нет документа РСОШ, но источник данных всё равно существует: его завёл
+    администратор. Раньше «нет документа» грозил ошибкой, и такая олимпиада
+    выглядела сломанной.
+    """
+    olympiad = await create_olympiad(client, 'Олимпиада без документа')
+
+    response = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
+    assert response.status_code == 200
+    assert response.json() == {
+        'title': 'Создано администратором Papaya',
+        'source_url': None,
+    }
+
+
+async def test_olympiad_source_keeps_manual_link(client):
+    """Ручная запись с заполненной ссылкой сохраняет её в источнике."""
     olympiad = await create_olympiad(
         client,
-        'Олимпиада школьников «Физтех»',
-        source_url='https://rsr-olymp.ru/list',
+        'Олимпиада со ссылкой',
+        source_url='https://rsr-olymp.ru/manual',
     )
 
     response = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
     assert response.status_code == 200
     body = response.json()
-    assert body['source_url'] == 'https://rsr-olymp.ru/list'
-    assert body['olympiad'] == 'Олимпиада школьников «Физтех»'
+    assert body['title'] == 'Создано администратором Papaya'
+    assert body['source_url'] == 'https://rsr-olymp.ru/manual'
 
 
 async def test_olympiad_source_does_not_leak_internals(client):
-    """Публичный источник не отдаёт служебное: имя файла, хеш, статус."""
+    """Публичный источник отдаёт ровно два пользовательских поля.
+
+    Внутренний UUID документа, имя файла, хеш и статус обработки — не
+    пользовательская информация, и наружу они не выходят.
+    """
     olympiad = await create_olympiad(client, 'Олимпиада без документа')
     response = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
     assert response.status_code == 200
-    body = response.json()
-    assert set(body) == {'title', 'source_url', 'olympiad'}
+    assert set(response.json()) == {'title', 'source_url'}
+
+
+async def test_public_olympiad_hides_source_doc_id(client):
+    """Внутренний идентификатор документа не публикуется.
+
+    ``source_doc_id`` нужен системе (импорт, архивирование) и администратору, но
+    посетителю каталога он ничего не даёт, а рассказывает об устройстве
+    импорта. Для источника есть отдельный маршрут.
+    """
+    olympiad = await create_olympiad(client, 'Олимпиада для проверки')
+
+    detail = await client.get(f"/api/v1/olympiads/{olympiad['id']}")
+    assert detail.status_code == 200
+    assert 'source_doc_id' not in detail.json()
+
+    catalog = await client.get('/api/v1/olympiads')
+    assert 'source_doc_id' not in catalog.json()['olympiads'][0]
+
+
+async def test_admin_still_sees_source_doc_id(client):
+    """Администратору источник записи нужен: он управляет импортом и архивом."""
+    olympiad = await create_olympiad(client, 'Олимпиада для админа')
+
+    created = await client.post(
+        f"/api/v1/olympiads/add_olympiad",
+        json={'name': 'Олимпиада из ответа админа'},
+    )
+    assert created.status_code == 201
+    assert 'source_doc_id' in created.json()
+
+    admin_list = await client.get('/api/v1/admin/olympiads')
+    assert admin_list.status_code == 200
+    assert 'source_doc_id' in admin_list.json()['olympiads'][0]
 
 
 async def test_olympiad_source_of_unknown_olympiad_is_404(client):

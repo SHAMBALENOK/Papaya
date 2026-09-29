@@ -3,6 +3,10 @@
 Олимпиада — единая сущность каталога, независимая от года. Схема записи не
 принимает ``status``: актуальность определяется импортом РСОШ и архивированием
 (см. ``app/rsosh/persist.py``) либо администратором через отдельный маршрут.
+
+Публичная карточка и ответ админских маршрутов различаются составом полей:
+``source_doc_id`` — внутренняя ссылка на загруженный документ, и в публичном
+ответе её нет (пользователю достаточно ``GET /olympiads/{id}/source``).
 """
 
 from datetime import datetime
@@ -10,6 +14,8 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
+from app.schemas.urls import ExternalUrl
 
 OLYMPIAD_STATUSES = ('PUBLISHED', 'ARCHIVED')
 
@@ -22,11 +28,10 @@ class OlympiadBase(BaseModel):
     name: str
     name_norm: Optional[str] = None
     description: Optional[str] = None
-    official_url: Optional[str] = None
-    preview_image: Optional[str] = None
-    image: Optional[str] = None
-    source_url: Optional[str] = None
-    source_doc_id: Optional[UUID] = None
+    official_url: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
+    source_url: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'
     archive_reason: Optional[str] = None
 
@@ -59,10 +64,10 @@ class OlympiadCreate(BaseModel):
 
     name: str
     description: Optional[str] = None
-    official_url: Optional[str] = None
-    preview_image: Optional[str] = None
-    image: Optional[str] = None
-    source_url: Optional[str] = None
+    official_url: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
+    source_url: Optional[ExternalUrl] = None
 
     @field_validator('name')
     @classmethod
@@ -84,10 +89,10 @@ class OlympiadUpdate(BaseModel):
 
     name: Optional[str] = None
     description: Optional[str] = None
-    official_url: Optional[str] = None
-    preview_image: Optional[str] = None
-    image: Optional[str] = None
-    source_url: Optional[str] = None
+    official_url: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
+    source_url: Optional[ExternalUrl] = None
 
     @field_validator('name')
     @classmethod
@@ -100,6 +105,23 @@ class OlympiadUpdate(BaseModel):
 
 
 class OlympiadResponse(OlympiadBase):
+    """Ответ админских маршрутов (создание, правка, архив).
+
+    В отличие от публичной карточки содержит ``source_doc_id``: администратор
+    должен видеть, из какого документа взялась запись. Публично этот
+    идентификатор не отдаётся — для пользователя есть ``/olympiads/{id}/source``.
+    """
+
+    source_doc_id: Optional[UUID] = None
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OlympiadPublicResponse(OlympiadBase):
+    """Публичная карточка олимпиады — без внутренних ссылок на документы."""
+
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 

@@ -241,11 +241,22 @@ function roleBadge(role) {
 function adminUsersHtml(users, universities) {
     if (!users.length) return emptyHtml('Пользователей нет', 'Зарегистрируйте первого пользователя.');
     const selfId = store.user ? store.user.id : null;
+    // Активных администраторов может быть один: последнего нельзя понизить или
+    // заблокировать — иначе зайти в панель будет некому. Сервер проверяет это
+    // правило (ошибка 409), здесь кнопки просто не предлагают действие.
+    const activeAdmins = users.filter(item => item.role === 'ADMIN' && item.isActive).length;
 
     return `<p class="text-sm text-ink-faint mb-6">Всего: ${users.length}</p>
     <div class="space-y-6">
         ${users.map(u => {
             const isSelf = String(u.id) === String(selfId);
+            const isLastAdmin = u.role === 'ADMIN' && u.isActive && activeAdmins === 1;
+            // Кнопки без действующего обоснования не показываем: показывать
+            // «сделать нельзя» и получать ошибку — хуже, чем объяснить сразу.
+            const lockedReason = isSelf
+                ? 'Нельзя менять роль у себя'
+                : (isLastAdmin ? 'Последний активный администратор' : '');
+            const lockedAttrs = lockedReason ? `disabled title="${escAttr(lockedReason)}"` : '';
             const universityOptions = universities.map(item =>
                 `<option value="${escAttr(item.id)}" ${String(u.university_id) === String(item.id) ? 'selected' : ''}>${escHtml(item.short_name || item.name)}</option>`).join('');
             return `
@@ -277,17 +288,18 @@ function adminUsersHtml(users, universities) {
                         <option value="">Без университета</option>
                         ${universityOptions}
                     </select>
-                    <button type="button" data-act="saveRole" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">
+                    <button type="button" data-act="saveRole" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}"
+                            ${isLastAdmin ? lockedAttrs : ''}>
                         Сохранить роль
                     </button>
                     <button type="button" data-act="${u.role === 'ADMIN' ? 'demote' : 'grant'}" data-id="${escAttr(u.id)}"
                             class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}"
-                            ${isSelf ? 'disabled title="Нельзя менять роль у себя"' : ''}>
+                            ${u.role === 'ADMIN' ? lockedAttrs : ''}>
                         ${u.role === 'ADMIN' ? 'Снять админа' : 'Сделать админом'}
                     </button>
                     <button type="button" data-act="${u.isActive ? 'ban' : 'unban'}" data-id="${escAttr(u.id)}"
                             class="${UI.btn} ${u.isActive ? UI.btnDanger : UI.btnSecondary} ${UI.btnSmall}"
-                            ${isSelf ? 'disabled title="Нельзя заблокировать себя"' : ''}>
+                            ${u.isActive ? lockedAttrs : ''}>
                         ${u.isActive ? 'Заблокировать' : 'Разблокировать'}
                     </button>
                 </div>
@@ -355,8 +367,8 @@ function adminUniversitiesHtml(universities) {
         ${universities.map(item => `
         <div class="${UI.card} px-8 py-7 flex flex-col lg:flex-row lg:items-center gap-6">
             <div class="flex-1 min-w-0">
-                <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
-                <p class="mt-2 text-sm text-ink-soft">${escHtml(item.short_name || '')}${item.website ? ' · ' + escHtml(item.website) : ''}</p>
+                <p class="font-bold text-ink leading-snug">${escHtml(item.short_name || item.name)}</p>
+                <p class="mt-2 text-sm text-ink-soft">${escHtml(item.short_name ? item.name : '')}${item.website ? `${item.short_name ? ' · ' : ''}` + escHtml(item.website) : ''}</p>
             </div>
             <div class="flex items-center gap-3 flex-wrap shrink-0">
                 <a href="#/universities/${escAttr(item.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть</a>

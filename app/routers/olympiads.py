@@ -33,7 +33,6 @@ class OlympiadListItem(BaseModel):
     preview_image: str | None = None
     image: str | None = None
     source_url: str | None = None
-    source_doc_id: str | None = None
     status: str | None = None
     archive_reason: str | None = None
 
@@ -42,20 +41,36 @@ class OlympiadsResponse(BaseModel):
     olympiads: List[OlympiadListItem]
 
 
+#: Заголовок источника для олимпиады, созданной вручную. Такой записи нет в
+#: перечне РСОШ, и это нужно сказать прямо, а не молча показать пустоту.
+MANUAL_SOURCE_TITLE = 'Создано администратором Papaya'
+
+#: Заголовок источника для записи из документа РСОШ, у которого нет названия.
+RSOSH_SOURCE_TITLE = 'Перечень олимпиад РСОШ'
+
+
 class SourceInfo(BaseModel):
     """Откуда взялась информация об олимпиаде.
 
-    Публичный минимум: пользователь должен видеть источник данных, не скачивая
-    при этом документ. Служебные поля документа (внутренний файл, хеш, статус
-    обработки) наружу не отдаются.
+    Ровно два поля, оба пользовательские: ``title`` — что стало источником
+    данных, ``source_url`` — публичная ссылка, если она есть. Внутренние
+    детали документа (UUID, имя файла, хеш, статус обработки, metadata) здесь
+    не отдаются: ответ на вопрос «откуда это» не должен быть доступом к
+    загруженному файлу.
     """
 
     title: str | None = None
     source_url: str | None = None
-    olympiad: str | None = None
 
 
 def _serialize(olympiad: dict) -> dict:
+    """Публичное представление олимпиады.
+
+    ``source_doc_id`` намеренно не попадает в ответ: это внутренняя ссылка на
+    загруженный документ, пользователю она ничего не даёт, а раскрывает
+    устройство импорта. Для источника есть отдельный маршрут
+    ``/olympiads/{id}/source``.
+    """
     return {
         'id': olympiad.get('id'),
         'name': olympiad.get('name'),
@@ -64,7 +79,6 @@ def _serialize(olympiad: dict) -> dict:
         'preview_image': olympiad.get('preview_image'),
         'image': olympiad.get('image'),
         'source_url': olympiad.get('source_url'),
-        'source_doc_id': olympiad.get('source_doc_id'),
         'status': olympiad.get('status'),
         'archive_reason': olympiad.get('archive_reason'),
     }
@@ -101,7 +115,7 @@ async def list_olympiads(
 
 @olympiads_page.get(
     '/{olympiad_id}',
-    response_model=schemas.olympiads.OlympiadResponse,
+    response_model=schemas.olympiads.OlympiadPublicResponse,
     responses={
         200: {'description': 'Olympiad details'},
         404: {'description': 'Olympiad not found'},
@@ -109,7 +123,7 @@ async def list_olympiads(
     },
 )
 async def olympiad_details(olympiad_id: uuid.UUID):
-    """Страница олимпиады."""
+    """Страница олимпиады (публичная карточка, без внутренних id документов)."""
     try:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)
         if not olympiad:
@@ -127,28 +141,34 @@ async def olympiad_details(olympiad_id: uuid.UUID):
     response_model=SourceInfo,
     responses={
         200: {'description': 'Источник данных об олимпиаде'},
-        404: {'description': 'Olympiad not found or has no source document'},
+        404: {'description': 'Olympiad not found'},
         500: {'description': 'Internal server error'},
     },
 )
 async def olympiad_source(olympiad_id: uuid.UUID):
-    """Откуда взята информация об олимпиаде.
+    """Откуда взялась информация об олимпиаде.
 
-    Публичный минимум для доверия к данным: название документа-источника и
-    ссылка на него, если она была указана. Служебные поля документа (имя
-    файла, хеш, статус обработки) намеренно не отдаются — здесь нужен ответ на
-    вопрос «откуда это», а не доступ к загруженному файлу.
+    Отвечает всегда (кроме несуществующей олимпиады): у Papaya два нормальных
+    источника — документ РСОШ и ручной ввод администратора, и оба надо называть
+    прямо. Раньше «нет документа» грозил ошибкой, из-за чего ручная олимпиада
+    выглядела сломанной.
+
+    - импорт РСОШ → ``title`` из названия документа, ``source_url`` из metadata
+      или из поля олимпиады;
+    - ручное создание → ``title`` = «Создано администратором Papaya»,
+      ``source_url`` = заполненная ссылка или ``null``.
+
+    Название файла, хеш, статус обработки и прочие служебные поля документа
+    наружу не отдаются: нужен ответ на вопрос «откуда это», а не доступ к
+    загруженному файлу.
     """
     try:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)
         if not olympiad:
             raise HTTPException(status_code=404, detail='Olympiad not found')
 
-        source: SourceInfo = SourceInfo(
-            title=olympiad.get('source_url') or None,
-            source_url=olympiad.get('source_url') or None,
-            olympiad=olympiad.get('name'),
-        )
+        title = MANUAL_SOURCE_TITLE
+        source_url = olympiad.get('source_url') or None
 
         doc_id = olympiad.get('source_doc_id')
         if doc_id:
@@ -156,18 +176,10 @@ async def olympiad_source(olympiad_id: uuid.UUID):
             if doc:
                 metadata = doc.get('metadata') or {}
                 rsosh = metadata.get('rsosh') or {}
-                # РСОШ-источник: показываем название документа, если оно есть, и
-                # ссылку на перечень. Название файла и хеш наружу не отдаются —
-                # это детали загрузки, а не «источник данных».
-                source.title = (
-                    metadata.get('title')
-                    or rsosh.get('title')
-                    or 'Перечень олимпиад РСОШ'
-                )
-                source.source_url = metadata.get('source_url') or olympiad.get(
-                    'source_url'
-                )
-        return source
+                title = metadata.get('title') or rsosh.get('title') or RSOSH_SOURCE_TITLE
+                source_url = metadata.get('source_url') or source_url
+
+        return SourceInfo(title=title, source_url=source_url)
     except HTTPException:
         raise
     except Exception:

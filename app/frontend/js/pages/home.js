@@ -167,10 +167,12 @@ function cardImageHtml(entity) {
             </div>`;
 }
 
-/** Заголовок карточки: полное название и краткое — оба, если они разные.
+/** Заголовок карточки: краткое название, под ним — полное.
  *
- * Раньше карточка показывала только краткое название, из-за чего
- * «НИУ ВШЭ — Школа экономики» выглядело как случайный набор слов.
+ * Краткое название идёт первым намеренно: карточка отвечает на вопрос «это
+ * МФТИ или Ломоносов?», а полное название нужное как уточнение. Обратный
+ * порядок заставлял читать «Московский физико-технический институт» раньше,
+ * чем «МФТИ». Полное название не прячется — оно всегда под кратким.
  */
 function entityTitleHtml(entity) {
     const name = escHtml(entity.name || '');
@@ -179,6 +181,6 @@ function entityTitleHtml(entity) {
         return `<h3 class="text-xl font-bold tracking-tight leading-snug">${name}</h3>`;
     }
     return `
-            <h3 class="text-xl font-bold tracking-tight leading-snug">${name}</h3>
-            <p class="mt-1 text-sm font-semibold text-ink-soft">${shortName}</p>`;
+            <h3 class="text-xl font-bold tracking-tight leading-snug">${shortName}</h3>
+            <p class="mt-1 text-sm text-ink-soft leading-snug">${name}</p>`;
 }

@@ -13,15 +13,27 @@ RUN apt-get update -o Acquire::Retries=10 -o Acquire::http::Timeout="60" -o Acqu
 
 COPY requirements.txt .
 
+# pip не использует apt, поэтому отдельного «сборочного» пакета здесь нет и
+# удалять нечего. Ранье здесь стоял `apt-get purge -y --auto-remove` без списка
+# пакетов: команда без аргументов вычищает всё, что apt считает ненужным, и
+# вместе со списками пакетов задевает runtime-часть образа — в том числе
+# tesseract и его языковые данные, на которых держится весь импорт РСОШ.
+# Очищаем только кэш apt.
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
-    apt-get purge -y --auto-remove && \
-    rm -rf /root/.cache /tmp/*
+    rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
 COPY . .
 
+# setup.sh — точка входа, и она обязана быть исполняемой. В рабочем дереве файл
+# может прийти с CRLF (checkout на Windows), и тогда shebang превращается в
+# `#!/bin/sh\r`: ядро не находит интерпретатор и контейнер падает с
+# "exec /setup.sh: no such file or directory". Приводим к LF в образе, чтобы
+# сборка не зависела от настроек git на машине разработчика.
 COPY setup.sh /setup.sh
-RUN chmod +x /setup.sh
+RUN chmod +x /setup.sh && \
+    sed -i 's/\r$//' /setup.sh && \
+    head -1 /setup.sh | grep -q '^#!/bin/sh'
 
 ENTRYPOINT ["/setup.sh"]
 EXPOSE 5000

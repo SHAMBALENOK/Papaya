@@ -212,3 +212,24 @@ async def get_amount_of_users() -> int:
             select(func.count()).select_from(Users)
         )
         return result.scalar()
+
+
+async def count_active_admins(exclude_user_id=None) -> int:
+    """Сколько активных администраторов останется, если убрать ``exclude_user_id``.
+
+    Считаются только активные (``isActive``) пользователи с ролью ``ADMIN``:
+    заблокированный администратор не может зайти в панель, поэтому оставлять
+    систему «без единого активного ADMIN» после блокировки последнего нельзя.
+    """
+    statement = select(func.count()).select_from(Users).where(
+        Users.role == ROLE_ADMIN,
+        Users.isActive.is_(True),
+    )
+    if exclude_user_id is not None:
+        if isinstance(exclude_user_id, str):
+            exclude_user_id = uuid_mod.UUID(exclude_user_id)
+        statement = statement.where(Users.id != exclude_user_id)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(statement)
+        return result.scalar()

@@ -101,16 +101,18 @@ async function renderUniversity(universityId) {
             Все университеты
         </a>
 
-        ${university.image ? `
+        ${(university.image || university.preview_image) ? `
         <div class="mt-12 bg-mist shadow-elev-1">
-            <img src="${escAttr(university.image)}" alt="${escAttr(university.name)}" class="w-full max-h-[20rem] object-cover"
+            <img src="${escAttr(university.image || university.preview_image)}" alt="${escAttr(university.name)}" class="w-full max-h-[20rem] object-cover"
                  onerror="this.onerror=null;this.parentElement.style.display='none'">
         </div>` : ''}
 
         <header class="mt-14">
             <p class="${UI.eyebrow}">Университет</p>
-            <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(university.name)}</h1>
-            ${university.short_name && university.short_name !== university.name ? `<p class="mt-4 text-lg text-ink-soft">${escHtml(university.short_name)}</p>` : ''}
+            <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(university.short_name || university.name)}</h1>
+            ${university.short_name && university.short_name !== university.name
+                ? `<p class="mt-4 text-lg text-ink-soft leading-snug">${escHtml(university.name)}</p>`
+                : ''}
         </header>
 
         ${university.description ? `

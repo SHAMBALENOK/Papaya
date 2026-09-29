@@ -18,6 +18,8 @@ bcrypt==5.0.0
 sqlalchemy==2.0.52
 asyncpg==0.31.0
 alembic==1.20.0
+# подгрузка .env для migrations/env.py
+python-dotenv==1.1.1
 
 # --- Redis и фоновые задачи ---
 redis==6.4.0

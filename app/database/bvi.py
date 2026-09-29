@@ -172,7 +172,19 @@ async def set_bvi_status(
     *,
     confirmed_by=None,
 ) -> dict | None:
-    """Сменить статус связи (подтверждение/снятие администратором)."""
+    """Сменить статус связи (подтверждение/снятие администратором).
+
+    Инвариант пары «статус + кто подтвердил»:
+
+    - ``CONFIRMED`` — ``confirmedBy`` указывает на администратора, который
+      подтвердил связь;
+    - ``PENDING`` — ``confirmedBy`` обязателен ``NULL``.
+
+    Иначе после снятия подтверждения остаётся запись «статус PENDING, но
+    подтвердил администратор X», и по ней нельзя понять, кто сейчас отвечает за
+    связь. Поэтому ``confirmedBy`` пишется только вместе с ``CONFIRMED``, а при
+    возврате в ``PENDING`` очищается.
+    """
     if status not in ('PENDING', 'CONFIRMED'):
         raise ValueError(f'Unsupported BVI status: {status}')
 
@@ -188,7 +200,12 @@ async def set_bvi_status(
         if not link:
             return None
         link.status = status
-        link.confirmedBy = _as_uuid(confirmed_by) if confirmed_by else None
+        if status == 'CONFIRMED':
+            if not confirmed_by:
+                raise ValueError('CONFIRMED BVI link requires confirmed_by')
+            link.confirmedBy = _as_uuid(confirmed_by)
+        else:
+            link.confirmedBy = None
         link.updatedAt = now
         await session.commit()
         await session.refresh(link)
