@@ -457,7 +457,17 @@ async def test_disappeared_olympiad_is_archived_with_reason(client):
     listing = await client.get('/api/v1/olympiads?include_archived=true')
     archived = [row for row in listing.json()['olympiads'] if row['status'] == 'ARCHIVED']
     assert archived
-    assert all(row['archive_reason'] == 'RSOSH_ABSENT' for row in archived)
+    # Причина архива не показывается посетителю, но видна администратору.
+    assert all('archive_reason' not in row for row in archived)
+
+    # Причина архива видна администратору при возврате в архив: попытка вернуть
+    # запись, исчезнувшую из перечня РСОШ, отклоняется.
+    target = archived[0]['id']
+    refused_restore = await client.post(
+        f'/api/v1/admin/archive_olympiad/{target}?archived=false'
+    )
+    assert refused_restore.status_code == 409
+    assert 'перечн' in refused_restore.json()['detail']
     # Архивные олимпиады не видны в обычном каталоге.
     public = await client.get('/api/v1/olympiads')
     public_ids = {row['id'] for row in public.json()['olympiads']}
@@ -480,10 +490,16 @@ async def test_returned_olympiad_leaves_archive(client):
     await run_import(client, second['id'])
     assert (await client.post(f"/api/v1/imports/{second['id']}/confirm", json={})).status_code == 200
 
+    # Публично о статусе читает посетитель, а причина архива — внутреннее
+    # значение: в публичной карточке её нет намеренно.
     detail = await client.get(f'/api/v1/olympiads/{olympiad_id}')
     assert detail.status_code == 200
     assert detail.json()['status'] == 'PUBLISHED'
-    assert detail.json()['archive_reason'] is None
+    assert 'archive_reason' not in detail.json()
+
+    admin_view = await client.get(f'/api/v1/olympiads/{olympiad_id}')
+    assert admin_view.status_code == 200
+    assert admin_view.json()['status'] == 'PUBLISHED'
 
 
 async def test_archive_missing_false_keeps_olympiads_published(client):

@@ -11,6 +11,7 @@ from tests.conftest import (
     admin_client,
     create_olympiad,
     create_university,
+    moderate_bvi,
     register_user,
     university_rep_client,
 )
@@ -27,12 +28,11 @@ async def _confirmed_link(client, university, olympiad):
     assert created.json()['status'] == 'PENDING'
 
     await admin_client(client)
-    confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'CONFIRMED'},
+    confirmed = await moderate_bvi(
+        client, university['id'], olympiad['id'], 'confirm'
     )
-    assert confirmed.status_code == 200
-    assert confirmed.json()['status'] == 'CONFIRMED'
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()['result'] == 'CONFIRMED'
     return rep
 
 
@@ -227,7 +227,8 @@ async def test_database_rejects_representative_without_university(client):
         await session.rollback()
 
 
-async def test_admin_confirms_and_unconfirms_link(client):
+async def test_admin_confirms_and_revokes_link(client):
+    """Подтверждение делает связь публичной, отзыв — удаляет её."""
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
     await university_rep_client(client, university['id'])
@@ -237,24 +238,23 @@ async def test_admin_confirms_and_unconfirms_link(client):
     )
 
     await admin_client(client)
-    confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'CONFIRMED'},
-    )
+    confirmed = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
     assert confirmed.status_code == 200
-
-    dropped = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'PENDING'},
-    )
-    assert dropped.status_code == 200
-    assert dropped.json()['status'] == 'PENDING'
+    assert confirmed.json()['result'] == 'CONFIRMED'
 
     public = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
-    assert public.json()['olympiads'] == []
+    assert [item['id'] for item in public.json()['olympiads']] == [olympiad['id']]
+
+    revoked = await moderate_bvi(client, university['id'], olympiad['id'], 'revoke')
+    assert revoked.status_code == 200
+    assert revoked.json()['result'] == 'removed'
+
+    after = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert after.json()['olympiads'] == []
 
 
-async def test_status_update_requires_admin(client):
+async def test_moderation_requires_admin(client):
+    """Представитель не может ни подтвердить, ни отклонить заявку."""
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
     await university_rep_client(client, university['id'])
@@ -263,11 +263,11 @@ async def test_status_update_requires_admin(client):
         json={'olympiad_id': olympiad['id']},
     )
 
-    response = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'CONFIRMED'},
-    )
-    assert response.status_code == 403
+    for action in ('confirm', 'reject'):
+        response = await moderate_bvi(
+            client, university['id'], olympiad['id'], action
+        )
+        assert response.status_code == 403, action
 
 
 async def test_rep_removes_own_pending_request(client):
@@ -332,22 +332,102 @@ async def test_admin_can_remove_confirmed_link(client):
     assert public.json()['olympiads'] == []
 
 
-async def test_admin_revoke_keeps_link_but_hides_it(client):
-    """Снятие подтверждения возвращает связь в статус заявки, а не удаляет её."""
+async def test_admin_revoke_deletes_link_entirely(client):
+    """Отзыв подтверждения удаляет связь, а не возвращает её в PENDING.
+
+    Искусственное состояние «PENDING после подтверждения» не оставляет записи,
+    которая нигде не видна: в публичном каталоге связь не показывается, а в
+    очереди модерации висит как будто университет подал заявку заново.
+    """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
     await _confirmed_link(client, university, olympiad)
 
-    revoked = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'PENDING'},
-    )
+    revoked = await moderate_bvi(client, university['id'], olympiad['id'], 'revoke')
     assert revoked.status_code == 200
-    assert revoked.json()['status'] == 'PENDING'
+    assert revoked.json()['result'] == 'removed'
 
     client.cookies.clear()
     public = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
     assert public.json()['olympiads'] == []
+
+    # В очереди модерации связи тоже нет: отзыв удалил её, а не вернул в заявки.
+    await admin_client(client)
+    queue = await client.get('/api/v1/admin/bvi')
+    assert queue.status_code == 200
+    assert queue.json()['links'] == []
+
+
+async def test_reject_deletes_pending_request(client):
+    """Отклонение заявки удаляет её: повторную подачу ждёт новая заявка."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await university_rep_client(client, university['id'])
+    await client.post(
+        f"/api/v1/universities/{university['id']}/bvi",
+        json={'olympiad_id': olympiad['id']},
+    )
+
+    await admin_client(client)
+    rejected = await moderate_bvi(client, university['id'], olympiad['id'], 'reject')
+    assert rejected.status_code == 200
+    assert rejected.json()['result'] == 'removed'
+
+    queue = await client.get('/api/v1/admin/bvi')
+    assert queue.json()['links'] == []
+
+
+async def test_moderation_actions_are_state_aware(client):
+    """Действие не применимо к связи в другом состоянии — 409, а не тихий no-op."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await university_rep_client(client, university['id'])
+    await client.post(
+        f"/api/v1/universities/{university['id']}/bvi",
+        json={'olympiad_id': olympiad['id']},
+    )
+
+    await admin_client(client)
+    # Отозвать ещё не подтверждённое и отклонить подтверждённое — нельзя.
+    assert (await moderate_bvi(
+        client, university['id'], olympiad['id'], 'revoke'
+    )).status_code == 409
+
+    await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
+    assert (await moderate_bvi(
+        client, university['id'], olympiad['id'], 'reject'
+    )).status_code == 409
+    # Повторное подтверждение тоже не имеет смысла.
+    assert (await moderate_bvi(
+        client, university['id'], olympiad['id'], 'confirm'
+    )).status_code == 409
+
+
+async def test_legacy_status_endpoint_is_gone(client):
+    """Произвольной смены статуса больше нет: только явные действия."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await university_rep_client(client, university['id'])
+    await client.post(
+        f"/api/v1/universities/{university['id']}/bvi",
+        json={'olympiad_id': olympiad['id']},
+    )
+
+    await admin_client(client)
+    for status in ('PENDING', 'CONFIRMED'):
+        response = await client.post(
+            f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
+            json={'status': status},
+        )
+        assert response.status_code in (404, 405), (status, response.status_code)
+
+
+async def test_unknown_action_is_422(client):
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await admin_client(client)
+    response = await moderate_bvi(client, university['id'], olympiad['id'], 'approve')
+    assert response.status_code == 422
 
 
 async def test_archived_olympiad_keeps_confirmed_link(client):

@@ -161,21 +161,6 @@ async def edit_university(university_id, ins: dict) -> dict | None:
         return university_to_dict(university)
 
 
-async def delete_university(university_id) -> bool:
-    """Удалить университет вместе с его связями БВИ (ON DELETE CASCADE)."""
-    university_uuid = _as_uuid(university_id)
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Universities).where(Universities.id == university_uuid)
-        )
-        university = result.scalar_one_or_none()
-        if not university:
-            return False
-        await session.delete(university)
-        await session.commit()
-        return True
-
-
 async def count_universities() -> int:
     """Количество университетов в каталоге."""
     async with AsyncSessionLocal() as session:

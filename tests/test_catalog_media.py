@@ -246,7 +246,17 @@ async def test_archived_olympiad_is_visible_in_admin_with_reason(client):
     assert listing.status_code == 200
     item = next(row for row in listing.json()['olympiads'] if row['id'] == olympiad['id'])
     assert item['status'] == 'ARCHIVED'
-    assert item['archive_reason'] == 'MANUAL'
+    assert item['is_archived'] is True
+    # Причина архива — техническое значение для панели, не для посетителя.
+    assert 'archive_reason' not in item
+
+    admin_listing = await client.get('/api/v1/admin/olympiads')
+    assert admin_listing.status_code == 200
+    admin_item = next(
+        row for row in admin_listing.json()['olympiads']
+        if row['id'] == olympiad['id']
+    )
+    assert admin_item['archive_reason'] == 'MANUAL'
 
 
 async def test_unknown_olympiad_archive_is_404(client):

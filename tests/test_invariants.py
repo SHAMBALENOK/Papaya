@@ -16,6 +16,7 @@ from tests.conftest import (
     admin_client,
     create_olympiad,
     create_university,
+    moderate_bvi,
     register_user,
     set_user_role,
     university_rep_client,
@@ -83,10 +84,7 @@ async def test_archived_olympiad_keeps_confirmed_link(client):
     assert (await _link(client, university['id'], olympiad['id'])).status_code == 201
 
     await admin_client(client)
-    confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'CONFIRMED'},
-    )
+    confirmed = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
     assert confirmed.status_code == 200
 
     archived = await client.post(
@@ -115,15 +113,16 @@ async def test_unknown_olympiad_is_404_not_409(client):
     assert response.status_code == 404
 
 
-# ------------------------- confirmedBy и статус -------------------------
+# ------------------------- confirmedBy и модерация -------------------------
 
 
-async def test_confirmed_by_is_set_and_cleared_with_status(client):
+async def test_confirmed_by_lives_only_with_confirmed(client):
     """Подтверждение и его автор существуют только вместе.
 
     ``PENDING`` означает «ещё никто не подтвердил», поэтому ``confirmedBy``
     обязан быть пустым: иначе по записи нельзя понять, кто сейчас отвечает за
-    связь.
+    связь. Отзыв подтверждения удаляет связь целиком, а не возвращает её в
+    ``PENDING``, поэтому такой записи в модели не появляется.
     """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада для модерации')
@@ -135,38 +134,134 @@ async def test_confirmed_by_is_set_and_cleared_with_status(client):
     assert created.json()['confirmedBy'] is None
 
     admin = await admin_client(client)
-    confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'CONFIRMED'},
-    )
+    confirmed = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
     assert confirmed.status_code == 200
-    assert confirmed.json()['status'] == 'CONFIRMED'
-    assert confirmed.json()['confirmedBy'] == admin['id']
 
-    dropped = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'PENDING'},
-    )
-    assert dropped.status_code == 200
-    assert dropped.json()['status'] == 'PENDING'
-    assert dropped.json()['confirmedBy'] is None
+    queue = await client.get('/api/v1/admin/bvi')
+    link = queue.json()['links'][0]
+    assert link['status'] == 'CONFIRMED'
+    assert link['confirmedBy'] == admin['id']
 
 
-async def test_reconfirmation_sets_confirmed_by_again(client):
-    """Повторное подтверждение снова фиксирует автора."""
+async def test_revoke_removes_link_and_its_confirmation(client):
+    """Отзыв подтверждения удаляет связь: автора подтверждения не остаётся."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада для отзыва')
+    await university_rep_client(client, university['id'])
+    await _link(client, university['id'], olympiad['id'])
+
+    await admin_client(client)
+    await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
+    revoked = await moderate_bvi(client, university['id'], olympiad['id'], 'revoke')
+    assert revoked.status_code == 200
+    assert revoked.json()['result'] == 'removed'
+
+    queue = await client.get('/api/v1/admin/bvi')
+    assert queue.json()['links'] == []
+
+
+async def test_reject_removes_pending_link(client):
+    """Отклонение заявки удаляет связь целиком."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада для отклонения')
+    await university_rep_client(client, university['id'])
+    await _link(client, university['id'], olympiad['id'])
+
+    await admin_client(client)
+    rejected = await moderate_bvi(client, university['id'], olympiad['id'], 'reject')
+    assert rejected.status_code == 200
+    assert rejected.json()['result'] == 'removed'
+
+    queue = await client.get('/api/v1/admin/bvi')
+    assert queue.json()['links'] == []
+
+
+async def test_repeated_confirmation_is_rejected(client):
+    """Подтверждённую связь нельзя подтвердить повторно: это 409, а не no-op."""
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада для повтора')
     await university_rep_client(client, university['id'])
     await _link(client, university['id'], olympiad['id'])
 
-    admin = await admin_client(client)
-    url = f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status"
-    await client.post(url, json={'status': 'CONFIRMED'})
-    await client.post(url, json={'status': 'PENDING'})
+    await admin_client(client)
+    first = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
+    assert first.status_code == 200
 
-    again = await client.post(url, json={'status': 'CONFIRMED'})
-    assert again.status_code == 200
-    assert again.json()['confirmedBy'] == admin['id']
+    again = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
+    assert again.status_code == 409
+
+    # Связь осталась подтверждённой, а не исчезла и не «переподтвердилась».
+    queue = await client.get('/api/v1/admin/bvi')
+    assert queue.json()['links'][0]['status'] == 'CONFIRMED'
+
+
+# ------------------------- Исторические связи -------------------------
+
+
+async def test_archived_link_is_marked_historical(client):
+    """Подтверждённая связь с архивной олимпиадой помечается исторической.
+
+    Университет давал БВИ, пока олимпиада была в перечне. Связь сохраняется,
+    но интерфейс должен показать, что это история, а не действующая льгота.
+    """
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада вне перечня')
+    await university_rep_client(client, university['id'])
+    await _link(client, university['id'], olympiad['id'])
+
+    await admin_client(client)
+    await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
+    await client.post(f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true")
+
+    client.cookies.clear()
+    page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert page.status_code == 200
+    item = page.json()['olympiads'][0]
+    assert item['bvi_status'] == 'CONFIRMED'
+    assert item['status'] == 'ARCHIVED'
+    assert item['is_historical'] is True
+
+    back = await client.get(f"/api/v1/olympiads/{olympiad['id']}/universities")
+    assert back.status_code == 200
+    assert back.json()['universities'][0]['is_historical'] is True
+
+
+async def test_current_link_is_not_historical(client):
+    """Актуальная олимпиада с подтверждённой связью — не историческая."""
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Актуальная олимпиада')
+    await university_rep_client(client, university['id'])
+    await _link(client, university['id'], olympiad['id'])
+
+    await admin_client(client)
+    await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
+
+    client.cookies.clear()
+    page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    item = page.json()['olympiads'][0]
+    assert item['is_historical'] is False
+
+
+async def test_public_olympiad_has_no_technical_fields(client):
+    """Публичная карточка не отдаёт служебные поля импорта и модерации."""
+    olympiad = await create_olympiad(client, 'Олимпиада для публичной схемы')
+    await admin_client(client)
+    await client.post(
+        f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
+    )
+
+    detail = await client.get(f"/api/v1/olympiads/{olympiad['id']}")
+    assert detail.status_code == 200
+    body = detail.json()
+    for field in ('name_norm', 'source_doc_id', 'createdAt', 'updatedAt',
+                  'archive_reason'):
+        assert field not in body, f'{field} не должен попадать в публичный ответ'
+    assert set(body) == {
+        'id', 'name', 'description', 'official_url', 'preview_image', 'image',
+        'source_url', 'status',
+    }
+    # Архив виден по статусу, а не по техническому enum-значению.
+    assert body['status'] == 'ARCHIVED'
 
 
 # ------------------------- Один способ назначить представителя -------------------------

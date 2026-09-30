@@ -303,6 +303,23 @@ async def set_user_role(
     )
 
 
+async def moderate_bvi(
+    test_client: AsyncClient,
+    university_id: str,
+    olympiad_id: str,
+    action: str,
+):
+    """Административное действие над заявкой БВИ.
+
+    ``action`` — ``confirm`` | ``reject`` | ``revoke``. Отдельного «снятия
+    подтверждения в PENDING» в модели нет: отзыв подтверждения удаляет связь.
+    """
+    return await test_client.post(
+        f'/api/v1/universities/{university_id}/bvi/{olympiad_id}/moderation',
+        json={'action': action},
+    )
+
+
 async def upload_document(
     test_client: AsyncClient,
     filename: str,

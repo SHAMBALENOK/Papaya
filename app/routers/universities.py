@@ -107,6 +107,7 @@ async def university_details(university_id: uuid.UUID):
 
 @universities_page.get(
     '/{university_id}/olympiads',
+    response_model=schemas.bvi.BviOlympiadsResponse,
     responses={
         200: {'description': 'Олимпиады, дающие БВИ в университете'},
         400: {'description': 'Access token required to view pending requests'},
@@ -128,6 +129,11 @@ async def university_olympiads(
     Гость получает подтверждённые связи — этого достаточно основному
     сценарию. Неподтверждённые заявки видны представителю своего университета
     и администратору: это рабочий процесс модерации, а не публичный факт.
+
+    Архивные олимпиады в списке остаются, но помечаются ``is_historical``:
+    университет давал БВИ, пока олимпиада была в перечне РСОШ, и эта история
+    не должна выглядеть как «действующая льгота». Сама связь при этом не
+    удаляется.
     """
     try:
         university = await database.universities.get_university(university_id)
@@ -347,34 +353,57 @@ async def remove_bvi(
 
 
 @universities_page.post(
-    '/{university_id}/bvi/{olympiad_id}/status',
-    response_model=schemas.bvi.BviLinkResponse,
+    '/{university_id}/bvi/{olympiad_id}/moderation',
+    response_model=schemas.bvi.BviModerationResult,
     responses={
-        200: {'description': 'BVI link status updated'},
+        200: {'description': 'Link confirmed or removed'},
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         404: {'description': 'BVI link not found'},
+        409: {'description': 'Action does not apply to the current link state'},
         422: {'description': 'Validation error'},
         500: {'description': 'Internal server error'},
     },
 )
-async def set_bvi_status(
+async def moderate_bvi(
     university_id: uuid.UUID,
     olympiad_id: uuid.UUID,
-    body: schemas.bvi.BviStatusUpdate,
+    body: schemas.bvi.BviModerationRequest,
     current_user: deps.AdminUser = None,
 ):
-    """Подтвердить или снять связь БВИ (модерация, администратор)."""
+    """Модерация заявки БВИ: подтвердить, отклонить или отозвать.
+
+    Три действия, каждое со своим смыслом:
+
+    - ``confirm`` — заявка ``PENDING`` становится ``CONFIRMED``, и связь
+      появляется в публичном каталоге;
+    - ``reject`` — заявка отклонена, связь удаляется;
+    - ``revoke`` — подтверждение отозвано, связь удаляется.
+
+    Перевода ``CONFIRMED → PENDING`` нет: это не состояние заявки, а отзыв
+    публичного факта. После удаления связи университет может подать новую
+    заявку, и она попадёт в очередь как новая.
+    """
     try:
-        link = await database.bvi.set_bvi_status(
-            olympiad_id,
-            university_id,
-            body.status,
-            confirmed_by=current_user.get('id'),
-        )
-        if not link:
+        try:
+            outcome = await database.bvi.moderate_bvi_link(
+                olympiad_id,
+                university_id,
+                body.action,
+                admin_id=current_user.get('id'),
+            )
+        except database.bvi.BviModerationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        if not outcome:
             raise HTTPException(status_code=404, detail='BVI link not found')
-        return link
+
+        return {
+            'result': outcome['result'],
+            'university_id': str(university_id),
+            'olympiad_id': str(olympiad_id),
+            'status': outcome['result'] if outcome['result'] == 'removed' else 'CONFIRMED',
+        }
     except HTTPException:
         raise
     except Exception:

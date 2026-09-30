@@ -87,17 +87,28 @@ async function renderOlympiad(olympiadId) {
     const universities = (uniRes.ok && uniRes.data && uniRes.data.universities) || [];
     const source = (srcRes.ok && srcRes.data) || null;
     const isAdmin = store.isAdmin();
+    const isArchived = olympiad.status === 'ARCHIVED';
 
+    // У архивной олимпиады все оставшиеся связи исторические: университеты
+    // давали БВИ, пока олимпиада была в перечне РСОШ. Подпись «БВИ» здесь
+    // обещала бы льготу, которой сейчас нет, поэтому показываем «Историческая
+    // связь» и не выбрасываем университеты из списка.
     const universitiesHtml = universities.length
-        ? `<div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${universities.map(u =>
-            `<a href="#/universities/${escAttr(u.id)}"
-                  class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                <span class="${UI.badge} ${UI.badgeSuccess}">
-                    <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
-                </span>
+        ? `<div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${universities.map(u => {
+            const historical = isArchived || u.is_historical;
+            const badge = historical
+                ? `<span class="${UI.badge} ${UI.badgeNeutral}">Историческая связь</span>`
+                : `<span class="${UI.badge} ${UI.badgeSuccess}">
+                       <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
+                   </span>`;
+            return `
+            <a href="#/universities/${escAttr(u.id)}"
+               class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+                ${badge}
                 ${entityTitleHtml(u)}
                 <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть →</p>
-            </a>`).join('')}</div>`
+            </a>`;
+        }).join('')}</div>`
         : emptyHtml('Университеты с БВИ пока не указаны',
                     'Представители университетов заявляют такие связи, администратор подтверждает их.');
 
@@ -119,8 +130,8 @@ async function renderOlympiad(olympiadId) {
             <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(olympiad.name)}</h1>
         </header>
 
-        ${olympiad.status === 'ARCHIVED' ? `
-        <div class="mt-8">${alertHtml(archiveReasonText(olympiad.archive_reason), 'error')}</div>` : ''}
+        ${isArchived ? `
+        <div class="mt-8">${alertHtml(archivedOlympiadNotice(), 'error')}</div>` : ''}
 
         ${olympiad.description ? `
         <section class="mt-14">
@@ -163,6 +174,20 @@ async function renderOlympiad(olympiadId) {
     }
 }
 
+
+/** Текст архивной олимпиады для публичной страницы.
+ *
+ * Формулировка намеренно не называет причину архива. В публичном API её нет
+ * (значения `RSOSH_ABSENT` и `MANUAL` — технические enumы, пользователю они
+ * ничего не объясняют), а обе причины означают одно и то же для посетителя:
+ * олимпиады сейчас нет в актуальном каталоге, но её история сохранена.
+ * Точную причину видит администратор в панели.
+ */
+function archivedOlympiadNotice() {
+    return 'Олимпиада не входит в актуальный каталог Papaya. '
+         + 'Информация об олимпиаде, официальный сайт и ранее подтверждённые '
+         + 'связи с университетами сохранены.';
+}
 
 /** Блок «Откуда взялась информация».
  *

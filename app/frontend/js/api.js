@@ -127,8 +127,15 @@ const api = {
             university_id: universityId || null,
         });
     },
-    setBviStatus(universityId, olympiadId, status) {
-        return this.post(`/universities/${universityId}/bvi/${olympiadId}/status`, { status });
+    /** Модерация заявки БВИ.
+     *
+     * Действия явные: 'confirm' (подтвердить), 'reject' (отклонить заявку) и
+     * 'revoke' (отозвать подтверждение). Произвольной смены статуса нет:
+     * отзыв подтверждения — это удаление связи, а не возврат в PENDING.
+     */
+    moderateBvi(universityId, olympiadId, action) {
+        return this.post(
+            `/universities/${universityId}/bvi/${olympiadId}/moderation`, { action });
     },
     archiveOlympiad(id, archived) {
         return this.post(`/admin/archive_olympiad/${id}?archived=${archived === false ? 'false' : 'true'}`);

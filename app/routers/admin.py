@@ -59,6 +59,10 @@ class AdminOlympiadListItem(BaseModel):
     id: str | None = None
     name: str | None = None
     status: str | None = None
+    # Причина архива нужна панели: по ней понятно, можно ли вернуть запись
+    # вручную. Без неё интерфейс предлагал «Вернуть» для олимпиады,
+    # исчезнувшей из перечня РСОШ, и получал 409.
+    archive_reason: str | None = None
     source_doc_id: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
@@ -75,6 +79,13 @@ class AdminBviListItem(BaseModel):
     olympiad_id: str | None = None
     olympiad_name: str | None = None
     status: str | None = None
+    # Авторы решения: кто заявил и кто подтвердил. Без этого очередь модерации
+    # не отвечает на вопрос «это точно тот вуз? и кто это подтвердил?».
+    createdBy: str | None = None
+    confirmedBy: str | None = None
+    # Актуальна ли олимпиада: по архивной новая заявка невозможна, и
+    # администратор должен видеть это до нажатия кнопок.
+    olympiad_status: str | None = None
     createdAt: str | None = None
 
 
@@ -153,7 +164,12 @@ async def list_users(current_user: deps.AdminUser = None):
     },
 )
 async def list_olympiads(current_user: deps.AdminUser = None):
-    """Каталог олимпиад включая архивные (вне актуального перечня РСОШ)."""
+    """Каталог олимпиад включая архивные (вне актуального перечня РСОШ).
+
+    В отличие от публичного каталога содержит служебные поля: причина архива
+    (чтобы понимать, можно ли вернуть запись) и документ-источник (чтобы видеть,
+    откуда взялись данные).
+    """
     try:
         olympiads = await database.olympiads.list_olympiads(status=None)
         return {
@@ -162,6 +178,7 @@ async def list_olympiads(current_user: deps.AdminUser = None):
                     'id': item.get('id'),
                     'name': item.get('name'),
                     'status': item.get('status'),
+                    'archive_reason': item.get('archive_reason'),
                     'source_doc_id': item.get('source_doc_id'),
                     'createdAt': item.get('createdAt'),
                     'updatedAt': item.get('updatedAt'),
@@ -188,7 +205,13 @@ async def list_bvi_links(
     status: str | None = None,
     current_user: deps.AdminUser = None,
 ):
-    """Очередь модерации: заявки университетов на связи БВИ."""
+    """Очередь модерации: заявки университетов на связи БВИ.
+
+    Для каждой связи видно авторов решения (кто заявил, кто подтвердил) и
+    актуальность олимпиады: по архивной заявку уже нельзя подать, но
+    подтверждение администратора по ней может быть и историческим, и
+    осмысленным.
+    """
     try:
         links = await database.bvi.list_links(status=status)
         enriched: list[dict] = []
@@ -204,7 +227,10 @@ async def list_bvi_links(
                     'university_name': (university or {}).get('name'),
                     'olympiad_id': link.get('olympiad_id'),
                     'olympiad_name': (olympiad or {}).get('name'),
+                    'olympiad_status': (olympiad or {}).get('status'),
                     'status': link.get('status'),
+                    'createdBy': link.get('createdBy'),
+                    'confirmedBy': link.get('confirmedBy'),
                     'createdAt': link.get('createdAt'),
                 }
             )
@@ -214,39 +240,16 @@ async def list_bvi_links(
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
-async def _change_user(
-    user_id: uuid.UUID,
-    ins: dict,
-    r: aioredis.Redis,
-) -> dict:
-    """Изменить пользователя и сбросить версионный кэш ролей.
+def _raise_admin_guard_error(outcome, action: str) -> None:
+    """Превратить отказ защиты в понятный 409.
 
-    Роль читается через versioned-кэш Redis, поэтому после записи кэш обязан
-    быть инвалидирован — иначе понижение прав не действует до истечения JWT.
+    Сама проверка атомарна и живёт в слое данных
+    (``apply_role_guarded`` / ``set_active_guarded``): здесь только перевод
+    результата в HTTP-ошибку. Отдельный предварительный подсчёт администраторов
+    был бы гонкой — две параллельные операции могли бы обе решить, что
+    понижаемый не последний.
     """
-    updated = await database.users.edit_user(user_id, ins)
-    if not updated:
-        raise HTTPException(status_code=404, detail='User not found')
-    await safe_cache_write(cache_user_after_write(r, updated))
-    return updated
-
-
-async def _ensure_not_last_active_admin(
-    user_id: uuid.UUID,
-    action: str,
-) -> None:
-    """Не дать лишить систему единственного активного администратора.
-
-    Заблокированный или пониженный администратор не может открыть панель, а
-    назначать новых администраторов должен действующий. Поэтому операция,
-    после которой не остаётся ни одного активного ``ADMIN``, отклоняется с
-    409: это защита от необратимого потери доступа, а не от «ошибки прав».
-
-    С несколькими администраторами операция разрешена — понижать можно, пока
-    остаётся хотя бы один.
-    """
-    remaining = await users_db.count_active_admins(exclude_user_id=user_id)
-    if remaining == 0:
+    if outcome == users_db.ADMIN_GUARD_LAST_ADMIN:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -254,6 +257,8 @@ async def _ensure_not_last_active_admin(
                 'Сначала назначьте другого администратора.'
             ),
         )
+    if outcome == users_db.ADMIN_GUARD_MISSING:
+        raise HTTPException(status_code=404, detail='User not found')
 
 
 @admin_page.post(
@@ -273,14 +278,20 @@ async def ban(
     r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
-    """Заблокировать пользователя (isActive = False)."""
+    """Заблокировать пользователя (isActive = False).
+
+    Последнего активного администратора заблокировать нельзя (409): зайти в
+    панель будет некому. Проверка выполняется в той же транзакции и под
+    блокировкой строк администраторов, поэтому параллельные операции не могут
+    оставить систему без администратора.
+    """
     try:
-        to_user = await users_db.find_user_by_id(user_id)
-        if not to_user:
+        updated = await users_db.set_active_guarded(user_id, False)
+        if isinstance(updated, str):
+            _raise_admin_guard_error(updated, 'заблокировать')
             raise HTTPException(status_code=404, detail='User not found')
-        if to_user.get('role') == users_db.ROLE_ADMIN and to_user.get('isActive'):
-            await _ensure_not_last_active_admin(user_id, 'заблокировать')
-        return await _change_user(user_id, {'isActive': False}, r)
+        await safe_cache_write(cache_user_after_write(r, updated))
+        return updated
     except HTTPException:
         raise
     except Exception:
@@ -306,7 +317,12 @@ async def unban(
 ):
     """Разблокировать пользователя (isActive = True)."""
     try:
-        return await _change_user(user_id, {'isActive': True}, r)
+        updated = await users_db.set_active_guarded(user_id, True)
+        if isinstance(updated, str):
+            _raise_admin_guard_error(updated, 'разблокировать')
+            raise HTTPException(status_code=404, detail='User not found')
+        await safe_cache_write(cache_user_after_write(r, updated))
+        return updated
     except HTTPException:
         raise
     except Exception:
@@ -326,27 +342,18 @@ async def _apply_role(
     слой доступа, существование университета — здесь: ошибка 404 должна
     говорить администратору, что такого вуза в каталоге нет.
 
-    Отдельно проверяется, что снятие ``ADMIN`` не оставит систему без
-    администратора: этот путь доступен и через ``/role``, и через
-    ``/demote_admin``, и оба должны вести себя одинаково.
+    Запрет на снятие роли у последнего активного администратора проверяется
+    атомарно в слое данных, а не отдельным предварительным подсчётом: этот путь
+    доступен и через ``/role``, и через ``/demote_admin``, и оба должны вести
+    себя одинаково и не должны гоняться.
     """
     if university_id and role == users_db.ROLE_UNIVERSITY_REP:
         university = await database.universities.get_university(university_id)
         if not university:
             raise HTTPException(status_code=404, detail='University not found')
 
-    if role != users_db.ROLE_ADMIN:
-        current = await users_db.find_user_by_id(user_id)
-        if not current:
-            raise HTTPException(status_code=404, detail='User not found')
-        if (
-            current.get('role') == users_db.ROLE_ADMIN
-            and current.get('isActive')
-        ):
-            await _ensure_not_last_active_admin(user_id, 'снять роль администратора')
-
     try:
-        updated = await users_db.apply_role(user_id, role, university_id)
+        updated = await users_db.apply_role_guarded(user_id, role, university_id)
     except users_db.RoleInvariantError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except IntegrityError as exc:
@@ -354,6 +361,8 @@ async def _apply_role(
         logger.warning('Role invariant violated for user %s: %s', user_id, exc)
         raise HTTPException(status_code=400, detail='Role invariant violated') from exc
 
+    if isinstance(updated, str):
+        _raise_admin_guard_error(updated, 'снять роль администратора')
     if not updated:
         raise HTTPException(status_code=404, detail='User not found')
     await safe_cache_write(cache_user_after_write(r, updated))
