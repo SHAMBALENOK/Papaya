@@ -13,6 +13,7 @@ from tests.conftest import (
     admin_client,
     create_olympiad,
     create_university,
+    moderate_bvi,
     university_rep_client,
 )
 
@@ -84,9 +85,8 @@ async def test_university_with_bvi_keeps_olympiad_names(client):
     assert created.status_code == 201
 
     await admin_client(client)
-    confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/status",
-        json={'status': 'CONFIRMED'},
+    confirmed = await moderate_bvi(
+        client, university['id'], olympiad['id'], 'confirm'
     )
     assert confirmed.status_code == 200
 

@@ -176,6 +176,30 @@
 
 ---
 
+## GET /universities/{university_id}/olympiads, GET /olympiads/{olympiad_id}/universities
+
+Публичные списки связей БВИ. Видны только подтверждённые связи.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Список связей | `{"olympiads": [BviOlympiadItem]}` / `{"universities": [BviUniversityItem]}` |
+| 401 | Запрошены неподтверждённые заявки без входа | `{"detail": "Access token required to view pending requests"}` |
+| 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
+| 404 | Университет или олимпиада не найдены | `{"detail": "..."}` |
+
+`BviOlympiadItem`: `id`, `name`, `description`, `official_url`,
+`preview_image`, `image`, `source_url`, `status`, `bvi_status`,
+`is_historical`.
+
+`BviUniversityItem`: `id`, `name`, `short_name`, `description`, `website`,
+`preview_image`, `image`, `bvi_status`, `is_historical`.
+
+`is_historical` — подтверждённая связь с архивной олимпиадой. Такая связь
+сохранена (архив не отменяет историю), но интерфейс показывает
+«Архивная олимпиада» / «Историческая связь» вместо «БВИ».
+
+---
+
 ## POST /universities/{university_id}/bvi/remove
 
 **Request body:** `{"olympiad_id": str}`
@@ -188,12 +212,27 @@
 
 ---
 
-## POST /universities/{university_id}/bvi/{olympiad_id}/status
+## POST /universities/{university_id}/bvi/{olympiad_id}/moderation
 
-Подтверждение или снятие подтверждения. **Администратор.**
+Административное действие над заявкой. Произвольной смены статуса нет.
 
-Инвариант пары «статус + автор подтверждения»: у `PENDING` поле `confirmedBy`
-пустое, у `CONFIRMED` указывает на администратора, который подтвердил связь.
+**Request body:** `{"action": "confirm"｜"reject"｜"revoke"}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Подтверждена или удалена | `{"result": "CONFIRMED"｜"removed", "university_id", "olympiad_id", "status"}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Связи нет | `{"detail": "BVI link not found"}` |
+| 409 | Действие не применимо к текущему состоянию | `{"detail": "..."}` — например, отклонить уже подтверждённую связь |
+| 422 | Неизвестное действие | `{"detail": [...]}` |
+
+- `confirm` — `PENDING` → `CONFIRMED`; поле `confirmedBy` заполняется.
+- `reject` — заявка отклонена, связь удаляется.
+- `revoke` — подтверждение отозвано, связь удаляется.
+
+Перехода `CONFIRMED → PENDING` не существует: это не состояние заявки, а
+отзыв публичного факта.
 
 Модерация: подтверждение или снятие связи.
 
@@ -217,7 +256,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status", "archive_reason"}]}` |
+| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status", "is_archived"}]}` |
 
 `status`: `PUBLISHED` — в актуальном перечне РСОШ, `ARCHIVED` — больше нет
 в перечне (запись сохранена исторически).
@@ -235,7 +274,12 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Карточка олимпиады | `{"id", "name", "name_norm", "description", "official_url", "preview_image", "image", "source_url", "status", "archive_reason", "createdAt", "updatedAt"}` |
+| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status"}` |
+
+Публичная модель минимальна: `name_norm`, `source_doc_id`, `createdAt`,
+`updatedAt` и `archive_reason` — служебные поля импорта и панели
+администратора, наружу они не отдаются. Причина архива пользователю ничего не
+объясняет: он видит `status: "ARCHIVED"` и понятный текст в интерфейсе.
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
 ---
@@ -472,6 +516,15 @@
 `archived=true` ставит причину `MANUAL` (исключил администратор — вернуть
 можно). Олимпиада, исчезнувшая из перечня РСОШ, помечена `RSOSH_ABSENT` и
 возвращается только подтверждением импорта, где она снова встретилась.
+
+---
+
+## Удаление каталога
+
+Маршрутов удаления олимпиады или университета нет, и в слое данных нет
+соответствующих функций. Единственный способ убрать олимпиаду из актуальных —
+`POST /admin/archive_olympiad/{id}?archived=true`: запись сохраняется вместе с
+подтверждёнными связями, документом-источником и историей актуальности.
 
 ---
 

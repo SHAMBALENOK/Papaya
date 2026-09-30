@@ -97,21 +97,31 @@ function drawMyBviList(linked, universityId, linkedIds) {
 
     box.innerHTML = `<div class="space-y-6">` + linked.map(item => {
         const confirmed = item.bvi_status === 'CONFIRMED';
+        const archived = item.status === 'ARCHIVED' || item.is_historical;
+        // Архивная олимпиада не попадает в выбор новых заявок, поэтому по
+        // такой связи представителю нечего отзывать: заявка уже подтверждена,
+        // а олимпиады нет в актуальном перечне.
+        const note = archived
+            ? `Связь историческая: олимпиады больше нет в перечне РСОШ.
+               Связь сохранена, но новые заявки по ней невозможны.`
+            : (confirmed
+                ? `Связь подтверждена. Снять подтверждение может администратор Papaya.`
+                : `Заявка ждёт подтверждения администратором.`);
         return `
         <div class="${UI.card} px-8 py-7 flex flex-col lg:flex-row lg:items-center gap-6">
             <div class="flex-1 min-w-0">
                 <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
                 <div class="mt-3 flex items-center gap-3 flex-wrap">
                     ${bviStatusBadge(item.bvi_status)}
-                    ${item.status === 'ARCHIVED' ? olympiadStatusBadge(item.status) : ''}
+                    ${archived
+                        ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архивная олимпиада</span>`
+                        : ''}
                 </div>
             </div>
             <div class="flex flex-col lg:items-end gap-3 shrink-0">
                 <a href="#/olympiads/${escAttr(item.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть</a>
-                ${confirmed
-                    ? `<p class="text-xs text-ink-faint max-w-[18rem] text-right">
-                        Связь подтверждена. Снять подтверждение может администратор Papaya.
-                       </p>`
+                ${confirmed || archived
+                    ? `<p class="text-xs text-ink-faint max-w-[18rem] text-right">${escHtml(note)}</p>`
                     : `<button type="button" data-remove="${escAttr(item.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать заявку</button>`}
             </div>
         </div>`;

@@ -167,18 +167,34 @@ async function renderUniversity(universityId) {
     }
 }
 
+/** Карточка олимпиады в списке БВИ университета.
+ *
+ * Разница между действующей и исторической связью — не в оформлении, а в
+ * подписи: подтверждённая связь с актуальной олимпиадой даёт «БВИ», а связь с
+ * архивной олимпиадой — «Архивная олимпиада» и «Историческая связь».
+ * Помечать архивную олимпиаду зелёным «БВИ» значило бы показывать льготу,
+ * которой сейчас нет.
+ */
 function bviOlympiadCardHtml(olympiad) {
+    const historical = olympiad.is_historical || olympiad.status === 'ARCHIVED';
+    const badge = historical
+        ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архивная олимпиада</span>`
+        : `<span class="${UI.badge} ${UI.badgeSuccess}">
+               <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
+           </span>`;
+    const note = historical
+        ? `<p class="mt-3 text-sm text-ink-faint">Историческая связь: университет давал БВИ, пока олимпиада была в перечне РСОШ.</p>`
+        : '';
+
     return `
     <a href="#/olympiads/${escAttr(olympiad.id)}"
        class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
         ${cardImageHtml(olympiad)}
         <div class="flex items-center gap-3 flex-wrap">
-            <span class="${UI.badge} ${UI.badgeSuccess}">
-                <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
-            </span>
-            ${olympiad.status === 'ARCHIVED' ? olympiadStatusBadge(olympiad.status) : ''}
+            ${badge}
         </div>
         <h3 class="mt-5 text-lg font-bold tracking-tight leading-snug">${escHtml(olympiad.name)}</h3>
+        ${note}
         <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(olympiad.description || '')}</p>
         <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть олимпиаду →</p>
     </a>`;

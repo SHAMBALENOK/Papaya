@@ -26,6 +26,14 @@ logger = logging.getLogger('papaya.olympiads')
 
 
 class OlympiadListItem(BaseModel):
+    """Публичная строка каталога олимпиад.
+
+    Состав — как у публичной карточки: пользовательские поля и ``status``.
+    ``archive_reason`` (``RSOSH_ABSENT`` / ``MANUAL``) — технические значения
+    для панели администратора, посетителю они ничего не объясняют; архив он
+    видит по ``status``.
+    """
+
     id: str | None = None
     name: str | None = None
     description: str | None = None
@@ -34,7 +42,7 @@ class OlympiadListItem(BaseModel):
     image: str | None = None
     source_url: str | None = None
     status: str | None = None
-    archive_reason: str | None = None
+    is_archived: bool = False
 
 
 class OlympiadsResponse(BaseModel):
@@ -69,7 +77,8 @@ def _serialize(olympiad: dict) -> dict:
     ``source_doc_id`` намеренно не попадает в ответ: это внутренняя ссылка на
     загруженный документ, пользователю она ничего не даёт, а раскрывает
     устройство импорта. Для источника есть отдельный маршрут
-    ``/olympiads/{id}/source``.
+    ``/olympiads/{id}/source``. ``archive_reason`` — тоже внутреннее поле:
+    в списке посетителю достаточно ``status`` и ``is_archived``.
     """
     return {
         'id': olympiad.get('id'),
@@ -80,7 +89,7 @@ def _serialize(olympiad: dict) -> dict:
         'image': olympiad.get('image'),
         'source_url': olympiad.get('source_url'),
         'status': olympiad.get('status'),
-        'archive_reason': olympiad.get('archive_reason'),
+        'is_archived': olympiad.get('status') != 'PUBLISHED',
     }
 
 
@@ -189,6 +198,7 @@ async def olympiad_source(olympiad_id: uuid.UUID):
 
 @olympiads_page.get(
     '/{olympiad_id}/universities',
+    response_model=schemas.bvi.BviUniversitiesResponse,
     responses={
         200: {'description': 'Университеты, дающие БВИ за эту олимпиаду'},
         404: {'description': 'Olympiad not found'},
@@ -200,6 +210,12 @@ async def olympiad_universities(olympiad_id: uuid.UUID):
 
     Публично видны только подтверждённые связи: заявка, ещё не одобренная
     администратором, публичным фактом не является.
+
+    Если олимпиада архивная, связи остаются в списке, но помечаются
+    ``is_historical``: университеты действительно давали БВИ, пока олимпиада
+    была в перечне РСОШ. Удалять их из-за архива нельзя — это стёрло бы
+    историю, и страница олимпиады выглядела бы «пустой», хотя информация о
+    льготе была.
     """
     try:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)

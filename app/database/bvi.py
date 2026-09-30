@@ -95,7 +95,14 @@ async def list_olympiads_for_university(
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
         return [
-            {**olympiad_to_dict(olympiad), 'bvi_status': status}
+            {
+                **olympiad_to_dict(olympiad),
+                'bvi_status': status,
+                # Связь историческая, если олимпиады больше нет в актуальном
+                # перечне. Саму связь не удаляем: университет действительно давал
+                # БВИ, пока олимпиада была актуальной.
+                'is_historical': olympiad.status != 'PUBLISHED',
+            }
             for olympiad, status in result.all()
         ]
 
@@ -117,8 +124,20 @@ async def list_universities_for_olympiad(
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
+        olympiad = (
+            await session.execute(
+                select(Olympiads.status).where(Olympiads.id == _as_uuid(olympiad_id))
+            )
+        ).scalar_one_or_none()
+        # Обратная сторона: олимпиада одна, поэтому историчность связи
+        # одинакова для всех университетов в списке.
+        is_historical = olympiad != 'PUBLISHED'
         return [
-            {**university_to_dict(university), 'bvi_status': status}
+            {
+                **university_to_dict(university),
+                'bvi_status': status,
+                'is_historical': is_historical,
+            }
             for university, status in result.all()
         ]
 
@@ -165,51 +184,99 @@ async def request_bvi_link(
         return bvi_link_to_dict(link)
 
 
-async def set_bvi_status(
+#: Что делает действие модерации: подтвердить заявку или убрать связь.
+MODERATION_CONFIRM = 'confirm'
+MODERATION_REJECT = 'reject'
+MODERATION_REVOKE = 'revoke'
+
+MODERATION_ACTIONS = (
+    MODERATION_CONFIRM,
+    MODERATION_REJECT,
+    MODERATION_REVOKE,
+)
+
+
+class BviModerationError(ValueError):
+    """Действие модерации неприменимо к связи в её текущем состоянии.
+
+    Текст сообщения отдаётся HTTP-слоем как 409, поэтому он должен объяснять
+    ситуацию администратору, а не сообщать код ошибки базы.
+    """
+
+
+async def moderate_bvi_link(
     olympiad_id,
     university_id,
-    status: str,
+    action: str,
     *,
-    confirmed_by=None,
+    admin_id=None,
 ) -> dict | None:
-    """Сменить статус связи (подтверждение/снятие администратором).
+    """Административное действие над заявкой БВИ.
 
-    Инвариант пары «статус + кто подтвердил»:
+    Три действия и только три:
 
-    - ``CONFIRMED`` — ``confirmedBy`` указывает на администратора, который
-      подтвердил связь;
-    - ``PENDING`` — ``confirmedBy`` обязателен ``NULL``.
+    - ``confirm`` (``PENDING`` → ``CONFIRMED``) — подтвердить заявку;
+    - ``reject`` (``PENDING`` → удаление) — отклонить заявку;
+    - ``revoke`` (``CONFIRMED`` → удаление) — отозвать подтверждение.
 
-    Иначе после снятия подтверждения остаётся запись «статус PENDING, но
-    подтвердил администратор X», и по ней нельзя понять, кто сейчас отвечает за
-    связь. Поэтому ``confirmedBy`` пишется только вместе с ``CONFIRMED``, а при
-    возврате в ``PENDING`` очищается.
+    Возврата ``CONFIRMED`` → ``PENDING`` здесь нет намеренно. Такой переход
+    создаёт запись, которая в публичном каталоге не показывается (связь не
+    подтверждена), а в очереди модерации видна как заявка, будто университет
+    её повторно подал. Отзыв подтверждения — это удаление связи, после
+    которого университет может подать новую заявку заново, и её видно в
+    очереди как новую.
+
+    Возвращает ``{'result': 'CONFIRMED'|'removed'}``; ``None``, если связи нет.
     """
-    if status not in ('PENDING', 'CONFIRMED'):
-        raise ValueError(f'Unsupported BVI status: {status}')
+    if action not in MODERATION_ACTIONS:
+        raise ValueError(f'Unsupported BVI moderation action: {action}')
 
+    olympiad_uuid = _as_uuid(olympiad_id)
+    university_uuid = _as_uuid(university_id)
     now = datetime.now(timezone.utc)
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(UniversityBvi).where(
-                UniversityBvi.olympiad_id == _as_uuid(olympiad_id),
-                UniversityBvi.university_id == _as_uuid(university_id),
+                UniversityBvi.olympiad_id == olympiad_uuid,
+                UniversityBvi.university_id == university_uuid,
             )
         )
         link = result.scalar_one_or_none()
         if not link:
             return None
-        link.status = status
-        if status == 'CONFIRMED':
-            if not confirmed_by:
-                raise ValueError('CONFIRMED BVI link requires confirmed_by')
-            link.confirmedBy = _as_uuid(confirmed_by)
-        else:
-            link.confirmedBy = None
-        link.updatedAt = now
+
+        if action == MODERATION_CONFIRM:
+            if link.status == 'CONFIRMED':
+                raise BviModerationError(
+                    'Связь уже подтверждена.'
+                )
+            if not admin_id:
+                raise ValueError('CONFIRMED BVI link requires admin_id')
+            link.status = 'CONFIRMED'
+            # Автор подтверждения существует только у CONFIRMED: у PENDING его
+            # быть не должно, иначе по записи нельзя понять, кто отвечает за
+            # связь.
+            link.confirmedBy = _as_uuid(admin_id)
+            link.updatedAt = now
+            await session.commit()
+            await session.refresh(link)
+            return {'result': 'CONFIRMED', 'link': bvi_link_to_dict(link)}
+
+        # reject/revoke: связь удаляется целиком. Отклонённая и отозванная
+        # связь не должна висеть ни в публичном каталоге, ни в очереди.
+        if action == MODERATION_REJECT and link.status != 'PENDING':
+            raise BviModerationError(
+                'Отклонить можно только заявку, ещё не подтверждённую. '
+                'Подтверждённую связь отзывают через «Отозвать подтверждение».'
+            )
+        if action == MODERATION_REVOKE and link.status != 'CONFIRMED':
+            raise BviModerationError(
+                'Отозвать подтверждение можно только у подтверждённой связи.'
+            )
+        await session.delete(link)
         await session.commit()
-        await session.refresh(link)
-        return bvi_link_to_dict(link)
+        return {'result': 'removed', 'link': None}
 
 
 async def delete_bvi_link(olympiad_id, university_id) -> bool:

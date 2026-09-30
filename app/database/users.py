@@ -25,6 +25,11 @@ class RoleInvariantError(ValueError):
     """
 
 
+def _as_uuid(value):
+    """Привести id пользователя к UUID (пути маршрутов дают строки)."""
+    return value if isinstance(value, uuid_mod.UUID) else uuid_mod.UUID(str(value))
+
+
 def _full_user_dict(user) -> dict:
     """Сериализовать пользователя вместе с хэшем пароля для входа."""
     data = user_to_dict(user)
@@ -123,25 +128,101 @@ async def edit_user(user_id: str, ins: dict):
         return user_to_dict(user)
 
 
-async def apply_role(
+#: Причины отказа при смене роли или активности администратора.
+#:
+#: Успешные операции возвращают обновлённого пользователя, поэтому отдельного
+#: значения «успех» здесь нет: строка означает именно «ничего не изменили».
+ADMIN_GUARD_MISSING = 'missing'
+ADMIN_GUARD_LAST_ADMIN = 'last_admin'
+
+
+async def _lock_admins(session) -> None:
+    """Заблокировать строки всех администраторов в фиксированном порядке.
+
+    Зачем это вместо «посчитать, потом изменить»: две параллельные
+    административные операции (два администратора понижают друг друга или себя)
+    видели бы одну и ту же картину и обе решили бы, что понижаемый не последний.
+    В итоге система осталась бы без единого активного администратора.
+
+    ``SELECT ... FOR UPDATE`` по всем строкам с ролью ``ADMIN`` в порядке ``id``
+    сериализует такие операции: вторая ждёт первую, а после её коммита
+    пересчитывает активных уже по свежему состоянию (``READ COMMITTED`` берёт
+    новый снимок на каждый оператор). Порядок ``ORDER BY id`` фиксирован, поэтому
+    взаимного ожидания (дедлока) не возникает.
+    """
+    await session.execute(
+        select(Users.id)
+        .where(Users.role == ROLE_ADMIN)
+        .order_by(Users.id)
+        .with_for_update()
+    )
+
+
+async def _active_admins_excluding(session, user_uuid) -> int:
+    """Сколько активных администраторов останется, если убрать ``user_uuid``."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(Users)
+        .where(
+            Users.role == ROLE_ADMIN,
+            Users.isActive.is_(True),
+            Users.id != user_uuid,
+        )
+    )
+    return result.scalar()
+
+
+async def set_active_guarded(user_id, is_active: bool) -> dict | str:
+    """Сменить активность пользователя, не оставив систему без администратора.
+
+    Блокировка последнего активного администратора отклоняется: заблокированный
+    администратор не может войти, а назначать новых должен действующий. Проверка
+    и запись — в одной транзакции под блокировкой строк администраторов.
+
+    Возвращает обновлённого пользователя либо строку-причину отказа:
+    ``'missing'`` или ``'last_admin'``.
+    """
+    user_uuid = _as_uuid(user_id)
+
+    async with AsyncSessionLocal() as session:
+        await _lock_admins(session)
+        current = await session.execute(
+            select(Users.role, Users.isActive, Users).where(Users.id == user_uuid)
+        )
+        row = current.one_or_none()
+        if not row:
+            await session.rollback()
+            return ADMIN_GUARD_MISSING
+
+        role, is_active_now, user = row
+        if role == ROLE_ADMIN and is_active_now and not is_active:
+            if await _active_admins_excluding(session, user_uuid) == 0:
+                # Отказ фиксируем откатом и уходим уже после закрытия сессии:
+                # возврат изнутри `async with` оставляет соединение в пуле в
+                # момент, когда транзакция ещё не отпустила блокировки строк.
+                await session.rollback()
+                return ADMIN_GUARD_LAST_ADMIN
+
+        user.isActive = is_active
+        user.updatedAt = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(user)
+        return user_to_dict(user)
+
+
+async def apply_role_guarded(
     user_id: str,
     role: str,
     university_id: str | None = None,
-) -> dict | None:
-    """Назначить пользователю роль с соблюдением инвариантов Papaya.
+) -> dict | str:
+    """Назначить роль, не понизив последнего активного администратора.
 
-    Правила (единое место, где они проверяются):
+    Инварианты роли проверяются как обычно (см. ``apply_role``), а запрет на
+    понижение последнего администратора проверяется под блокировкой строк
+    администраторов, поэтому две параллельные операции не могут пройти обе.
 
-    - ``EDITOR`` (представитель университета) обязан быть привязан к
-      конкретному университету: без привязки непонятно, чьи связи БВИ он
-      будет вести, поэтому такое состояние недопустимо;
-    - ``USER`` не привязывается к университету: привязка без роли
-      представителя была бы молчаливым способом выдать права;
-    - ``ADMIN`` не зависит от привязки: его права определяются ролью, но
-      привязка сохраняется, чтобы понижение админа могло вернуть роль
-      представителя, а не «обнулить» пользователя.
-
-    Возвращает обновлённого пользователя или ``None``, если его нет.
+    Возвращает обновлённого пользователя либо строку-причину отказа:
+    ``'missing'`` или ``'last_admin'``.
     """
     if role not in ROLES:
         raise RoleInvariantError(f'Unknown role: {role}')
@@ -154,23 +235,39 @@ async def apply_role(
             'Роль USER не предполагает привязки к университету'
         )
 
-    if isinstance(user_id, str):
-        user_id = uuid_mod.UUID(user_id)
+    user_uuid = _as_uuid(user_id)
     university_uuid = (
         uuid_mod.UUID(str(university_id)) if university_id else None
     )
 
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Users).where(Users.id == user_id)
+        await _lock_admins(session)
+        current = await session.execute(
+            select(Users.role, Users.isActive).where(Users.id == user_uuid)
         )
-        user = result.scalar_one_or_none()
-        if not user:
-            return None
+        row = current.one_or_none()
+        if not row:
+            await session.rollback()
+            return ADMIN_GUARD_MISSING
+
+        current_role, is_active_now = row
+        if role != ROLE_ADMIN and current_role == ROLE_ADMIN and is_active_now:
+            if await _active_admins_excluding(session, user_uuid) == 0:
+                await session.rollback()
+                return ADMIN_GUARD_LAST_ADMIN
+
+        user = (
+            await session.execute(select(Users).where(Users.id == user_uuid))
+        ).scalar_one_or_none()
         user.role = role
         user.university_id = university_uuid
         user.updatedAt = datetime.now(timezone.utc)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # CHECK-ограничение БД: страховка от гонки и прямых правок данных.
+            await session.rollback()
+            raise
         await session.refresh(user)
         return user_to_dict(user)
 
@@ -214,22 +311,8 @@ async def get_amount_of_users() -> int:
         return result.scalar()
 
 
-async def count_active_admins(exclude_user_id=None) -> int:
-    """Сколько активных администраторов останется, если убрать ``exclude_user_id``.
+# Счёт активных администраторов намеренно не вынесен в отдельную функцию:
+# «посчитать, потом изменить» — гонка, из-за которой система могла остаться без
+# администратора. Проверка живёт внутри ``set_active_guarded`` и
+# ``apply_role_guarded`` под блокировкой строк администраторов.
 
-    Считаются только активные (``isActive``) пользователи с ролью ``ADMIN``:
-    заблокированный администратор не может зайти в панель, поэтому оставлять
-    систему «без единого активного ADMIN» после блокировки последнего нельзя.
-    """
-    statement = select(func.count()).select_from(Users).where(
-        Users.role == ROLE_ADMIN,
-        Users.isActive.is_(True),
-    )
-    if exclude_user_id is not None:
-        if isinstance(exclude_user_id, str):
-            exclude_user_id = uuid_mod.UUID(exclude_user_id)
-        statement = statement.where(Users.id != exclude_user_id)
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(statement)
-        return result.scalar()

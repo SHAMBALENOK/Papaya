@@ -119,10 +119,46 @@ class OlympiadResponse(OlympiadBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class OlympiadPublicResponse(OlympiadBase):
-    """Публичная карточка олимпиады — без внутренних ссылок на документы."""
+class OlympiadPublicResponse(BaseModel):
+    """Публичная карточка олимпиады: только пользовательские поля.
 
-    createdAt: Optional[datetime] = None
-    updatedAt: Optional[datetime] = None
+    Отдельная схема, а не наследник ``OlympiadBase``, потому что базовая нужна
+    админским маршрутам (создание, правка, архив) и отдаёт служебные данные.
+    Наружу они не выходят:
+
+    - ``name_norm`` — служебное нормализованное имя для дедупликации при импорте;
+    - ``source_doc_id`` — внутренняя ссылка на загруженный документ (для
+      пользователя есть ``GET /olympiads/{id}/source``);
+    - ``createdAt`` / ``updatedAt`` — служебные метки времени;
+    - ``archive_reason`` — техническое значение ``RSOSH_ABSENT`` / ``MANUAL``,
+      пользователю оно ничего не объясняет. Про архив пользователь узнаёт по
+      ``status`` и читает понятный текст в интерфейсе.
+    """
+
+    id: Optional[UUID] = None
+    name: str
+    description: Optional[str] = None
+    official_url: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
+    source_url: Optional[ExternalUrl] = None
+    status: str = 'PUBLISHED'
+
+    @field_validator('status')
+    @classmethod
+    def _check_status(cls, v):
+        if v not in OLYMPIAD_STATUSES:
+            raise ValueError('status must be one of ' + ', '.join(OLYMPIAD_STATUSES))
+        return v
+
+    @property
+    def is_archived(self) -> bool:
+        """Олимпиада вне актуального каталога.
+
+        Производное поле для интерфейса: карточке нужно понимать, показывать ли
+        предупреждение об архиве, а разбирать ``status`` в шаблоне — это
+        дублирование правил на клиенте.
+        """
+        return self.status == 'ARCHIVED'
 
     model_config = ConfigDict(from_attributes=True)

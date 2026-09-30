@@ -110,8 +110,9 @@ async function handleAdminClick(e) {
         demote: () => api.demoteAdmin(id),
         archive: () => api.archiveOlympiad(id, true),
         restore: () => api.archiveOlympiad(id, false),
-        confirmBvi: () => api.setBviStatus(btn.dataset.university, id, 'CONFIRMED'),
-        dropBvi: () => api.setBviStatus(btn.dataset.university, id, 'PENDING'),
+        confirmBvi: () => api.moderateBvi(btn.dataset.university, id, 'confirm'),
+        rejectBvi: () => api.moderateBvi(btn.dataset.university, id, 'reject'),
+        revokeBvi: () => api.moderateBvi(btn.dataset.university, id, 'revoke'),
         newUniversity: () => openUniversityFormModal(null, () => reloadAdmin()),
         editUniversity: () => editUniversityAction(id),
         newOlympiad: () => openOlympiadFormModal(null, () => reloadAdmin()),
@@ -131,7 +132,8 @@ async function handleAdminClick(e) {
         archive: 'Олимпиада исключена из актуального каталога',
         restore: 'Олимпиада возвращена в актуальный каталог',
         confirmBvi: 'Связь БВИ подтверждена',
-        dropBvi: 'Подтверждение связи БВИ снято',
+        rejectBvi: 'Заявка отклонена, связь удалена',
+        revokeBvi: 'Подтверждение отозвано, связь удалена',
     };
 
     const call = calls[act];
@@ -407,8 +409,10 @@ function adminBviHtml(links) {
             <div class="flex items-center gap-3 flex-wrap shrink-0">
                 ${bviStatusBadge(link.status)}
                 ${link.status === 'CONFIRMED'
-                    ? `<button data-act="dropBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Снять</button>`
-                    : `<button data-act="confirmBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить</button>`}
+                    ? `<button data-act="rejectBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Удалить связь</button>
+                       <button data-act="revokeBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать подтверждение</button>`
+                    : `<button data-act="rejectBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Отклонить</button>
+                       <button data-act="confirmBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить</button>`}
             </div>
         </div>`).join('')}
     </div>`;

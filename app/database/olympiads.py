@@ -7,6 +7,12 @@
 
 ``name_norm`` нормализуется сервером: он же используется для поиска
 дубликатов при импорте (см. ``app/rsosh/matching.py``).
+
+Физического удаления олимпиады здесь нет и не должно появляться: у записи
+есть история (подтверждённые связи БВИ, документ-источник, путь по перечню
+РСОШ), а удаление уничтожило бы её вместе с подтверждёнными заявками
+университетов. Единственный способ убрать олимпиаду из актуальных —
+архивирование (см. ``app/routers/admin.py``).
 """
 
 import uuid as uuid_mod
@@ -174,25 +180,6 @@ async def edit_olympiad(olympiad_id, ins: dict) -> dict | None:
             return None
         await session.refresh(olympiad)
         return olympiad_to_dict(olympiad)
-
-
-async def delete_olympiad(olympiad_id) -> bool:
-    """Удалить олимпиаду (используется только при явном удалении админом).
-
-    Документы-источники при этом не удаляются: историческая информация о том,
-    откуда пришли данные, остаётся.
-    """
-    olympiad_uuid = _as_uuid(olympiad_id)
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Olympiads).where(Olympiads.id == olympiad_uuid)
-        )
-        olympiad = result.scalar_one_or_none()
-        if not olympiad:
-            return False
-        await session.delete(olympiad)
-        await session.commit()
-        return True
 
 
 async def count_olympiads() -> int:

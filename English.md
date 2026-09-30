@@ -75,11 +75,13 @@ Key decisions:
 - **A university never creates a copy of an olympiad.** A link references an existing catalog entry, and a unique index on the pair makes duplicate links impossible even at the database level.
 - **A request is not a public fact.** `PENDING` links are visible to the university's own representative and to the administrator; public lists contain confirmed links only.
 - **Archive, not delete.** An olympiad that disappears from the RSOSH list moves to `ARCHIVED`: the record is kept and the interface states that it is no longer in the current list.
-- **An archived olympiad accepts no new BVI requests.** A request means "we admit students through this olympiad right now", which cannot be true for an olympiad outside the current list: such a request gets 409. Already confirmed links are kept and shown as historical — the archive changes relevance, not history.
+- **An archived olympiad accepts no new BVI requests.** A request means "we admit students through this olympiad right now", which cannot be true for an olympiad outside the current list: such a request gets 409. Already confirmed links are kept and flagged as historical (`is_historical`) — the archive changes relevance, not history.
+- **Archive, never delete.** An olympiad carries history: confirmed links, its source document, its path through the RSOSH lists. There is no physical deletion of catalog records anywhere in the system — neither in the data layer nor in the API.
 - **An archive has a reason.** The status is one, but two different mechanisms decide it, so an archived record always carries `archive_reason`: `RSOSH_ABSENT` (not in the RSOSH list — an import brings it back) or `MANUAL` (excluded by an administrator — restorable by hand). A record that vanished from the RSOSH list cannot be restored manually: only the list itself can say it is current again.
 - **A skipped row is not a missing one.** If an administrator removed a row in the preview, it does not count as missing from the list: a single recognition error must not archive a real olympiad.
 - **Two images per entity.** `preview_image` is used in catalog cards, `image` on the entity page; if one is missing, the interface falls back to the other.
 - **Documents are data sources.** Each olympiad stores `source_doc_id`, so it is always clear where the information came from: the olympiad page shows the source via `GET /api/v1/olympiads/<id>/source`, publicly and without exposing the uploaded file itself. The internal `source_doc_id` is not part of public responses, and the source endpoint always answers `200` — a manual entry has a source too ("created by a Papaya administrator").
+- **The public model is minimal.** An olympiad response carries only user-facing fields (`id`, `name`, `description`, `official_url`, `preview_image`, `image`, `source_url`, `status`). Internal `name_norm`, `source_doc_id`, `createdAt`, `updatedAt` and `archive_reason` never reach a visitor: they matter for imports and for the admin panel, and explain nothing to a reader.
 - **The short name comes first.** Cards, catalogs and page headings show the short name (`MIPT`) first and the full name underneath. The full name is never hidden.
 - **There is no generic "organization" entity.** Papaya models neither olympiad organizers nor schools: that would be an extra abstraction level for a single participant type.
 
@@ -102,9 +104,19 @@ Role invariant: a representative is "a role plus a university binding", not a se
 
 The last active administrator cannot be banned or demoted (409), because nobody would be able to sign in to the panel. With a second administrator, demotion is allowed.
 
+The check is atomic: it runs under a lock on the administrator rows (`SELECT ... FOR UPDATE` in `id` order) inside the same transaction as the operation itself. Without it, two parallel operations (demote the first admin, ban the second) would each see "someone else remains" and together leave the system without a single active `ADMIN`.
+
 BVI link rights: a representative creates a request for a **current** olympiad and may withdraw it while it is `PENDING`; only an administrator can revoke a confirmed link. A confirmed link is a public fact, so removing it is the administrator's decision, not the requester's.
 
-`confirmedBy` exists only together with its status: it is empty for `PENDING` and points at the administrator who confirmed the link for `CONFIRMED`. Otherwise a record reading "status PENDING, but confirmed by X" says nothing about who is currently responsible for the link.
+Moderation is three explicit actions rather than "any status change":
+
+| Action | Effect |
+|--------|--------|
+| `confirm` | `PENDING` → `CONFIRMED`: the link becomes public |
+| `reject`  | the request is declined, the link is deleted |
+| `revoke`  | the confirmation is withdrawn, the link is deleted |
+
+There is no `CONFIRMED → PENDING` transition: that is not a request state but the withdrawal of a public fact. Such a record would be invisible in the catalog and would sit in the moderation queue as if the university had just applied again. `confirmedBy` exists only on `CONFIRMED` and points at the administrator who confirmed the link.
 
 ## RSOSH document import
 

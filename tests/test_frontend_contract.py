@@ -1,10 +1,4 @@
-"""Контракт фронтенда: порядок названий, источник, роли, отсутствие легаси.
-
-Статические файлы не исполняются в pytest, поэтому проверяются инварианты,
-которые иначе ломаются молча: перевёрнутый порядок названий, удалённый
-``short_name``, текст про университеты «из РСОШ» и остатки удалённого
-``/admin/university`` в клиентском коде.
-"""
+"""Контракт фронтенда: архив, история, модерация, отсутствие легаси."""
 
 import re
 from pathlib import Path
@@ -15,7 +9,18 @@ FRONTEND = Path(__file__).resolve().parents[1] / 'app' / 'frontend' / 'js'
 
 
 def _read(*parts: str) -> str:
-    return (FRONTEND.joinpath(*parts)).read_text(encoding='utf-8')
+    return FRONTEND.joinpath(*parts).read_text(encoding='utf-8')
+
+def _entity_title_body() -> str:
+    """╨в╨╡╨╗╨╛ ``entityTitleHtml`` тАФ ╨╛╨▒╤Й╨╕╨╣ ╨║╨╛╨╝╨┐╨╛╨╜╨╡╨╜╤В ╨╖╨░╨│╨╛╨╗╨╛╨▓╨║╨░ ╨║╨░╤А╤В╨╛╤З╨║╨╕."""
+    source = _read('pages', 'home.js')
+    match = re.search(
+        r'function entityTitleHtml\(entity\) \{(.*?)\n\}',
+        source,
+        re.S,
+    )
+    assert match, 'entityTitleHtml ╨╜╨╡ ╨╜╨░╨╣╨┤╨╡╨╜ ╨▓ pages/home.js'
+    return match.group(1)
 
 
 def _entity_title_body() -> str:
@@ -30,7 +35,7 @@ def _entity_title_body() -> str:
     return match.group(1)
 
 
-# ------------------------------ Названия ------------------------------
+# ----------------------------------------------
 
 
 def test_card_title_shows_short_name_first():
@@ -96,7 +101,7 @@ def test_university_pages_use_short_name_as_heading():
     assert "escHtml(university.short_name || university.name)" in cabinet
 
 
-# ------------------------------ Источник ------------------------------
+# ----------------------------------------------
 
 
 def test_source_block_always_rendered():
@@ -120,7 +125,7 @@ def test_frontend_calls_source_endpoint():
     assert '/source' in api
 
 
-# ------------------------------ Роли ------------------------------
+# ----------------------------------------------
 
 
 def test_no_frontend_call_to_removed_endpoint():
@@ -147,7 +152,7 @@ def test_role_payload_sends_role_and_university_together():
     assert 'university_id' in body
 
 
-# ------------------------------ Концепция ------------------------------
+# ----------------------------------------------
 
 
 def test_home_does_not_say_universities_come_from_rsosh():
@@ -205,3 +210,134 @@ def test_images_have_fallback_in_cards_and_pages():
 def test_frontend_file_exists(filename):
     """Файлы фронтенда на месте: страница падает на отсутствующем скрипте."""
     assert FRONTEND.joinpath(filename).exists()
+
+def test_frontend_uses_moderation_endpoint():
+    """Клиент вызывает /moderation, а не произвольную смену статуса."""
+    api = _read('api.js')
+    assert 'moderateBvi' in api
+    assert '/moderation' in api
+    assert 'setBviStatus' not in api
+    assert '/bvi/${olympiadId}/status' not in api
+
+
+def test_admin_panel_offers_explicit_moderation_actions():
+    """В панели есть подтвердить, отклонить и отозвать — по отдельности."""
+    admin = _read('pages', 'admin.js')
+    for action in ('confirmBvi', 'rejectBvi', 'revokeBvi'):
+        assert action in admin, action
+    assert 'dropBvi' not in admin
+    for action in ('confirm', 'reject', 'revoke'):
+        assert f"'{action}'" in admin, action
+
+
+# ----------------------------------------------
+
+
+def test_public_pages_do_not_render_archive_reason():
+    """Публичные страницы не показывают технические enum-значения.
+
+    `RSOSH_ABSENT` / `MANUAL` — внутренние значения для панели; посетитель
+    видит понятный текст. Проверяется именно отрисованная разметка: enum может
+    упоминаться в комментарии или в сравнении, но не попасть в HTML.
+    """
+    for name in ('pages/olympiads.js', 'pages/universities.js',
+                 'pages/home.js', 'pages/myuniversity.js'):
+        source = _read(*name.split('/'))
+        # Публичные страницы вообще не знают про archive_reason.
+        assert 'archive_reason' not in source, name
+        # В разметке (внутри ${...} шаблонов) enum-значений нет.
+        for match in re.finditer(r'\$\{([^}]*)\}', source):
+            rendered = match.group(1)
+            assert 'RSOSH_ABSENT' not in rendered, name
+            assert "=== 'MANUAL'" not in rendered, name
+
+
+def test_admin_panel_renders_reason_as_text():
+    """Панель показывает причину архива словами, а не enum-значением.
+
+    Сравнивать с enum-значением функция обязана — по нему выбирается текст, но
+    наружу enum попадать не должен.
+    """
+    app = _read('app.js')
+    body = re.search(r'function archiveReasonText\(reason\) \{(.*?)\n\}', app, re.S)
+    assert body, 'archiveReasonText не найден'
+    function = body.group(1)
+
+    returned = re.findall(r"return ([^;]+);", function)
+    assert returned, 'функция ничего не возвращает'
+    for text in returned:
+        assert 'RSOSH_ABSENT' not in text, text
+        assert 'MANUAL' not in text, text
+        assert 'архивирована' in text.lower() or 'перечн' in text.lower()
+
+
+def test_archived_page_has_explicit_notice():
+    """На странице архивной олимпиады есть явное объяснение."""
+    source = _read('pages', 'olympiads.js')
+    assert 'function archivedOlympiadNotice' in source
+    body = re.search(
+        r'function archivedOlympiadNotice\(\) \{(.*?)\n\}', source, re.S
+    )
+    assert body, 'archivedOlympiadNotice без тела'
+    notice = body.group(1)
+    assert 'не входит в актуальный' in notice
+    # Обещание, что информация сохранена: архив не удаление.
+    assert 'сохранены' in notice
+
+
+def test_bvi_cards_distinguish_historical_links():
+    """Карточки БВИ различают действующую и историческую связь."""
+    universities = _read('pages', 'universities.js')
+    body = re.search(
+        r'function bviOlympiadCardHtml\(olympiad\) \{(.*?)\n\}',
+        universities,
+        re.S,
+    )
+    assert body, 'bviOlympiadCardHtml не найден'
+    card = body.group(1)
+    assert 'is_historical' in card
+    assert 'Архивная олимпиада' in card
+    assert 'Историческая связь' in card
+    # Зелёное «БВИ» остаётся только для актуальных олимпиад.
+    assert 'historical' in card
+
+
+def test_olympiad_page_marks_universities_as_historical_when_archived():
+    """На странице архивной олимпиады вузы показаны историческими, не выброшены."""
+    source = _read('pages', 'olympiads.js')
+    assert 'isArchived' in source
+    assert 'Историческая связь' in source
+    # Университеты не удаляются из списка при архиве.
+    assert 'universities.map' in source
+
+
+def test_rep_cabinet_shows_archived_links_as_historical():
+    """В кабинете представителя архивная связь видна и объяснена."""
+    source = _read('pages', 'myuniversity.js')
+    assert 'is_historical' in source or "item.status === 'ARCHIVED'" in source
+    assert 'Связь историческая' in source
+
+
+# ----------------------------------------------
+
+
+def test_frontend_has_no_delete_actions():
+    """В интерфейсе нет физического удаления олимпиады или университета."""
+    banned = ('deleteOlympiad', 'delete_university', 'deleteOlympiad(')
+    for path in FRONTEND.rglob('*.js'):
+        source = path.read_text(encoding='utf-8')
+        for needle in banned:
+            assert needle not in source, f'{path.name}: {needle}'
+
+
+def test_picker_uses_current_catalog_only():
+    """Выбор олимпиады для новой заявки берёт только актуальные записи.
+
+    `listOlympiads` без `include_archived` возвращает `PUBLISHED`, поэтому
+    архивную олимпиаду нельзя выбрать даже до серверной проверки.
+    """
+    source = _read('pages', 'myuniversity.js')
+    match = re.search(r'api\.listOlympiads\((.*?)\)', source)
+    assert match, 'вызов listOlympiads не найден'
+    assert 'include_archived' not in match.group(1)
+    assert 'true' not in match.group(1)
