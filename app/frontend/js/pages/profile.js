@@ -150,11 +150,9 @@ function openEditProfileModal(u) {
         btn.disabled = true;
         try {
             const res = await api.editUser(u.id, {
-                id: u.id,
                 name: fd.get('name'),
                 surname: fd.get('surname'),
                 email: fd.get('email'),
-                isActive: u.isActive !== false,
                 gender: fd.get('gender') || null,
                 bday: fd.get('bday') || null,
                 bio: fd.get('bio') || null,
@@ -162,7 +160,6 @@ function openEditProfileModal(u) {
                 country: fd.get('country') || null,
                 region: fd.get('region') || null,
                 status: fd.get('status') || null,
-                role: u.role || 'USER',
             });
             if (res.ok) {
                 close();

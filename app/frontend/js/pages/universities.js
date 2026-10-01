@@ -86,13 +86,36 @@ async function renderUniversity(universityId) {
     }
 
     const university = uniRes.data;
-    const olympiads = (olyRes.ok && olyRes.data && olyRes.data.olympiads) || [];
+    const all = (olyRes.ok && olyRes.data && olyRes.data.olympiads) || [];
     const isAdmin = store.isAdmin();
 
-    const olympiadsHtml = olympiads.length
-        ? `<div class="grid gap-8 md:grid-cols-2">` + olympiads.map(bviOlympiadCardHtml).join('') + `</div>`
+    // Актуальные и исторические связи — разные ответы на разные вопросы.
+    // «Какие олимпиады дают БВИ здесь сейчас?» — только про актуальные;
+    // архивные показываются отдельно и не входят в счётчик, иначе страница
+    // отвечала бы на вопрос завышенным числом.
+    const current = all.filter(item => !isHistoricalBvi(item));
+    const historical = all.filter(isHistoricalBvi);
+
+    const olympiadsHtml = current.length
+        ? `<div class="grid gap-8 md:grid-cols-2">` + current.map(bviOlympiadCardHtml).join('') + `</div>`
         : emptyHtml('Пока нет олимпиад с БВИ',
-            'Когда университет подтвердит перечень олимпиад РСОШ, они появятся здесь.');
+            'Олимпиады появляются здесь, когда представитель запросит связь, '
+            + 'а модератор Papaya её подтвердит. Перечень олимпиад приходит из РСОШ.');
+
+    // Исторический блок — визуально второстепенный и только при наличии.
+    const historicalHtml = historical.length
+        ? `<div class="mt-14 pt-10 border-t border-mist">
+               <h2 class="${UI.eyebrow}">Исторические связи</h2>
+<p class="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
+                    Олимпиады, которые университет учитывал для БВИ раньше. Сейчас
+                    их нет в актуальном перечне РСОШ, поэтому вуз их не показывает
+                    среди действующих — связи сохранены как история.
+                </p>
+               <div class="mt-8 grid gap-6 md:grid-cols-2 opacity-70">
+                   ${historical.map(bviOlympiadCardHtml).join('')}
+               </div>
+           </div>`
+        : '';
 
     page.innerHTML = `
     <article class="pb-16 md:pb-24">
@@ -133,12 +156,8 @@ async function renderUniversity(universityId) {
                     </dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-ink-faint">Олимпиад с БВИ</dt>
-                    <dd class="mt-2 text-base font-semibold">${olympiads.length}</dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-ink-faint">Обновлено</dt>
-                    <dd class="mt-2 text-base">${formatDate(university.updatedAt)}</dd>
+                    <dt class="text-sm font-medium text-ink-faint">Олимпиад с БВИ сейчас</dt>
+                    <dd class="mt-2 text-base font-semibold">${current.length}</dd>
                 </div>
             </dl>
         </section>
@@ -151,12 +170,15 @@ async function renderUniversity(universityId) {
         <section class="mt-20 md:mt-28" aria-labelledby="uni-bvi-title">
             <p class="${UI.eyebrow}">Главное для поступления</p>
             <h2 id="uni-bvi-title" class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">
-                Олимпиады, дающие БВИ
+                Олимпиады, которые университет учитывает для БВИ
             </h2>
             <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-                Поступление без вступительных испытаний за дипломы этих олимпиад.
+                Дипломы этих олимпиад университет засчитывает для поступления без
+                вступительных испытаний. Условия засчитывания устанавливает сам
+                университет.
             </p>
             <div class="mt-12">${olympiadsHtml}</div>
+            ${historicalHtml}
         </section>
     </article>`;
 
@@ -176,7 +198,7 @@ async function renderUniversity(universityId) {
  * которой сейчас нет.
  */
 function bviOlympiadCardHtml(olympiad) {
-    const historical = olympiad.is_historical || olympiad.status === 'ARCHIVED';
+    const historical = isHistoricalBvi(olympiad);
     const badge = historical
         ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архивная олимпиада</span>`
         : `<span class="${UI.badge} ${UI.badgeSuccess}">

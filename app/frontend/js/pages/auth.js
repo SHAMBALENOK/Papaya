@@ -94,10 +94,8 @@ function renderAuth() {
         btn.disabled = true;
         try {
             const res = await api.login({
-                name: '', surname: '',
                 email: fd.get('email'),
                 password: fd.get('password'),
-                isActive: true,
             });
             if (res.ok) { enterApp(res.data); return; }
             console.error('[auth] ошибка входа:', res.status, res.data);
@@ -124,7 +122,6 @@ function renderAuth() {
                 surname: fd.get('surname'),
                 email: fd.get('email'),
                 password: fd.get('password'),
-                isActive: true,
             });
             if (res.ok) { enterApp(res.data); return; }
             console.error('[auth] ошибка регистрации:', res.status, res.data);

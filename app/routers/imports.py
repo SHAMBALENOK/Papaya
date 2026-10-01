@@ -41,11 +41,16 @@ class ConfirmRequest(BaseModel):
     ``skip`` — список ``name_norm``, которые НЕ нужно создавать/обновлять
     (администратор снял галочку в окне проверки). Пустое тело — подтвердить
     всё. ``archive_missing`` — перевести в архив олимпиады, исчезнувшие из
-    перечня РСОШ (по умолчанию включено).
+    перечня РСОШ (по умолчанию включено; при неполном распознавании
+    архивирование автоматически отключается и причина попадает в отчёт).
     """
 
     skip: List[str] = Field(default_factory=list)
     archive_missing: bool = True
+    # Явное согласие применить перечень, который устарел: загружен раньше уже
+    # подтверждённого. Без этого подтверждения такой импорт отклоняется — иначе
+    # старый документ тихо откатил бы каталог назад.
+    allow_outdated: bool = False
 
 
 class ImportListItem(BaseModel):
@@ -58,6 +63,44 @@ class ImportListItem(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None
+
+
+class ImportView(BaseModel):
+    """Состояние одного прогона импорта.
+
+    Модель описана явно, чтобы ``/docs`` показывал настоящий ответ: без
+    ``response_model`` FastAPI отдаёт пустую схему, и по документации нельзя
+    понять, что вообще возвращает маршрут. Набор полей совпадает с
+    ``_import_view``.
+    """
+
+    id: str
+    name: str | None = None
+    type: str | None = None
+    status: str | None = None
+    state: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    summary: dict = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    # Итог применения: created/updated/archived/skipped/errors и
+    # archive_skipped_reason. Произвольная структура, поэтому dict.
+    confirm: dict | None = None
+
+
+class ImportConfirmResponse(BaseModel):
+    """Ответ на подтверждение импорта."""
+
+    import_: ImportView = Field(alias='import')
+    # Что записано в каталог: created, updated, archived, skipped, errors и
+    # archive_skipped_reason (почему пропавшие не архивировались).
+    result: dict = Field(default_factory=dict)
+    # Что администратор снял в preview. Отдельным полем, а не внутри result:
+    # это его решение, а не итог записи в каталог.
+    skipped: list[str] = Field(default_factory=list)
+
+    model_config = {'populate_by_name': True}
 
 
 def _import_view(doc: dict) -> dict:
@@ -100,6 +143,11 @@ async def start_rsosh_import(
         view = _import_view(doc)
         view['execution'] = mode
         return view
+    except processor.RsoshConflictError as exc:
+        # Состояние каталога не позволяет применить импорт (например,
+        # подтверждается устаревший перечень) — это конфликт, а не плохой
+        # запрос.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except processor.RsoshError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
@@ -136,6 +184,7 @@ async def list_imports(
 
 @imports_page.get(
     '/{import_id}',
+    response_model=ImportView,
     responses={
         200: {'description': 'Статус импорта'},
         401: {'description': 'Access token missing'},
@@ -194,12 +243,16 @@ async def import_preview(
 
 @imports_page.post(
     '/{import_id}/confirm',
+    response_model=ImportConfirmResponse,
     responses={
         200: {'description': 'Import confirmed and applied'},
         400: {'description': 'Import is not confirmable in its state'},
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         404: {'description': 'Import not found'},
+        # Перечень устарел относительно уже подтверждённого: каталог нельзя
+        # откатывать назад без явного согласия (allow_outdated=true).
+        409: {'description': 'Snapshot is older than a confirmed import'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -216,6 +269,7 @@ async def confirm(
             import_id,
             skip=chosen.skip,
             archive_missing=chosen.archive_missing,
+            allow_outdated=chosen.allow_outdated,
         )
         doc = result['document']
         return {
@@ -226,6 +280,11 @@ async def confirm(
             # нему видно, что «создано 4 из 5» — намеренно, а не из-за ошибки.
             'skipped': result['skipped'],
         }
+    except processor.RsoshConflictError as exc:
+        # Состояние каталога не позволяет применить импорт (например,
+        # подтверждается устаревший перечень) — это конфликт, а не плохой
+        # запрос.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except processor.RsoshError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:

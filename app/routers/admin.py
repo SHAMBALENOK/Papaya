@@ -21,7 +21,6 @@ from typing import List
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 
@@ -144,10 +143,10 @@ async def list_users(current_user: deps.AdminUser = None):
     """Все пользователи, включая заблокированных."""
     try:
         users = await database.users.list_users(include_inactive=True)
-        return JSONResponse(
-            status_code=200,
-            content={'users': [_serialize_user(user) for user in users]},
-        )
+        # Словарь, а не JSONResponse: response_model=AdminUsersResponse
+        # проверит контракт и отсечёт лишние поля. _serialize_user уже
+        # перечисляет разрешённые поля явно, хэша пароля среди них нет.
+        return {'users': [_serialize_user(user) for user in users]}
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')

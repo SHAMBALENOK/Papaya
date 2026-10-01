@@ -11,7 +11,7 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
@@ -40,16 +40,6 @@ async def get_university(university_id) -> dict | None:
             select(Universities).where(
                 Universities.id == _as_uuid(university_id)
             )
-        )
-        university = result.scalar_one_or_none()
-        return university_to_dict(university) if university else None
-
-
-async def find_university_by_name_norm(name_norm: str) -> dict | None:
-    """Точный поиск университета по нормализованному названию."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Universities).where(Universities.name_norm == name_norm)
         )
         university = result.scalar_one_or_none()
         return university_to_dict(university) if university else None
@@ -159,12 +149,3 @@ async def edit_university(university_id, ins: dict) -> dict | None:
             return None
         await session.refresh(university)
         return university_to_dict(university)
-
-
-async def count_universities() -> int:
-    """Количество университетов в каталоге."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(func.count()).select_from(Universities)
-        )
-        return result.scalar()

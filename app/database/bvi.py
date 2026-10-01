@@ -7,10 +7,15 @@
 
 Инварианты, которые держит этот модуль:
 
-- одна пара (университет, олимпиада) — одна связь (уникальный индекс в БД),
-  поэтому «две одинаковые связи» невозможны даже напрямую в базе;
+- одна пара (университет, олимпиада) — одна связь (уникальный индекс в БД и
+  обработка конфликта при параллельной вставке), поэтому «две одинаковые
+  связи» невозможны даже при гонке двух запросов;
 - университет **не создаёт олимпиаду**: здесь только ссылки на существующие
   записи каталога;
+- новая заявка возможна только по актуальной олимпиаде (``PUBLISHED``): правило
+  проверяется в ``request_bvi_link``, а не только в роутере, поэтому его нельзя
+  обойти другим вызывающим; уже существующая связь возвращается как есть —
+  архив сохраняет историю;
 - заявка представителя (``PENDING``) не видна в публичных списках: там только
   подтверждённые администратором связи (``CONFIRMED``).
 """
@@ -19,6 +24,7 @@ import uuid as uuid_mod
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
 from app.middlewares.serializers import (
@@ -142,6 +148,29 @@ async def list_universities_for_olympiad(
         ]
 
 
+class BviRequestError(ValueError):
+    """Заявку на связь БВИ создать нельзя.
+
+    Доменное исключение слоя данных: правило «архивная олимпиада не получает
+    новых заявок» держится здесь, а не только в HTTP-роутере. Иначе любой будущий
+    вызывающий (Celery-задача, административный скрипт, второй эндпоинт) мог бы
+    обойти проверку, и каталог тихо пополнялся бы связями с олимпиадами,
+    которых уже нет в перечне РСОШ.
+
+    Несёт ``status_code`` и ``detail`` — HTTP-слой подставляет их в ответ без
+    собственной логики, поэтому текст ошибки не дублируется.
+    """
+
+    def __init__(self, detail: str, *, status_code: int = 409):
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
+
+
+#: Статус олимпиады, для которого связи БВИ ещё имеют смысл.
+OLYMPIAD_ACTIVE_STATUS = 'PUBLISHED'
+
+
 async def request_bvi_link(
     olympiad_id,
     university_id,
@@ -154,12 +183,44 @@ async def request_bvi_link(
     изменения. Повторная заявка после подтверждения не сбрасывает статус на
     ``PENDING`` — иначе представитель мог бы «разжаловать» подтверждённую
     связь одной повторной заявкой.
+
+    Правила, которые держит именно эта функция (а не роутер):
+
+    - олимпиада должна существовать (404);
+    - олимпиада должна быть актуальной (``PUBLISHED``), иначе 409 — и это
+      проверяется **до** идемпотентности. Иначе повторный запрос по уже
+      существующей связи отвечал бы «201 Created», то есть утверждал бы, что
+      заявку приняли, хотя олимпиада в архиве;
+    - для актуальной олимпиады повтор возвращает существующую связь без
+      изменений (идемпотентность);
+    - конкурентные заявки на одну пару не приводят к 500: уникальный индекс
+      остаётся последней линией защиты, а конфликт обрабатывается как
+      «связь уже создана».
+
+    Строка олимпиады читается с блокировкой: архивирование не может пройти
+    между проверкой и вставкой связи.
     """
     olympiad_uuid = _as_uuid(olympiad_id)
     university_uuid = _as_uuid(university_id)
     now = datetime.now(timezone.utc)
 
     async with AsyncSessionLocal() as session:
+        olympiad_result = await session.execute(
+            select(Olympiads.status)
+            .where(Olympiads.id == olympiad_uuid)
+            .with_for_update()
+        )
+        olympiad_status = olympiad_result.scalar_one_or_none()
+        if olympiad_status is None:
+            raise BviRequestError('Олимпиада не найдена', status_code=404)
+        if olympiad_status != OLYMPIAD_ACTIVE_STATUS:
+            raise BviRequestError(
+                'Олимпиада архивирована: её нет в актуальном перечне РСОШ, '
+                'новые заявки БВИ за неё не принимаются. Подтверждённые ранее '
+                'связи сохраняются.',
+                status_code=409,
+            )
+
         result = await session.execute(
             select(UniversityBvi).where(
                 UniversityBvi.olympiad_id == olympiad_uuid,
@@ -179,7 +240,14 @@ async def request_bvi_link(
             updatedAt=now,
         )
         session.add(link)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Гонка: пара (университет, олимпиада) уникальна, и параллельный
+            # запрос успел вставить связь раньше нас. Для вызывающего это тот же
+            # идемпотентный результат — «связь есть», а не ошибка сервера.
+            await session.rollback()
+            return await get_link(olympiad_uuid, university_uuid)
         await session.refresh(link)
         return bvi_link_to_dict(link)
 

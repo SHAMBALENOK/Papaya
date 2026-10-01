@@ -49,8 +49,8 @@ class Users(Base):
     )
     isActive = Column(Boolean, default=True)
     # Индекс помогает сортировке списков пользователей по дате создания.
-    # Timezone-aware, как и в events, чтобы обе таблицы имели общий контракт
-    # времени (миграция 0003 выровняла legacy-колонки).
+    # Timezone-aware, как и в остальных таблицах каталога, чтобы контракт
+    # времени был общим (миграция 0003 выровняла legacy-колонки).
     createdAt = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

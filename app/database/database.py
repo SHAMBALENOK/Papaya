@@ -49,11 +49,6 @@ async def get_db():
         yield db
 
 
-def get_connection_url() -> str | None:
-    """Вернуть текущий DATABASE_URL (для диагностики и тестов)."""
-    return DATABASE_URL
-
-
 @asynccontextmanager
 async def db_lifespan(app: FastAPI):
     """Lifespan базы данных: здесь нет создания схемы.

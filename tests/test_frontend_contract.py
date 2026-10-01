@@ -295,20 +295,92 @@ def test_bvi_cards_distinguish_historical_links():
     )
     assert body, 'bviOlympiadCardHtml не найден'
     card = body.group(1)
-    assert 'is_historical' in card
+    assert 'isHistoricalBvi' in card, 'карточка должна использовать общий предикат'
     assert 'Архивная олимпиада' in card
     assert 'Историческая связь' in card
     # Зелёное «БВИ» остаётся только для актуальных олимпиад.
     assert 'historical' in card
 
 
-def test_olympiad_page_marks_universities_as_historical_when_archived():
-    """На странице архивной олимпиады вузы показаны историческими, не выброшены."""
+def test_olympiad_page_splits_current_and_historical_universities():
+    """Страница олимпиады делит университеты на действующие и исторические.
+
+    Один общий список смешивал льготу, которой сейчас нет, с историей, и
+    страница переставала отвечать на вопрос «кто учитывает эту олимпиаду
+    для БВИ сейчас».
+    """
     source = _read('pages', 'olympiads.js')
     assert 'isArchived' in source
+    assert 'currentUniversities' in source, 'нет разделения на актуальные'
+    assert 'historicalUniversities' in source, 'нет раздела исторических'
+    assert 'Исторические связи' in source
     assert 'Историческая связь' in source
-    # Университеты не удаляются из списка при архиве.
-    assert 'universities.map' in source
+    # Вузы не выбрасываются: исторические только помечаются.
+    assert 'historicalUniversities.map' in source
+    # Исторический блок вставлен в разметку, а не объявлен и забыт.
+    assert '${historicalHtml}' in source
+
+
+def test_university_page_splits_current_and_historical_olympiads():
+    """Страница университета: основной блок — актуальные, история — отдельно."""
+    source = _read('pages', 'universities.js')
+    assert 'isHistoricalBvi' in source
+    assert 'historical' in source
+    assert 'Исторические связи' in source
+    assert '${historicalHtml}' in source
+
+
+def test_bvi_count_excludes_historical():
+    """Счётчик «Олимпиад с БВИ сейчас» не включает исторические связи.
+
+    Иначе страница отвечала бы на главный вопрос завышенным числом.
+    """
+    source = _read('pages', 'universities.js')
+    # Счётчик берётся из отфильтрованного списка актуальных, а не всего.
+    match = re.search(r'\$\{current\.length\}', source)
+    assert match, 'счётчик считает не current.length'
+    assert '${olympiads.length}' not in source, 'счётчик использует общий список'
+    assert '${all.length}' not in source, 'счётчик использует общий список'
+
+
+def test_no_false_bvi_claims():
+    """Тексты не обещают поступление без оговорки «в этом университете».
+
+    Papaya знает только пары «университет → олимпиада». Фраза «по диплому этой
+    олимпиады можно поступить» без контекста обещает льготу во всех вузах сразу,
+    чего в данных нет.
+    """
+    forbidden = [
+        'по диплому этой олимпиады можно поступить',
+        'поступление без вступительных испытаний за дипломы этих олимпиад',
+    ]
+    for path in FRONTEND.rglob('*.js'):
+        source = path.read_text(encoding='utf-8')
+        for phrase in forbidden:
+            assert phrase not in source, f'{path.name}: {phrase}'
+
+
+def test_historical_rule_has_single_source():
+    """Правило «связь историческая» не дублируется по страницам."""
+    source = _read('pages', 'home.js')
+    body = re.search(
+        r'function isHistoricalBvi\(item\) \{(.*?)\n\}', source, re.S
+    )
+    assert body, 'isHistoricalBvi не найден'
+    assert 'is_historical' in body.group(1)
+    # На страницах не должно быть собственных копий правила.
+    for name in ('pages/universities.js', 'pages/olympiads.js'):
+        page = _read(*name.split('/'))
+        own = re.findall(r'\.is_historical\s*\|\|', page)
+        assert not own, f'{name}: правило продублировано'
+
+
+def test_archived_not_in_count_but_kept_in_history():
+    """Архивная олимпиада не попадает в основной ответ, но связи её хранятся."""
+    source = _read('pages', 'universities.js')
+    # Фильтрация опирается на общий предикат, а не на вырезание из массива.
+    assert 'all.filter' in source
+    assert 'current' in source and 'historical' in source
 
 
 def test_rep_cabinet_shows_archived_links_as_historical():
@@ -341,3 +413,30 @@ def test_picker_uses_current_catalog_only():
     assert match, 'вызов listOlympiads не найден'
     assert 'include_archived' not in match.group(1)
     assert 'true' not in match.group(1)
+
+
+def test_import_confirm_handles_outdated_snapshot_explicitly():
+    """Устаревший перечень нельзя применить молча, но можно — осознанно.
+
+    Без явного шага администратор упирается в 409 без выхода: API требует
+    `allow_outdated`, а панель молча показывала ошибку. Тест фиксирует
+    оба конца контракта.
+    """
+    source = _read('pages', 'admin.js')
+    # Отказ обрабатывается отдельно, а не глотается общим тостом.
+    assert '409' in source
+    # Явное согласие = второй запрос с allow_outdated.
+    assert 'allow_outdated: true' in source
+    # И объяснение, что именно произойдёт, до кнопки подтверждения.
+    assert 'Перечень устарел' in source
+
+
+def test_import_result_shows_archive_skipped_reason():
+    """Причина пропущенного архивирования показывается администратору.
+
+    Молчаливое «импорт применён» выглядит как «перечень актуален», хотя
+    пропавшие олимпиады остались в каталоге.
+    """
+    source = _read('pages', 'admin.js')
+    assert 'archive_skipped_reason' in source
+    assert 'Архивирование пропущено' in source

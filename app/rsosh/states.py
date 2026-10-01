@@ -53,11 +53,6 @@ def rsosh_section(doc: dict | None) -> dict:
     return section
 
 
-def rsosh_state(doc: dict | None) -> str | None:
-    section = rsosh_section(doc)
-    return section.get('state')
-
-
 def docs_metadata_with_section(doc: dict | None, section: dict) -> dict:
     """Метаданные документа с обновлённым разделом ``rsosh``."""
     metadata = dict((doc or {}).get('metadata') or {})
@@ -127,18 +122,4 @@ def rejected_section(doc: dict | None) -> dict:
         **rsosh_section(doc),
         'state': 'rejected',
         'finished_at': _now(),
-    }
-
-
-def public_view(doc: dict | None) -> dict:
-    """Состояние импорта для ответа API (без полного списка кандидатов)."""
-    section = rsosh_section(doc)
-    return {
-        'state': section.get('state'),
-        'started_at': section.get('started_at'),
-        'finished_at': section.get('finished_at'),
-        'error': section.get('error'),
-        'summary': section.get('summary') or {},
-        'warnings': section.get('warnings') or [],
-        'confirm': section.get('confirm'),
     }

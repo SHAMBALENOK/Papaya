@@ -5,7 +5,7 @@ from typing import Annotated
 
 import redis.asyncio as aioredis
 from fastapi import Cookie, Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,7 +94,10 @@ async def main(
         )
         if not user_dict:
             raise HTTPException(status_code=404, detail='User not found')
-        return JSONResponse(status_code=200, content=user_dict)
+        # Возвращаем словарь, а не JSONResponse: объявленный response_model
+        # отфильтрует ответ по контракту UserResponse. Явный JSONResponse
+        # отдавал бы весь словарь из БД как есть и обходил бы схему.
+        return user_dict
     except HTTPException:
         raise
     except Exception:

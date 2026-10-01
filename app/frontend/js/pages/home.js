@@ -45,7 +45,8 @@ function renderHome() {
             <p class="text-sm font-extrabold text-ember">02</p>
             <h2 class="mt-6 text-xl font-bold tracking-tight">Посмотрите олимпиады с БВИ</h2>
             <p class="mt-4 text-ink-soft leading-relaxed">
-                На странице университета — список олимпиад, дающих поступление без испытаний.
+                На странице университета — олимпиады, которые именно этот вуз
+                засчитывает для БВИ.
             </p>
         </article>
         <article class="${UI.card} p-8">
@@ -90,8 +91,8 @@ async function loadHomeCatalog() {
            <p class="mt-8"><a href="#/universities" class="${UI.btn} ${UI.btnGhost}">Все университеты →</a></p>`
         : emptyHtml('Каталог университетов пока пуст',
                     'Университеты заводит администратор Papaya. Связь с олимпиадами '
-                    + 'представитель университета подтверждает сам — после этого олимпиады '
-                    + 'дают БВИ.');
+                    + 'запрашивает представитель университета, а подтверждает модератор '
+                    + 'Papaya — после этого в каталоге появляются олимпиады этого вуза.');
 
     const olympiadsHtml = olympiadsData.length
         ? `<div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">` +
@@ -122,6 +123,22 @@ async function loadHomeCatalog() {
         <div class="mt-12">${olympiadsHtml}</div>
     </div>`;
 }
+
+/** Историческая ли связь БВИ.
+ *
+ * Единственное место, где это решается во фронтенде: раздел актуальных и
+ * исторических связей на страницах университета и олимпиады обязан считать
+ * одинаково, иначе одна страница покажет олимпиаду как действующую льготу,
+ * а другая — как историю.
+ *
+ * Проверяются оба признака: сервер отдаёт `is_historical` (унаследовано от
+ * олимпиады), а на всякий случай и её собственный статус. `is_archived` —
+ * дублирование того же факта, поэтому в проверке не участвует.
+ */
+function isHistoricalBvi(item) {
+    return Boolean(item.is_historical) || item.status === 'ARCHIVED';
+}
+
 
 function universityCardHtml(university) {
     return `

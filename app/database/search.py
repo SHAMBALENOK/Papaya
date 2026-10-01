@@ -84,8 +84,3 @@ def like_pattern(search: str) -> str:
         .replace('_', '\\_')
     )
     return f'%{escaped}%'
-
-
-def escape_like_literal(value: str) -> str:
-    """Экранировать спецсимволы LIKE для передачи в SQL-параметр."""
-    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')

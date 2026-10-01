@@ -1,5 +1,3 @@
-import asyncio
-
 from celery import Celery
 
 from app.core.config import REDIS_URL
@@ -23,18 +21,3 @@ task_queue.conf.update(
         'app.rsosh.worker',
     ),
 )
-
-
-async def run_task(task, *args, **kwargs):
-    """Запустить задачу без лимитов и дождаться результата вне worker task."""
-    result = task.apply_async(
-        args=args,
-        kwargs=kwargs,
-        time_limit=None,
-        soft_time_limit=None,
-    )
-    return await asyncio.to_thread(
-        result.get,
-        timeout=None,
-        disable_sync_subtasks=True,
-    )

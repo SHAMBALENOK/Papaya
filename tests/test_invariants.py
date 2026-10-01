@@ -131,7 +131,9 @@ async def test_confirmed_by_lives_only_with_confirmed(client):
     created = await _link(client, university['id'], olympiad['id'])
     assert created.status_code == 201
     assert created.json()['status'] == 'PENDING'
-    assert created.json()['confirmedBy'] is None
+    # Автор подтверждения — служебное поле модерации, в ответе представителю его
+    # нет. Проверяется в очереди администратора (см. ниже).
+    assert 'confirmedBy' not in created.json()
 
     admin = await admin_client(client)
     confirmed = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
@@ -141,6 +143,21 @@ async def test_confirmed_by_lives_only_with_confirmed(client):
     link = queue.json()['links'][0]
     assert link['status'] == 'CONFIRMED'
     assert link['confirmedBy'] == admin['id']
+
+    # У неподтверждённой заявки автора подтверждения нет: иначе по записи нельзя
+    # было бы понять, кто сейчас отвечает за связь.
+    other = await create_university(client, 'Второй университет')
+    await university_rep_client(client, other['id'])
+    await _link(client, other['id'], olympiad['id'])
+    # Сессия клиента теперь у представителя: возвращаем админские права.
+    await admin_client(client)
+    admin_queue = await client.get('/api/v1/admin/bvi')
+    assert admin_queue.status_code == 200
+    pending = [
+        row for row in admin_queue.json()['links'] if row['status'] == 'PENDING'
+    ]
+    assert pending, 'заявка должна быть в очереди'
+    assert all(row['confirmedBy'] is None for row in pending)
 
 
 async def test_revoke_removes_link_and_its_confirmation(client):
@@ -258,10 +275,13 @@ async def test_public_olympiad_has_no_technical_fields(client):
         assert field not in body, f'{field} не должен попадать в публичный ответ'
     assert set(body) == {
         'id', 'name', 'description', 'official_url', 'preview_image', 'image',
-        'source_url', 'status',
+        'source_url', 'status', 'is_archived',
     }
     # Архив виден по статусу, а не по техническому enum-значению.
     assert body['status'] == 'ARCHIVED'
+    # is_archived обязан реально доезжать в JSON: как обычное @property он в
+    # Pydantic не сериализуется, и карточка молча теряла бы признак архива.
+    assert body['is_archived'] is True
 
 
 # ------------------------- Один способ назначить представителя -------------------------
@@ -303,6 +323,99 @@ async def test_role_endpoint_is_the_working_way(client):
     assert response.status_code == 200
     assert response.json()['role'] == 'EDITOR'
     assert response.json()['university_id'] == university['id']
+
+
+async def test_self_edit_cannot_grant_rights(client):
+    """Правка своего профиля не может выдать роль, вуз или разблокировку.
+
+    ``/user/{id}/edit_info`` применяет к БД всё, что пришло в теле запроса
+    (``model_dump(exclude_unset=True)``), поэтому единственная защита от
+    самостоятельного повышения прав — это состав ``UserUpdate``. Тест фиксирует
+    именно эту защиту: если в схему добавят ``role``, ``isActive`` или
+    ``university_id``, тест упадёт, а не тихо откроет повышение прав.
+    """
+    user = await register_user(client)
+
+    response = await client.post(
+        f"/api/v1/user/{user['id']}/edit_info",
+        json={
+            'name': 'Попытка повысить себя',
+            'role': 'ADMIN',
+            'isActive': True,
+            'university_id': str(uuid.uuid4()),
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    # В ответе роль остаётся прежней...
+    assert response.json()['role'] == 'USER'
+    assert response.json()['university_id'] is None
+
+    # ...и в базе тоже: иначе «безобидный» ответ скрывал бы выданные права.
+    me = await client.get('/api/v1/')
+    assert me.status_code == 200
+    assert me.json()['role'] == 'USER'
+    assert me.json()['university_id'] is None
+
+    schema = await client.get('/openapi.json')
+    body = schema.json()
+    edit = body['paths']['/api/v1/user/{user_id}/edit_info']['post']
+    referenced = set()
+    for ref in edit.get('requestBody', {}).get('content', {}).values():
+        schema_ref = ref.get('schema', {}).get('$ref', '')
+        if schema_ref:
+            name = schema_ref.rsplit('/', 1)[-1]
+            referenced.add(name)
+            referenced |= set(body['components']['schemas'][name].get('properties', {}))
+    assert 'role' not in referenced, 'edit_info не должен принимать role'
+    assert 'isActive' not in referenced, 'edit_info не должен принимать isActive'
+    assert 'university_id' not in referenced, (
+        'edit_info не должен принимать university_id'
+    )
+
+
+# ------------------------- Признак архива в публичном контракте -------------------------
+
+
+async def test_is_archived_is_serialized_and_consistent(client):
+    """Признак архива доезжает в JSON и совпадает со статусом.
+
+    Раньше это был обычный ``@property``, который Pydantic в ответ не отдаёт:
+    поле молча пропадало, и карточка олимпиады не могла отличить архивную
+    олимпиаду, не разбирая ``status`` на клиенте.
+    """
+    olympiad = await create_olympiad(client, 'Олимпиада с признаком архива')
+
+    fresh = await client.get(f"/api/v1/olympiads/{olympiad['id']}")
+    assert fresh.status_code == 200
+    assert fresh.json()['is_archived'] is False
+
+    await admin_client(client)
+    await client.post(
+        f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
+    )
+
+    archived = await client.get(f"/api/v1/olympiads/{olympiad['id']}")
+    assert archived.json()['is_archived'] is True
+
+    # В каталоге по умолчанию архивных олимпиад нет — это и есть «не в
+    # актуальном перечне», поэтому искать её там нельзя.
+    listing = await client.get('/api/v1/olympiads')
+    assert listing.status_code == 200
+    assert olympiad['id'] not in [
+        entry['id'] for entry in listing.json()['olympiads']
+    ]
+
+    # С признаком архива она появляется в каталоге с include_archived, и
+    # карточка не расходится с карточкой-деталью.
+    with_archived = await client.get('/api/v1/olympiads?include_archived=true')
+    assert with_archived.status_code == 200
+    item = next(
+        entry for entry in with_archived.json()['olympiads']
+        if entry['id'] == olympiad['id']
+    )
+    assert item['is_archived'] is True
+    assert item['status'] == 'ARCHIVED'
 
 
 # ------------------------- Валидация ссылок -------------------------

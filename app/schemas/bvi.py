@@ -60,16 +60,21 @@ class BviModerationRequest(BaseModel):
 
 
 class BviLinkResponse(BaseModel):
-    """Связь БВИ в ответе API."""
+    """Связь БВИ в ответе на заявку представителя.
+
+    Минимальный публичный контракт: пара id, статус и актуальность олимпиады.
+    ``createdBy`` / ``confirmedBy`` / ``createdAt`` / ``updatedAt`` — служебные
+    поля модерации, пользователю они ничего не дают, поэтому наружу не
+    отдаются: по заявке достаточно понимать, что она создана и в каком статусе.
+    """
 
     id: Optional[UUID] = None
     university_id: UUID
     olympiad_id: UUID
     status: str = 'PENDING'
-    createdBy: Optional[UUID] = None
-    confirmedBy: Optional[UUID] = None
-    createdAt: Optional[datetime] = None
-    updatedAt: Optional[datetime] = None
+    # Актуальна ли олимпиада: по архивной новых заявок не бывает, но
+    # подтверждённая историческая связь остаётся в списке.
+    is_historical: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
