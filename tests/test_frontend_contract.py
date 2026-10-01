@@ -415,20 +415,24 @@ def test_picker_uses_current_catalog_only():
     assert 'true' not in match.group(1)
 
 
-def test_import_confirm_handles_outdated_snapshot_explicitly():
-    """Устаревший перечень нельзя применить молча, но можно — осознанно.
+def test_import_confirm_refuses_outdated_snapshot_without_offering_a_way_around():
+    """Устаревший перечень отклоняется, и обхода в интерфейсе не предлагается.
 
-    Без явного шага администратор упирается в 409 без выхода: API требует
-    `allow_outdated`, а панель молча показывала ошибку. Тест фиксирует
-    оба конца контракта.
+    В прошлой версии панель показывала диалог с кнопкой «Применить всё равно» и
+    отправляла ``allow_outdated: true``. Такого пути в продукте быть не должно:
+    актуальный каталог определяется последним подтверждённым перечнем.
     """
     source = _read('pages', 'admin.js')
-    # Отказ обрабатывается отдельно, а не глотается общим тостом.
-    assert '409' in source
-    # Явное согласие = второй запрос с allow_outdated.
-    assert 'allow_outdated: true' in source
-    # И объяснение, что именно произойдёт, до кнопки подтверждения.
-    assert 'Перечень устарел' in source
+    assert '409' in source, 'отказ по устаревшему перечню должен обрабатываться'
+    assert 'allow_outdated' not in source, (
+        'в панели не должно быть флага, отключающего проверку актуальности'
+    )
+    assert 'Применить всё равно' not in source, (
+        'в панели не должно быть кнопки принудительного применения'
+    )
+    # Отказ объясняется, а не прячется: администратор должен понимать причину.
+    assert 'showOutdatedImportNotice' in source
+    assert 'нельзя' in source or 'невозможно' in source
 
 
 def test_import_result_shows_archive_skipped_reason():

@@ -541,11 +541,11 @@ async function rejectImportAction(id) {
 async function confirmImportAction(id) {
     const res = await api.confirmImport(id, { skip: [], archive_missing: true });
     if (!res.ok) {
-        // Перечень устарел относительно уже подтверждённого: каталог нельзя
-        // откатывать молча. Показываем риск и спрашиваем явно — решение
-        // принимает администратор, а не порядок загрузки файлов.
         if (res.status === 409) {
-            await confirmOutdatedImport(id, errorText(res));
+            // Каталог уже соответствует более новому перечню, либо этот
+            // перечень уже применён. Применить его снова нельзя: в панели нет
+            // и не должно быть способа вернуть каталог к старой редакции.
+            showOutdatedImportNotice(errorText(res));
             return;
         }
         showToast(errorText(res), 'error');
@@ -564,46 +564,21 @@ async function confirmImportAction(id) {
     await loadAdminTab('imports');
 }
 
-/** Явное согласие применить устаревший перечень (allow_outdated). */
-function confirmOutdatedImport(id, reason) {
+/** Объяснить отказ по устаревшему перечню — без предложения «применить всё равно». */
+function showOutdatedImportNotice(reason) {
     const body = `
-    <div id="modal-alert"></div>
     <div class="space-y-5 text-ink-soft leading-relaxed">
         <p>${escHtml(reason)}</p>
-        <p>Подтверждение вернёт каталог к старой редакции РСОШ: олимпиады,
-           добавленные позже, уйдут в архив, а отсутствующие в этом перечне —
-           вернутся в актуальные. Если перечень загружен случайно, закройте
-           окно и загрузите нужный документ заново.</p>
+        <p>Актуальный каталог определяется последним подтверждённым перечнем
+           РСОШ, поэтому вернуть его к предыдущей редакции нельзя. Загрузите
+           актуальный перечень и подтвердите его — олимпиады, исчезнувшие из
+           нового перечня, попадут в архив, а исторические связи сохранятся.</p>
     </div>
     <div class="flex flex-wrap justify-end gap-3 mt-10">
-        <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-        <button type="button" data-apply class="${UI.btn} ${UI.btnPrimary}">Применить всё равно</button>
+        <button type="button" data-close class="${UI.btn} ${UI.btnGhost}">Понятно</button>
     </div>`;
-    const { overlay, close } = openModal('Перечень устарел', body);
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
-    overlay.querySelector('[data-apply]').addEventListener('click', async e => {
-        const btn = e.target;
-        btn.disabled = true;
-        const forced = await api.confirmImport(id, {
-            skip: [], archive_missing: true, allow_outdated: true,
-        });
-        if (!forced.ok) {
-            showModalError(overlay, forced);
-            btn.disabled = false;
-            return;
-        }
-        close();
-        const result = forced.data.result || {};
-        showToast(
-            `Устаревший перечень применён: создано ${(result.created || []).length}, обновлено ${(result.updated || []).length}, в архив ${(result.archived || []).length}`,
-            'success', 6000);
-        if (result.archive_skipped_reason) {
-            showToast(
-                `Архивирование пропущено: ${result.archive_skipped_reason}`,
-                'error', 10000);
-        }
-        await loadAdminTab('imports');
-    });
+    const { overlay, close } = openModal('Перечень не применён', body);
+    overlay.querySelector('[data-close]').addEventListener('click', close);
 }
 
 async function showImportPreview(id) {

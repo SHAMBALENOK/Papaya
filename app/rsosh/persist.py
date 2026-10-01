@@ -18,24 +18,55 @@
 перечень прочитан целиком. Если часть строк не распозналась или не
 применилась, «отсутствует» означает совсем другое, и массовая архивация
 уничтожила бы действующие записи каталога.
+
+Всё применение перечня происходит в одной транзакции (см.
+``apply_confirmed_import``). Это не оптимизация, а требование целостности:
+
+- подтверждение двух перечней не должно пересекаться, иначе старый перечень,
+  подтверждённый вторым, откатил бы каталог назад (проверка актуальности и
+  запись должны быть под одним замком);
+- один перечень нельзя применить дважды, поэтому состояние документа
+  проверяется под блокировкой его строки;
+- ошибка одной строки не должна ломать остальные, поэтому каждый кандидат
+  записывается в SAVEPOINT (см. ``_apply_candidates``).
 """
 
 import logging
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.database.database import AsyncSessionLocal
 from app.database.search import normalize_name
-from app.middlewares.serializers import olympiad_to_dict
+from app.middlewares.serializers import doc_to_dict, olympiad_to_dict
 from app.models.docs import Docs
 from app.models.olympiads import Olympiads
-from app.rsosh.types import Candidate
+from app.rsosh import states
+from app.rsosh.types import Candidate, RsoshConflictError, RsoshError
 
 logger = logging.getLogger('papaya.rsosh.persist')
 
 # Причины архивирования (совпадают с комментарием в app/models/olympiads.py).
 ARCHIVE_BY_RSOSH = 'RSOSH_ABSENT'
 ARCHIVE_MANUAL = 'MANUAL'
+
+#: Единственный тип документа, который может создавать и обновлять олимпиады.
+#:
+#: Другие типы (``UNIVERSITY_ORDER``, ``OTHER``) существуют как хранилище
+#: источников: приказ университета полезно хранить рядом с каталогом, но он не
+#: является перечнем олимпиад и не должен ни создавать, ни обновлять записи
+#: каталога. Значение совпадает с ``processor.RSOSH_DOC_TYPE``, но продублировано
+#: намеренно: persist не должен импортировать процессор (тот импортирует persist).
+RSOSH_DOC_TYPE = 'RSOSH_LIST'
+
+#: Ключ advisory-блокировки, сериализующей применение перечней РСОШ.
+#:
+#: Произвольное, но постоянное число: важно лишь, чтобы применение любого
+#: перечня РСОШ в пределах одной базы шло через один и тот же ключ. Блокировка
+#: транзакционная (``pg_advisory_xact_lock``), поэтому снимается сама при
+#: commit или rollback — «забыть» её нельзя, в том числе при падении процесса.
+RSOSH_SNAPSHOT_LOCK_KEY = 0x7061_7061  # 'papa'
 
 #: Предупреждения, после которых перечень нельзя считать прочитанным целиком.
 #:
@@ -67,6 +98,25 @@ def _as_iso(value):
     if value is None or isinstance(value, str):
         return value
     return value.isoformat()
+
+
+def _candidate_error_text(exc: Exception) -> str:
+    """Понятная причина неудачной строки без внутренностей реализации.
+
+    Текст попадает в отчёт импорта, который возвращается в API и хранится в
+    метаданных документа, поэтому тексты ошибок БД (имена таблиц, колонок,
+    значения параметров) туда не выводятся.
+    """
+    if isinstance(exc, IntegrityError):
+        return 'строка нарушает ограничения целостности (дубликат или '\
+            'недопустимое значение)'
+    if isinstance(exc, DBAPIError):
+        return 'строку не удалось записать: ошибка соединения с базой данных'
+    if isinstance(exc, (TypeError, ValueError, AttributeError, KeyError)):
+        # Ошибка уровня Python: текст безопасен и полезен (какое поле сломано).
+        return f'некорректные данные строки: {exc}'
+    return 'строку не удалось записать'
+
 
 
 def _archive_decision(
@@ -106,70 +156,237 @@ def _archive_decision(
     return True, None
 
 
-async def apply_candidates(
+async def apply_confirmed_import(
+    *,
+    doc_id,
+    skip: list[str] | None = None,
+    archive_missing: bool = True,
+) -> dict:
+    """Применить подтверждённый перечень целиком, в одной транзакции.
+
+    Порядок именно такой, и он обеспечен блокировками, а не проверками:
+
+    1. advisory-блокировка (transaction-scoped) — с этого момента никакое
+       другое применение перечня РСОШ не идёт ни в этой базе, ни в этой
+       транзакции. Это и есть защита от отката: проверка актуальности и
+       запись каталога не могут разойтись по времени;
+    2. блокировка строки документа (``SELECT ... FOR UPDATE``) — второй
+       администратор, подтверждающий тот же перечень, дождётся конца первой
+       транзакции и увидит состояние ``approved``, а не ``review``;
+    3. перечитывание состояния документа и поиск свежего подтверждённого
+       перечня — уже под обеими блокировками, то есть по актуальным данным;
+    4. запись кандидатов (каждый в SAVEPOINT) и архивирование пропавших;
+    5. запись состояния ``approved`` и ``processedAt`` **той же**
+       транзакцией, что и каталог.
+
+    Благодаря пункту 5 подтверждённый перечень становится актуальным ровно в
+    момент коммита вместе с записями каталога. Расхождение «каталог записан, а
+    документ ещё не approved» невозможно, а значит невозможен и откат каталога
+    старым перечнем, который сочтётся самым свежим по состоянию документов.
+
+    Возвращает ``{'document': dict, 'result': dict, 'skipped': [name_norm]}``.
+    """
+    skip_list = [str(item) for item in (skip or [])]
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            section = states.rsosh_section(document)
+            if section.get('state') not in states.CONFIRMABLE_STATES:
+                # Сюда попадает и повторное подтверждение уже применённого
+                # перечня: состояние approved не confirmable.
+                raise RsoshConflictError(
+                    f'Импорт в состоянии {section.get("state")} уже применён '
+                    'или не может быть применён повторно'
+                )
+            if document.get('type') != RSOSH_DOC_TYPE:
+                # Единственный документ, который может обновлять каталог.
+                # Приказ университета и любой другой источник остаются
+                # хранилищем документов и олимпиад из них не создают.
+                raise RsoshError(
+                    'Only RSOSH_LIST documents can update the catalog'
+                )
+
+            newest = await _newest_confirmed(session, exclude_doc_id=doc_uuid)
+            if is_outdated_snapshot(document, newest):
+                newest_id, newest_created_at = newest
+                raise RsoshConflictError(
+                    'Этот перечень устарел: он загружен раньше уже '
+                    f'подтверждённого документа (от {str(newest_created_at)[:10]}). '
+                    'Подтверждение вернуло бы каталог к старой редакции, '
+                    'поэтому невозможно. Загрузите актуальный перечень РСОШ.'
+                )
+
+            candidates = [
+                Candidate.from_dict(item)
+                for item in (section.get('candidates') or [])
+            ]
+            skip_set = set(skip_list)
+            unknown = skip_set - {item.name_norm for item in candidates}
+            if unknown:
+                raise RsoshError(
+                    'Unknown candidates in skip: ' + ', '.join(sorted(unknown))
+                )
+
+            selected = [
+                item for item in candidates if item.name_norm not in skip_set
+            ]
+            # Кандидаты, снятые администратором в preview, защищаются от
+            # автоматического архивирования: «не подтвердил» не значит «нет в
+            # перечне РСОШ» (чаще всего снятие — это реакция на ошибку
+            # распознавания).
+            protected_ids = {
+                item.matched_olympiad_id
+                for item in candidates
+                if item.name_norm in skip_set and item.matched_olympiad_id
+            }
+
+            result = await _apply_candidates(
+                session,
+                candidates=selected,
+                doc_id=doc_uuid,
+                archive_missing=archive_missing,
+                protected_ids=protected_ids,
+                # Предупреждения разбора решают, можно ли доверять перечню в
+                # вопросе «кого в нём больше нет».
+                warnings=section.get('warnings') or [],
+            )
+
+            now = datetime.now(timezone.utc)
+            doc_row.processedAt = now
+            doc_row.updatedAt = now
+            doc_row.status = states.DOCS_STATUS['approved']
+            doc_row.meta = states.docs_metadata_with_section(
+                document, states.confirmed_section(document, result)
+            )
+            document = doc_to_dict(doc_row)
+
+    return {
+        'document': document,
+        'result': result,
+        'skipped': sorted(skip_set),
+    }
+
+
+async def _lock_snapshot_scope(session) -> None:
+    """Заблокировать применение перечней РСОШ до конца транзакции.
+
+    ``pg_advisory_xact_lock`` — блокировка уровня базы, привязанная к
+    транзакции: PostgreSQL отдаёт её при commit и rollback, а также при
+    разрыве соединения. Отдельного «забытого» замка не остаётся, в том числе
+    если процесс упал посреди импорта.
+    """
+    await session.execute(
+        text('SELECT pg_advisory_xact_lock(:key)'),
+        {'key': RSOSH_SNAPSHOT_LOCK_KEY},
+    )
+
+
+async def _newest_confirmed(session, *, exclude_doc_id=None) -> tuple | None:
+    """Самый «свежий» уже подтверждённый перечень — в текущей транзакции.
+
+    Порядок снимков определяется временем загрузки документа: год олимпиады
+    Papaya не моделирует (одна каноническая олимпиада независимо от года), и
+    разбирать документ ради даты — значит трогать распознавание. Практически
+    это и есть нужный порядок: перечень РСОШ загружают по мере выхода новой
+    редакции.
+
+    Чтение выполняется в сессии вызывающего намеренно: под advisory-блокировкой
+    так видны изменения, зафиксированные другим применением, — именно это и
+    нужно, чтобы отвергнуть старый перечень.
+
+    Время возвращается в том же виде, что и у словаря документа (ISO-8601),
+    чтобы сравнение не зависело от типа.
+    """
+    rows = (
+        await session.execute(
+            select(Docs.id, Docs.createdAt, Docs.meta)
+            .where(Docs.type == 'RSOSH_LIST')
+            .order_by(Docs.createdAt.desc(), Docs.id)
+        )
+    ).all()
+    for row_id, created_at, meta in rows:
+        if exclude_doc_id is not None and str(row_id) == str(exclude_doc_id):
+            continue
+        row_section = ((meta or {}).get('rsosh') or {})
+        if row_section.get('state') == 'approved':
+            return row_id, _as_iso(created_at)
+    return None
+
+
+async def _apply_candidates(
+    session,
     *,
     candidates: list[Candidate],
-    doc: dict,
-    archive_missing: bool = True,
-    protected_ids: set[str] | None = None,
-    warnings: list[str] | None = None,
+    doc_id,
+    archive_missing: bool,
+    protected_ids: set[str],
+    warnings: list[str],
 ) -> dict:
-    """Применить подтверждённый импорт.
+    """Записать кандидатов в каталог в рамках уже открытой транзакции.
+
+    Каждый кандидат сохраняется в отдельном SAVEPOINT. Это не «хороший тон»,
+    а требование: ошибка ``flush()`` переводит сессию SQLAlchemy в
+    failed-состояние, и простой ``continue`` после такой ошибки не оставляет
+    сессию пригодной для следующих строк — вместо «одна строка не записалась»
+    получается «весь импорт развалился». SAVEPOINT откатывает только
+    неудачную строку, оставляя транзакцию и уже записанное на месте.
 
     ``protected_ids`` — id олимпиад, которые нельзя архивировать, даже если их
-    не было в текущем документе (например, кандидаты, которые администратор
-    снял в preview из-за ошибки распознавания).
+    не было в текущем документе (кандидаты, снятые администратором в preview).
 
     ``warnings`` — предупреждения разбора документа: часть из них означает, что
     структуру перечня прочитать не удалось, и тогда архивирование отключается
     (см. ``_archive_decision``).
-
-    Возвращает итог: сколько олимпиад создано, сколько обновлено, какие
-    отправлены в архив и какие записи пропущены.
     """
-    doc_id = _as_uuid(doc['id'])
     created: list[str] = []
     updated: list[str] = []
     skipped: list[str] = []
     errors: list[str] = []
     touched_ids: list[str] = []
-    # Олимпиады, о которых администратор сказал «не трогать»: снятые с
-    # подтверждения кандидаты. Они не считаются отсутствующими в перечне.
-    protected_ids: set[str] = {str(value) for value in (protected_ids or set())}
 
-    async with AsyncSessionLocal() as session:
-        for candidate in candidates:
-            try:
+    for candidate in candidates:
+        try:
+            async with session.begin_nested():
                 olympiad = await _upsert(session, candidate, doc_id)
-            except Exception as exc:  # noqa: BLE001 - одна плохая строка не
-                # должна откатывать весь импорт
-                logger.exception('rsosh: cannot apply candidate %s', candidate.name)
-                errors.append(f'{candidate.name}: {exc}')
-                continue
-            if olympiad is None:
-                skipped.append(candidate.name)
-                continue
-            touched_ids.append(str(olympiad['id']))
-            if candidate.action == 'create':
-                created.append(olympiad['name'])
-            else:
-                updated.append(olympiad['name'])
+        except Exception as exc:  # noqa: BLE001 - одна плохая строка не
+            # должна откатывать весь импорт
+            logger.exception('rsosh: cannot apply candidate %s', candidate.name)
+            errors.append(f'{candidate.name}: {_candidate_error_text(exc)}')
+            continue
+        if olympiad is None:
+            skipped.append(candidate.name)
+            continue
+        touched_ids.append(str(olympiad['id']))
+        if candidate.action == 'create':
+            created.append(olympiad['name'])
+        else:
+            updated.append(olympiad['name'])
 
-        archived: list[str] = []
-        archive_reason = None
-        should_archive, archive_reason = _archive_decision(
-            requested=archive_missing,
-            errors=errors,
-            warnings=list(warnings or []),
+    archived: list[str] = []
+    archive_reason = None
+    should_archive, archive_reason = _archive_decision(
+        requested=archive_missing,
+        errors=errors,
+        warnings=list(warnings or []),
+    )
+    if should_archive:
+        archived = await _archive_missing(
+            session,
+            doc_id,
+            set(touched_ids) | {str(value) for value in protected_ids},
         )
-        if should_archive:
-            archived = await _archive_missing(
-                session,
-                doc_id,
-                set(touched_ids) | protected_ids,
-            )
-
-        await session.commit()
 
     logger.info(
         'rsosh: applied %s candidates (created=%s, merged=%s, archived=%s%s)',
@@ -187,6 +404,7 @@ async def apply_candidates(
         # отработало штатно.
         'archive_skipped_reason': archive_reason,
     }
+
 
 
 async def _upsert(session, candidate: Candidate, doc_id):
@@ -277,39 +495,6 @@ async def _archive_missing(session, doc_id, keep_ids: set[str]) -> list[str]:
     return archived
 
 
-async def newest_confirmed_rsosh_doc_id(exclude_doc_id=None) -> tuple | None:
-    """Самый «свежий» уже подтверждённый документ РСОШ.
-
-    Порядок снимков определяется временем загрузки документа: год олимпиады
-    Papaya не моделирует (одна каноническая олимпиада независимо от года), и
-    разбирать документ ради даты — значит трогать распознавание. Практически
-    это и есть нужный порядок: перечень РСОШ загружают по мере выхода новой
-    редакции.
-
-    Возвращает ``(id, createdAt)`` последнего подтверждённого перечня.
-
-    Время возвращается в том же виде, что и у словаря документа (ISO-8601),
-    чтобы сравнение не зависело от типа: документ приходит в процессор
-    сериализованным, и сравнивать его ``createdAt`` с ``datetime`` означало бы
-    упасть на ``TypeError`` вместо отказа по смыслу.
-    """
-    newest = None
-    async with AsyncSessionLocal() as session:
-        rows = (await session.execute(
-            select(Docs.id, Docs.createdAt, Docs.meta)
-            .where(Docs.type == 'RSOSH_LIST')
-            .order_by(Docs.createdAt.desc(), Docs.id)
-        )).all()
-        for doc_id, created_at, meta in rows:
-            if exclude_doc_id is not None and str(doc_id) == str(exclude_doc_id):
-                continue
-            section = ((meta or {}).get('rsosh') or {})
-            if section.get('state') == 'approved':
-                newest = (doc_id, _as_iso(created_at))
-                break
-    return newest
-
-
 def is_outdated_snapshot(doc: dict, newest_confirmed) -> bool:
     """Является ли документ устаревшим снимком перечня.
 
@@ -319,7 +504,9 @@ def is_outdated_snapshot(doc: dict, newest_confirmed) -> bool:
     новую.
 
     Тот же документ устаревшим не считается: повторное подтверждение уже
-    применённого перечня ничего не откатывает.
+    применённого перечня ничего не откатывает. Проверка состояния перечня
+    (можно ли его применять вообще) живёт отдельно, в
+    ``apply_confirmed_import``, под блокировкой.
     """
     if not newest_confirmed:
         return False
@@ -333,17 +520,3 @@ def is_outdated_snapshot(doc: dict, newest_confirmed) -> bool:
     # времени, — поэтому достаточно строкового сравнения.
     return str(created_at) < str(newest_created_at)
 
-
-async def mark_processed(doc_id) -> None:
-    """Отметить время завершения обработки документа."""
-    from datetime import datetime, timezone
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Docs).where(Docs.id == _as_uuid(doc_id))
-        )
-        doc = result.scalar_one_or_none()
-        if not doc:
-            return
-        doc.processedAt = datetime.now(timezone.utc)
-        await session.commit()

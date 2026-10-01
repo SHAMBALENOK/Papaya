@@ -31,7 +31,7 @@ from pathlib import Path
 from app.core.config import DOCS_DIR, RSOSH_EXECUTION
 from app.database import docs as db_docs
 from app.rsosh import extraction, matching, parsing, states, validation
-from app.rsosh.types import Candidate, RsoshConflictError, RsoshError
+from app.rsosh.types import RsoshError
 
 logger = logging.getLogger('papaya.rsosh.processor')
 
@@ -192,74 +192,33 @@ async def confirm_import(
     *,
     skip: list[str] | None = None,
     archive_missing: bool = True,
-    allow_outdated: bool = False,
 ) -> dict:
     """Применить импорт: создать/обновить олимпиады и архивировать пропавшие.
 
-    Перечень — это снимок: он отвечает на вопрос «какие олимпиады актуальны
-    сейчас». Поэтому подтверждение документа, загруженного **раньше** уже
-    подтверждённого, откатило бы каталог назад: опубликовало бы олимпиаду,
-    которой в свежем перечне уже нет, и заархивировало новую.
+    Само применение живёт в ``persist.apply_confirmed_import`` и выполняется в
+    одной транзакции под advisory-блокировкой применения перечней и блокировкой
+    строки документа. Здесь нет ничего, что стоило бы делать до или после неё:
+    и проверка актуальности снимка, и проверка состояния, и запись каталога, и
+    отметка документа обработанным должны быть под одними блокировками, иначе
+    два параллельных подтверждения снова смогут разойтись по времени.
 
-    Такой импорт не отклоняется молча — он требует явного согласия
-    администратора (``allow_outdated=True``) и понятного сообщения: решение
-    принимает человек, а не порядок загрузки файлов.
+    Перечень — снимок, отвечающий на вопрос «какие олимпиады актуальны сейчас».
+    Поэтому перечень, загруженный раньше уже подтверждённого, применить нельзя
+    (409): подтверждение вернуло бы каталог к старой редакции. Обхода этого
+    правила нет — «подтвердить всё равно» здесь означало бы вернуть каталог
+    назад, а каталог должен отвечать на вопрос о текущей редакции перечня.
     """
     from app.rsosh import persist
 
-    doc = await db_docs.get_doc(doc_id)
-    if not doc:
-        raise RsoshError(f'Document {doc_id} not found')
-
-    section = states.rsosh_section(doc)
-    if section.get('state') not in states.CONFIRMABLE_STATES:
-        raise RsoshError(
-            f'Import state {section.get("state")} is not confirmable; '
-            'start a new import first'
-        )
-
-    newest = await persist.newest_confirmed_rsosh_doc_id(exclude_doc_id=doc_id)
-    if not allow_outdated and persist.is_outdated_snapshot(doc, newest):
-        _newest_id, newest_created_at = newest
-        raise RsoshConflictError(
-            'Этот перечень устарел: он загружен раньше уже подтверждённого '
-            f'документа (от {str(newest_created_at)[:10]}). Подтверждение вернёт '
-            'каталог к старой редакции. Если это нужно, повторите '
-            'подтверждение с allow_outdated=true.'
-        )
-
-    candidates = [Candidate.from_dict(item) for item in section.get('candidates') or []]
-    skip_set = {str(item) for item in (skip or [])}
-    unknown = skip_set - {item.name_norm for item in candidates}
-    if unknown:
-        raise RsoshError('Unknown candidates in skip: ' + ', '.join(sorted(unknown)))
-
-    selected = [item for item in candidates if item.name_norm not in skip_set]
-    # Кандидаты, снятые администратором в preview, защищаются от
-    # автоматического архивирования: «не подтвердил» не значит «нет в
-    # перечне РСОШ» (чаще всего снятие — это реакция на ошибку распознавания).
-    protected_ids = {
-        item.matched_olympiad_id
-        for item in candidates
-        if item.name_norm in skip_set and item.matched_olympiad_id
-    }
-    result = await persist.apply_candidates(
-        candidates=selected,
-        doc=doc,
+    applied = await persist.apply_confirmed_import(
+        doc_id=doc_id,
+        skip=list(skip or []),
         archive_missing=archive_missing,
-        protected_ids=protected_ids,
-        # Предупреждения разбора решают, можно ли доверять перечню в вопросе
-        # «кого в нём больше нет».
-        warnings=section.get('warnings') or [],
     )
-    await persist.mark_processed(doc['id'])
-
-    confirmed_section = states.confirmed_section(doc, result)
-    doc = await _set_state(doc, confirmed_section)
     return {
-        'document': doc,
-        'result': result,
-        'skipped': sorted(skip_set),
+        'document': applied['document'],
+        'result': applied['result'],
+        'skipped': applied['skipped'],
     }
 
 
