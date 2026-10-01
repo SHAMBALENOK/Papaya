@@ -25,24 +25,9 @@ olympiads_page = APIRouter(
 logger = logging.getLogger('papaya.olympiads')
 
 
-class OlympiadListItem(BaseModel):
-    """Публичная строка каталога олимпиад.
-
-    Состав — как у публичной карточки: пользовательские поля и ``status``.
-    ``archive_reason`` (``RSOSH_ABSENT`` / ``MANUAL``) — технические значения
-    для панели администратора, посетителю они ничего не объясняют; архив он
-    видит по ``status``.
-    """
-
-    id: str | None = None
-    name: str | None = None
-    description: str | None = None
-    official_url: str | None = None
-    preview_image: str | None = None
-    image: str | None = None
-    source_url: str | None = None
-    status: str | None = None
-    is_archived: bool = False
+# Публичная строка каталога описана в схемах: одна формулировка на
+# /olympiads и /search, чтобы поля не расходились.
+OlympiadListItem = schemas.olympiads.OlympiadListItem
 
 
 class OlympiadsResponse(BaseModel):

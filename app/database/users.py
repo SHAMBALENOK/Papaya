@@ -302,17 +302,7 @@ async def list_users(
         return [user_to_dict(user) for user in result.scalars().all()]
 
 
-async def get_amount_of_users() -> int:
-    """Количество пользователей в платформе."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(func.count()).select_from(Users)
-        )
-        return result.scalar()
-
-
 # Счёт активных администраторов намеренно не вынесен в отдельную функцию:
 # «посчитать, потом изменить» — гонка, из-за которой система могла остаться без
 # администратора. Проверка живёт внутри ``set_active_guarded`` и
 # ``apply_role_guarded`` под блокировкой строк администраторов.
-

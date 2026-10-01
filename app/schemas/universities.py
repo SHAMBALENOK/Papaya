@@ -62,7 +62,38 @@ class UniversityUpdate(BaseModel):
     image: Optional[ExternalUrl] = None
 
 
+class UniversityPublicResponse(BaseModel):
+    """Публичная карточка университета.
+
+    Отдельная схема вместо наследника ``UniversityBase``, потому что базовая
+    нужна админским маршрутам и отдаёт служебные поля. Посетителю каталога они
+    ничего не дают: ``name_norm`` — служебное нормализованное имя для
+    защиты от дублей, ``createdAt`` / ``updatedAt`` — служебные метки времени.
+    """
+
+    id: Optional[UUID] = None
+    name: str
+    short_name: Optional[str] = None
+    description: Optional[str] = None
+    website: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def _empty_id_to_none(cls, v):
+        return None if v == '' or v is None else v
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class UniversityResponse(UniversityBase):
+    """Ответ админских маршрутов (создание, правка).
+
+    Содержит служебные поля каталога: их видит только администратор, который
+    работает с записями, и они не нужны публичной карточке.
+    """
+
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 

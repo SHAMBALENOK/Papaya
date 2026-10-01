@@ -16,7 +16,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app import database
+from app import database, schemas
 
 search_page = APIRouter(
     prefix='/search',
@@ -30,9 +30,17 @@ MAX_LIMIT = 50
 
 
 class SearchResults(BaseModel):
+    """Результат поиска по каталогам.
+
+    Элементы — те же публичные схемы, что и в каталогах. Раньше здесь стояли
+    ``List[dict]``, и в выдачу попадали сырые записи слоя данных вместе со
+    служебными полями (``name_norm``, метки времени, ``source_doc_id``):
+    поиск был единственным публичным маршрутом, который их отдавал.
+    """
+
     query: str
-    universities: List[dict]
-    olympiads: List[dict]
+    universities: List[schemas.universities.UniversityPublicResponse]
+    olympiads: List[schemas.olympiads.OlympiadListItem]
 
 
 @search_page.get(
@@ -48,7 +56,12 @@ async def search(
     q: str = Query(default='', description='Поисковый запрос'),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
 ):
-    """Единый поиск по университетам и олимпиадам (публично, без авторизации)."""
+    """Единый поиск по университетам и олимпиадам (публично, без авторизации).
+
+    Ищет только по двум каталогам: пользователи, документы, заявки БВИ и
+    служебные данные в выдачу не попадают — поиск отвечает на вопрос «найти
+    университет или олимпиаду», а не «поискать по базе».
+    """
     try:
         query = (q or '').strip()
         if not query:
@@ -62,10 +75,28 @@ async def search(
             search=query,
             limit=limit,
         )
+        # Валидация моделей ещё и отсекает лишнее: сырые словари слоя данных
+        # содержат поля, которых нет в публичной модели.
         return {
             'query': query,
-            'universities': universities,
-            'olympiads': olympiads,
+            'universities': [
+                schemas.universities.UniversityPublicResponse(**item)
+                for item in universities
+            ],
+            'olympiads': [
+                schemas.olympiads.OlympiadListItem(
+                    id=item.get('id'),
+                    name=item.get('name'),
+                    description=item.get('description'),
+                    official_url=item.get('official_url'),
+                    preview_image=item.get('preview_image'),
+                    image=item.get('image'),
+                    source_url=item.get('source_url'),
+                    status=item.get('status') or 'PUBLISHED',
+                    is_archived=item.get('status') != 'PUBLISHED',
+                )
+                for item in olympiads
+            ],
         }
     except Exception:
         logger.exception('Unhandled error')

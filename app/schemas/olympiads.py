@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.schemas.urls import ExternalUrl
 
@@ -104,6 +104,34 @@ class OlympiadUpdate(BaseModel):
         return v.strip()
 
 
+class OlympiadListItem(BaseModel):
+    """Строка публичного каталога олимпиад.
+
+    Ровно то, что нужно карточке каталога: название, описание, картинки,
+    официальный сайт, ссылка на источник и актуальность. Архивные записи
+    показываются отдельным статусом и только по явному запросу пользователя.
+    """
+
+    id: Optional[UUID] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    official_url: Optional[ExternalUrl] = None
+    preview_image: Optional[ExternalUrl] = None
+    image: Optional[ExternalUrl] = None
+    source_url: Optional[ExternalUrl] = None
+    status: str = 'PUBLISHED'
+    is_archived: bool = False
+
+    @field_validator('status')
+    @classmethod
+    def _check_status(cls, v):
+        if v not in OLYMPIAD_STATUSES:
+            raise ValueError('status must be one of ' + ', '.join(OLYMPIAD_STATUSES))
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class OlympiadResponse(OlympiadBase):
     """Ответ админских маршрутов (создание, правка, архив).
 
@@ -143,6 +171,14 @@ class OlympiadPublicResponse(BaseModel):
     image: Optional[ExternalUrl] = None
     source_url: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'
+    # Производное поле для интерфейса: карточке нужно понимать, показывать ли
+    # предупреждение об архиве, не разбирая ``status`` в шаблоне.
+    #
+    # Именно объявленное поле, а не ``@property``: Pydantic не отдаёт обычные
+    # свойства в JSON, и такое поле молча пропадало бы из карточки, оставляя
+    # фронтенд догадываться о признаке по статусу. Поле перечислено и в
+    # ``OlympiadListItem``, поэтому контракт у карточки и каталога один.
+    is_archived: bool = False
 
     @field_validator('status')
     @classmethod
@@ -151,14 +187,10 @@ class OlympiadPublicResponse(BaseModel):
             raise ValueError('status must be one of ' + ', '.join(OLYMPIAD_STATUSES))
         return v
 
-    @property
-    def is_archived(self) -> bool:
-        """Олимпиада вне актуального каталога.
-
-        Производное поле для интерфейса: карточке нужно понимать, показывать ли
-        предупреждение об архиве, а разбирать ``status`` в шаблоне — это
-        дублирование правил на клиенте.
-        """
-        return self.status == 'ARCHIVED'
+    @model_validator(mode='after')
+    def _derive_is_archived(self):
+        """Держим ``is_archived`` согласованным со статусом."""
+        object.__setattr__(self, 'is_archived', self.status == 'ARCHIVED')
+        return self
 
     model_config = ConfigDict(from_attributes=True)

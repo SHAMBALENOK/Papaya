@@ -18,7 +18,7 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
@@ -82,27 +82,6 @@ async def list_olympiads(
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
-        return [olympiad_to_dict(item) for item in result.scalars().all()]
-
-
-async def find_olympiad_by_name_norm(name_norm: str) -> dict | None:
-    """Точный поиск олимпиады по нормализованному названию."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Olympiads).where(Olympiads.name_norm == name_norm)
-        )
-        olympiad = result.scalar_one_or_none()
-        return olympiad_to_dict(olympiad) if olympiad else None
-
-
-async def list_olympiads_by_name_norms(name_norms: list[str]) -> list[dict]:
-    """Олимпиады по списку нормализованных названий (дедупликация импорта)."""
-    if not name_norms:
-        return []
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Olympiads).where(Olympiads.name_norm.in_(name_norms))
-        )
         return [olympiad_to_dict(item) for item in result.scalars().all()]
 
 
@@ -180,14 +159,3 @@ async def edit_olympiad(olympiad_id, ins: dict) -> dict | None:
             return None
         await session.refresh(olympiad)
         return olympiad_to_dict(olympiad)
-
-
-async def count_olympiads() -> int:
-    """Количество олимпиад в каталоге (без архивных)."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(func.count())
-            .select_from(Olympiads)
-            .where(Olympiads.status == 'PUBLISHED')
-        )
-        return result.scalar()

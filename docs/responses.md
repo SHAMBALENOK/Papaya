@@ -109,8 +109,12 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Карточка университета | `{"id", "name", "name_norm", "short_name", "description", "website", "image", "createdAt", "updatedAt"}` |
+| 200 | Карточка университета | `{"id", "name", "short_name", "description", "website", "image", "preview_image"}` |
 | 404 | Вуз не найден | `{"detail": "University not found"}` |
+
+Публичная карточка отдаёт только то, что нужно читателю: без `name_norm`,
+`createdAt`, `updatedAt` и прочих служебных полей. Админский маршрут правки
+возвращает полный `UniversityResponse`.
 
 ---
 
@@ -120,12 +124,15 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Олимпиады с БВИ | `{"olympiads": [OlympiadResponse + "bvi_status"]}` |
+| 200 | Олимпиады с БВИ | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status", "bvi_status": "CONFIRMED"｜"PENDING", "is_historical": bool}]}` |
 | 401 | `include_pending` без входа | `{"detail": "Access token required to view pending requests"}` |
 | 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
 | 404 | Вуз не найден | `{"detail": "University not found"}` |
 
 Публично видны только подтверждённые (`CONFIRMED`) связи.
+
+`is_historical` — олимпиада осталась в перечне РСОШ, но связи с архивной
+олимпиадой; такие показываются отдельным историческим блоком.
 
 ---
 
@@ -169,10 +176,20 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 201 | Заявка создана или уже существует | `{"id", "university_id", "olympiad_id", "status", "createdBy", "confirmedBy", "createdAt", "updatedAt"}` |
+| 201 | Заявка создана или уже существует | `{"id", "university_id", "olympiad_id", "status": "PENDING"｜"CONFIRMED", "is_historical": bool}` |
 | 403 | Не администратор и не представитель этого вуза | `{"detail": "You can only manage your own university"}` |
 | 404 | Вуз или олимпиада не найдены | `{"detail": "University not found"}` / `{"detail": "Olympiad not found"}` |
 | 409 | Олимпиада архивирована | `{"detail": "Олимпиада архивирована: её нет в актуальном перечне РСОШ, новые заявки БВИ за неё не принимаются. Подтверждённые ранее связи сохраняются."}` |
+
+Кто подтвердил заявку и когда она создана — служебные поля: представителю
+университета они не нужны, поэтому в ответ не отдаются. Полная карточка связи
+(`confirmedBy`, `createdAt`, `updatedAt`) доступна только администратору в
+очереди модерации `GET /admin/bvi`.
+
+Повторный запрос той же пары «вуз — олимпиада» не создаёт вторую связь:
+возвращается существующая заявка, поэтому 201 приходит в обоих случаях.
+Архивная олимпиада проверяется до этой проверки: для неё 409 даже при
+повторном запросе.
 
 ---
 
@@ -234,17 +251,6 @@
 Перехода `CONFIRMED → PENDING` не существует: это не состояние заявки, а
 отзыв публичного факта.
 
-Модерация: подтверждение или снятие связи.
-
-**Request body:** `{"status": "PENDING" | "CONFIRMED"}`
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Статус изменён | `BviLinkResponse` |
-| 403 | Не администратор | `{"detail": "Permission denied"}` |
-| 404 | Связи нет | `{"detail": "BVI link not found"}` |
-| 422 | Неверный статус | `{"detail": [...]}` |
-
 ---
 
 ## GET /olympiads
@@ -274,13 +280,16 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status"}` |
+| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status", "is_archived": bool}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
 Публичная модель минимальна: `name_norm`, `source_doc_id`, `createdAt`,
 `updatedAt` и `archive_reason` — служебные поля импорта и панели
 администратора, наружу они не отдаются. Причина архива пользователю ничего не
 объясняет: он видит `status: "ARCHIVED"` и понятный текст в интерфейсе.
-| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+
+`is_archived` — производное от `status` поле для интерфейса: карточка не
+разбирает статус сама. Значение всегда согласовано со `status`.
 
 ---
 
@@ -291,8 +300,11 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список вузов | `{"universities": [UniversityResponse + "bvi_status"]}` |
+| 200 | Список вузов | `{"universities": [{"id", "name", "short_name", "description", "website", "preview_image", "image", "bvi_status": "CONFIRMED", "is_historical": bool}]}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+
+`is_historical` равен `true`, если олимпиада архивная: такие вузы показываются
+отдельным историческим блоком и не подписаны как «даёт БВИ».
 
 ---
 
@@ -400,8 +412,12 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Состояние импорта | `{"state": "processing｜review｜approved｜rejected｜failed", "summary": {"total", "new", "merge", "review"}, "warnings": [...], "error": str｜null}` |
+| 200 | Состояние импорта | `{"id", "name", "type", "status", "state": "processing｜review｜approved｜rejected｜failed", "started_at", "finished_at", "error": str｜null, "summary": {"total", "new", "merge", "review"}, "warnings": [...], "confirm": object｜null}` |
 | 404 | Импорт не найден | `{"detail": "Import not found"}` |
+
+Поле `confirm` — итог применения (тело ответа `confirm` в разделе confirm
+ниже). Оно хранится в метаданных документа, поэтому `archive_skipped_reason`
+виден и при повторном открытии импорта, а не только в момент подтверждения.
 
 ---
 
@@ -421,17 +437,40 @@
 
 ## POST /imports/{import_id}/confirm
 
-**Request body:** `{"skip": [name_norm, ...], "archive_missing": bool}`.
+**Request body:** `{"skip": [name_norm, ...], "archive_missing": bool, "allow_outdated": bool}`.
+Пустое тело — подтвердить всё; `archive_missing` по умолчанию `true`,
+`allow_outdated` по умолчанию `false`.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Импорт применён | `{"import": {...}, "result": {"created": [...], "updated": [...], "archived": [...], "skipped": [...], "errors": [...]}, "skipped": [name_norm, ...]}` |
+| 200 | Импорт применён | `{"import": {...}, "result": {"created": [...], "updated": [...], "archived": [...], "skipped": [...], "errors": [...], "archive_skipped_reason": str｜null}, "skipped": [name_norm, ...]}` |
 | 400 | Импорт нельзя подтвердить или неизвестные `skip` | `{"detail": "Import state approved is not confirmable; start a new import first"}` |
+| 409 | Перечень устарел относительно уже подтверждённого | `{"detail": "Этот перечень устарел: он загружен раньше уже подтверждённого документа ... повторите подтверждение с allow_outdated=true"}` |
 
 Поле верхнего уровня `skipped` — то, что администратор снял в preview.
 Снятый кандидат не пишется в каталог **и не считается отсутствующим** в
 перечне: иначе ошибка распознавания одной строки архивировала бы
 существующую олимпиаду (у кандидата-merge защищается его `matched_olympiad_id`).
+
+### Порядок подтверждения перечней
+
+Перечень — снимок состояния на момент загрузки. Подтверждение документа,
+загруженного **раньше** уже подтверждённого, откатило бы каталог назад, поэтому
+такой импорт отклоняется с 409. Повторить его можно только явно:
+`{"allow_outdated": true}`. Решение принимает администратор, а не порядок
+загрузки файлов.
+
+### Когда архивирование не происходит
+
+`archive_skipped_reason` объясняет, почему пропавшие из перечня олимпиады не
+архивированы. Пустое значение — архивирование отработало штатно либо его не
+запрашивали. Причины отказа:
+
+| Причина | Что означает |
+|---------|--------------|
+| строки перечня не распознаны или сопоставление подозрительно | каталог нельзя считать полным: олимпиада могла просто не распознаться |
+| в `errors` есть хотя бы одна строка | часть перечня не записана, судить по нему о «ком больше нет» нельзя |
+| `archive_missing=false` | администратор сознательно оставил каталог без архивирования |
 
 ---
 

@@ -240,7 +240,7 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `POST` | `/api/v1/universities/edit_university/<id>` | Update a university | `ADMIN` |
 | `POST` | `/api/v1/universities/<id>/bvi` | Request a BVI link to an existing olympiad | `EDITOR` (own university) or `ADMIN` |
 | `POST` | `/api/v1/universities/<id>/bvi/remove` | Remove a BVI link | `EDITOR` (own university) or `ADMIN` |
-| `POST` | `/api/v1/universities/<id>/bvi/<olympiad_id>/status` | Confirm or revoke a BVI link | `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/bvi/<olympiad_id>/moderation` | Confirm, reject or revoke a BVI link | `ADMIN` |
 | `GET` | `/api/v1/olympiads?search=&include_archived=` | Olympiad catalog | Public |
 | `GET` | `/api/v1/olympiads/<id>/source` | Where the olympiad data came from | Public |
 | `GET` | `/api/v1/olympiads/<id>` | Olympiad page | Public |

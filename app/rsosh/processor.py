@@ -31,7 +31,7 @@ from pathlib import Path
 from app.core.config import DOCS_DIR, RSOSH_EXECUTION
 from app.database import docs as db_docs
 from app.rsosh import extraction, matching, parsing, states, validation
-from app.rsosh.types import Candidate, RsoshError
+from app.rsosh.types import Candidate, RsoshConflictError, RsoshError
 
 logger = logging.getLogger('papaya.rsosh.processor')
 
@@ -131,11 +131,46 @@ async def run_import(doc_id) -> dict:
         )
         return await _set_state(doc, section)
     except RsoshError as exc:
+        # Тексты RsoshError написаны вручную и предназначены для показа, но
+        # даже они могут содержать путь к файлу (см. _document_path).
         logger.warning('rsosh: import of %s failed: %s', doc_id, exc)
-        return await _set_state(doc, states.failed_section(doc, error=str(exc)))
-    except Exception as exc:  # noqa: BLE001 - причина попадает в отчёт импорта
+        return await _set_state(
+            doc, states.failed_section(doc, error=_public_error(exc))
+        )
+    except Exception:  # noqa: BLE001 - любая ошибка не должна ронять импорт
+        # Неизвестная ошибка в отчёте импорта не показывается: `str(exc)`
+        # у ошибок БД и файловой системы содержит имена таблиц, пути и строки
+        # подключения, а этот текст отдаётся в API и рисуется в панели.
+        # Подробности остаются в логе.
         logger.exception('rsosh: unexpected failure while importing %s', doc_id)
-        return await _set_state(doc, states.failed_section(doc, error=str(exc)))
+        return await _set_state(
+            doc,
+            states.failed_section(
+                doc,
+                error='Не удалось обработать документ. Подробности — в логе сервера.',
+            ),
+        )
+
+
+#: Что показывать вместо внутреннего текста ошибки импорта.
+_PUBLIC_ERROR = (
+    'Не удалось обработать документ: {reason}. Подробности — в логе сервера.'
+)
+
+
+def _public_error(exc: Exception) -> str:
+    """Понятный текст ошибки без внутренних деталей.
+
+    Сообщения ``RsoshError`` в основном пригодны для показа, но могут
+    содержать путь к файлу документа. Такие места заменяются нейтральной
+    формулировкой, а не просто обрезаются: администратору нужно понимать,
+    что именно сломалось, не получая при этом внутренности.
+    """
+    text = str(exc)
+    # Внутренние детали: пути к файлам, имена каталогов хранилища.
+    if 'storage' in text.lower() or '\\' in text or '/' in text:
+        return _PUBLIC_ERROR.format(reason='файл документа недоступен')
+    return text
 
 
 def _page_confidence(pages) -> dict:
@@ -157,8 +192,19 @@ async def confirm_import(
     *,
     skip: list[str] | None = None,
     archive_missing: bool = True,
+    allow_outdated: bool = False,
 ) -> dict:
-    """Применить импорт: создать/обновить олимпиады и архивировать пропавшие."""
+    """Применить импорт: создать/обновить олимпиады и архивировать пропавшие.
+
+    Перечень — это снимок: он отвечает на вопрос «какие олимпиады актуальны
+    сейчас». Поэтому подтверждение документа, загруженного **раньше** уже
+    подтверждённого, откатило бы каталог назад: опубликовало бы олимпиаду,
+    которой в свежем перечне уже нет, и заархивировало новую.
+
+    Такой импорт не отклоняется молча — он требует явного согласия
+    администратора (``allow_outdated=True``) и понятного сообщения: решение
+    принимает человек, а не порядок загрузки файлов.
+    """
     from app.rsosh import persist
 
     doc = await db_docs.get_doc(doc_id)
@@ -170,6 +216,16 @@ async def confirm_import(
         raise RsoshError(
             f'Import state {section.get("state")} is not confirmable; '
             'start a new import first'
+        )
+
+    newest = await persist.newest_confirmed_rsosh_doc_id(exclude_doc_id=doc_id)
+    if not allow_outdated and persist.is_outdated_snapshot(doc, newest):
+        _newest_id, newest_created_at = newest
+        raise RsoshConflictError(
+            'Этот перечень устарел: он загружен раньше уже подтверждённого '
+            f'документа (от {str(newest_created_at)[:10]}). Подтверждение вернёт '
+            'каталог к старой редакции. Если это нужно, повторите '
+            'подтверждение с allow_outdated=true.'
         )
 
     candidates = [Candidate.from_dict(item) for item in section.get('candidates') or []]
@@ -192,6 +248,9 @@ async def confirm_import(
         doc=doc,
         archive_missing=archive_missing,
         protected_ids=protected_ids,
+        # Предупреждения разбора решают, можно ли доверять перечню в вопросе
+        # «кого в нём больше нет».
+        warnings=section.get('warnings') or [],
     )
     await persist.mark_processed(doc['id'])
 

@@ -89,28 +89,51 @@ async function renderOlympiad(olympiadId) {
     const isAdmin = store.isAdmin();
     const isArchived = olympiad.status === 'ARCHIVED';
 
-    // У архивной олимпиады все оставшиеся связи исторические: университеты
-    // давали БВИ, пока олимпиада была в перечне РСОШ. Подпись «БВИ» здесь
-    // обещала бы льготу, которой сейчас нет, поэтому показываем «Историческая
-    // связь» и не выбрасываем университеты из списка.
-    const universitiesHtml = universities.length
-        ? `<div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${universities.map(u => {
-            const historical = isArchived || u.is_historical;
-            const badge = historical
-                ? `<span class="${UI.badge} ${UI.badgeNeutral}">Историческая связь</span>`
-                : `<span class="${UI.badge} ${UI.badgeSuccess}">
-                       <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
-                   </span>`;
-            return `
-            <a href="#/universities/${escAttr(u.id)}"
-               class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-                ${badge}
-                ${entityTitleHtml(u)}
-                <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть →</p>
-            </a>`;
-        }).join('')}</div>`
+    // Актуальные и исторические связи — разные блоки. У архивной олимпиады
+    // историческими являются все оставшиеся связи: университеты учитывали её
+    // для БВИ, пока она была в перечне РСОШ. Выбрасывать их нельзя — это
+    // стёрло бы историю, но и подписывать их «БВИ» значило бы обещать льготу,
+    // которой сейчас нет.
+    const currentUniversities = universities.filter(
+        item => !(isArchived || isHistoricalBvi(item)));
+    const historicalUniversities = universities.filter(
+        item => isArchived || isHistoricalBvi(item));
+
+    function universityLinkHtml(university, historical) {
+        const badge = historical
+            ? `<span class="${UI.badge} ${UI.badgeNeutral}">Историческая связь</span>`
+            : `<span class="${UI.badge} ${UI.badgeSuccess}">
+                   <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
+               </span>`;
+        return `
+        <a href="#/universities/${escAttr(university.id)}"
+           class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+            ${badge}
+            ${entityTitleHtml(university)}
+            <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть →</p>
+        </a>`;
+    }
+
+    const universitiesHtml = currentUniversities.length
+        ? `<div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">`
+            + currentUniversities.map(item => universityLinkHtml(item, false)).join('')
+            + `</div>`
         : emptyHtml('Университеты с БВИ пока не указаны',
                     'Представители университетов заявляют такие связи, администратор подтверждает их.');
+
+    const historicalHtml = historicalUniversities.length
+        ? `<div class="mt-14 pt-10 border-t border-mist">
+               <h3 class="${UI.eyebrow}">Исторические связи</h3>
+               <p class="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
+                   ${isArchived
+                       ? 'Олимпиада не входит в актуальный перечень РСОШ. Университеты учитывали её для БВИ раньше — связи сохранены как история.'
+                       : 'Ранее подтверждённые связи, которые сейчас не действуют.'}
+               </p>
+               <div class="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3 opacity-70">
+                   ${historicalUniversities.map(item => universityLinkHtml(item, true)).join('')}
+               </div>
+           </div>`
+        : '';
 
     page.innerHTML = `
     <article class="max-w-narrow mx-auto pb-16 md:pb-24">
@@ -158,12 +181,14 @@ async function renderOlympiad(olympiadId) {
 
         <section class="mt-20 md:mt-28">
             <h2 class="${UI.eyebrow}">БВИ</h2>
-            <h3 class="mt-5 text-3xl font-extrabold tracking-tight leading-[1.1]">Университеты, дающие БВИ</h3>
+            <h3 class="mt-5 text-3xl font-extrabold tracking-tight leading-[1.1]">Университеты, учитывающие олимпиаду для БВИ</h3>
             <p class="mt-6 text-lg text-ink-soft leading-relaxed">
-                Список подтверждённых связей: по диплому этой олимпиады можно
-                поступить без вступительных испытаний.
+                Эти университеты засчитывают диплом олимпиады для поступления без
+                вступительных испытаний. В других университетах условия
+                устанавливает сам вуз.
             </p>
             <div class="mt-12">${universitiesHtml}</div>
+            ${historicalHtml}
         </section>
     </article>`;
 

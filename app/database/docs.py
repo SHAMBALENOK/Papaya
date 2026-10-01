@@ -107,18 +107,3 @@ async def edit_doc(doc_id, ins: dict) -> dict | None:
         await session.commit()
         await session.refresh(doc)
         return doc_to_dict(doc)
-
-
-async def delete_doc(doc_id) -> bool:
-    """Удалить запись о документе (файл из хранилища выносится наружу)."""
-    doc_uuid = _as_uuid(doc_id)
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Docs).where(Docs.id == doc_uuid)
-        )
-        doc = result.scalar_one_or_none()
-        if not doc:
-            return False
-        await session.delete(doc)
-        await session.commit()
-        return True

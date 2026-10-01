@@ -84,7 +84,7 @@ async def list_universities(
 
 @universities_page.get(
     '/{university_id}',
-    response_model=schemas.universities.UniversityResponse,
+    response_model=schemas.universities.UniversityPublicResponse,
     responses={
         200: {'description': 'University details'},
         404: {'description': 'University not found'},
@@ -266,33 +266,35 @@ async def request_bvi(
     подтверждения администратором. Права проверяются для конкретного вуза:
     представитель одного университета не может заявить связь за другой.
 
-    Заявка возможна только по актуальной олимпиаде (``PUBLISHED``). Архивная
-    олимпиада — историческая запись, и новые связи за ней не создаются: её
-    уже нет в актуальном перечне РСОШ, а университет не может подтвердить БВИ
-    за олимпиаду, которой нет. Уже подтверждённые связи при этом сохраняются
-    и остаются видимыми — архив не отменяет историю.
+    Бизнес-правила заявки живут в слое данных
+    (``database.bvi.request_bvi_link``): заявка возможна только по актуальной
+    олимпиаде, а конкурентные запросы не приводят к 500. Здесь эти правила
+    только переводятся в HTTP-коды — дублировать их в роутере значило бы
+    держать одно и то же условие в двух местах, и они рано или поздно
+    разошлись бы.
     """
     try:
         university = await database.universities.get_university(university_id)
         if not university:
             raise HTTPException(status_code=404, detail='University not found')
-        olympiad = await database.olympiads.get_olympiad(body.olympiad_id)
-        if not olympiad:
-            raise HTTPException(status_code=404, detail='Olympiad not found')
-        if olympiad.get('status') == 'ARCHIVED':
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    'Олимпиада архивирована: её нет в актуальном перечне РСОШ, '
-                    'новые заявки БВИ за неё не принимаются. Подтверждённые ранее '
-                    'связи сохраняются.'
-                ),
-            )
 
-        link = await database.bvi.request_bvi_link(
-            body.olympiad_id,
-            university_id,
-            requested_by=current_user.get('id'),
+        try:
+            link = await database.bvi.request_bvi_link(
+                body.olympiad_id,
+                university_id,
+                requested_by=current_user.get('id'),
+            )
+        except database.bvi.BviRequestError as exc:
+            raise HTTPException(
+                status_code=exc.status_code, detail=exc.detail
+            ) from exc
+
+        # Актуальность олимпиады показываем явно: заявка по актуальной
+        # олимпиаде и повтор по уже подтверждённой связи архивной — это разные
+        # ситуации, и представителю полезно видеть, с чем он работает.
+        olympiad = await database.olympiads.get_olympiad(body.olympiad_id)
+        link['is_historical'] = bool(
+            olympiad and olympiad.get('status') != 'PUBLISHED'
         )
         return link
     except HTTPException:

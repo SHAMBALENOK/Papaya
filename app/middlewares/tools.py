@@ -1,20 +1,4 @@
-import os
-
-def mkdir(path: str) -> None:
-    """
-    Функция для создания папок, потому что мне лень писать все нижеуказанное
-    """
-    try:
-        os.makedirs(path)
-    except OSError:
-        pass
-
-def allowed_file(filename: str, extensions: list) -> bool:
-    """
-    Функция для проверки правильности расширения файла
-    """
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in extensions
+import bcrypt
 
 
 def check_password(entered_password: str, stored_hash: bytes) -> bool:
@@ -24,7 +8,6 @@ def check_password(entered_password: str, stored_hash: bytes) -> bool:
     Оборачивает ValueError bcrypt: пароль длиннее 72 байт (или битый хэш)
     не должен превращаться в 500, а просто считается неверным.
     """
-    import bcrypt
     try:
         return bcrypt.checkpw(
             entered_password.encode('utf-8'),

@@ -136,35 +136,50 @@ async def upload_doc(
         doc_id = uuid.uuid4()
         target = _storage_path(str(doc_id), extension)
         os.makedirs(DOCS_DIR, exist_ok=True)
+
+        # Правило загрузки: «нет записи в БД — нет файла на диске».
+        #
+        # Файл пишется раньше, чем появляется запись о документе (нужно
+        # проверить сигнатуру по содержимому), поэтому между этими шагами он
+        # может остаться лежать: при превышении размера, при неверном
+        # содержимом или при сбое вставки. Каждый такой путь закрывается
+        # удалением файла — иначе ``DOCS_DIR`` постепенно забивается мусором,
+        # на который никто не ссылается.
+        created = False
         try:
-            _size, checksum = _read_upload(file, target)
+            try:
+                _size, checksum = _read_upload(file, target)
+            finally:
+                await file.close()
+
+            if not target.is_file() or target.stat().st_size == 0:
+                raise HTTPException(
+                    status_code=400, detail='Uploaded file is empty'
+                )
+
+            # Сверяем сигнатуру: расширение может быть подделано, а импортёр
+            # всё равно откажется работать с неподдерживаемым содержимым.
+            try:
+                kind = filetypes.detect(str(target))
+            except filetypes.RsoshError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            record = await database.docs.add_doc(
+                {
+                    'id': str(doc_id),
+                    'name': (name or filename).strip(),
+                    'type': doc_type,
+                    'storage_key': target.name,
+                    'mime_type': kind,
+                    'checksum': checksum,
+                    'status': 'UPLOADED',
+                }
+            )
+            created = record is not None
+            return record
         finally:
-            await file.close()
-
-        if not target.is_file() or target.stat().st_size == 0:
-            target.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail='Uploaded file is empty')
-
-        # Сверяем сигнатуру: расширение может быть подделано, а импортёр
-        # всё равно откажется работать с неподдерживаемым содержимым.
-        try:
-            kind = filetypes.detect(str(target))
-        except filetypes.RsoshError as exc:
-            target.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        created = await database.docs.add_doc(
-            {
-                'id': str(doc_id),
-                'name': (name or filename).strip(),
-                'type': doc_type,
-                'storage_key': target.name,
-                'mime_type': kind,
-                'checksum': checksum,
-                'status': 'UPLOADED',
-            }
-        )
-        return created
+            if not created:
+                target.unlink(missing_ok=True)
     except HTTPException:
         raise
     except Exception:

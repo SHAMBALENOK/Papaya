@@ -133,19 +133,6 @@ async def get_cached_user(
     )
 
 
-async def get_cached_users(
-    r: aioredis.Redis,
-    include_inactive: bool,
-    loader: Callable[[], Awaitable[list[dict]]],
-) -> list[dict]:
-    return await _get_versioned(
-        r,
-        _USERS_VERSION_KEY,
-        lambda version: _users_data_key(include_inactive, version),
-        loader,
-    )
-
-
 async def cache_user_after_write(r: aioredis.Redis, user: dict) -> None:
     """Publish a user write and invalidate both active and admin lists."""
     user_id = str(user['id'])

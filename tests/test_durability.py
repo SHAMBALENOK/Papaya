@@ -273,12 +273,18 @@ async def test_repeated_request_for_archived_olympiad_still_rejected(client):
     await admin_client(client)
     await client.post(f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true")
 
+    # Повтор тоже отказ, хотя связь уже есть: ответ «201 Created» означал бы,
+    # что заявку приняли, а олимпиада в архиве. Существующая связь при этом
+    # остаётся на месте — её видно в кабинете и в списках как историческая.
     for _ in range(2):
         repeat = await client.post(
             f"/api/v1/universities/{university['id']}/bvi",
             json={'olympiad_id': olympiad['id']},
         )
         assert repeat.status_code == 409, repeat.text
+
+    admin_queue = await client.get('/api/v1/admin/bvi')
+    assert len(admin_queue.json()['links']) == 1, 'существующая связь не тронута'
 
     # И администратор не может завести новую связь с архивной олимпиадой:
     # иначе запрет обходился бы ролью.
