@@ -8,7 +8,8 @@ docs осталась, и это замечают пользователи. Зд
   существует в схеме;
 - публичные ответы не содержат служебных полей импорта и модерации;
 - поля, которые документация обещает в ответе, действительно есть в схеме;
-- контракт подтверждения импорта содержит ``allow_outdated`` и 409.
+- в контракте подтверждения импорта нет флага, отключающего проверку
+  актуальности снимка, а 409 — есть (устаревший перечень применить нельзя).
 """
 
 import re
@@ -17,6 +18,7 @@ from pathlib import Path
 from app.main import app
 
 ROOT = Path(__file__).resolve().parents[1]
+FRONTEND = ROOT / 'app' / 'frontend'
 SCHEMA = app.openapi()
 PATHS = SCHEMA['paths']
 
@@ -213,7 +215,7 @@ def test_bvi_request_response_hides_moderation_fields():
 
 
 def test_confirm_contract_matches_documentation():
-    """Подтверждение импорта: allow_outdated, 409 и итог с причиной."""
+    """Подтверждение импорта: skip/archive_missing, 409 и итог с причиной."""
     operation = PATHS['/api/v1/imports/{import_id}/confirm']['post']
     body = (
         operation.get('requestBody', {})
@@ -222,15 +224,49 @@ def test_confirm_contract_matches_documentation():
         .get('schema', {})
     )
     props = _fields(body)
-    for field in ('skip', 'archive_missing', 'allow_outdated'):
+    for field in ('skip', 'archive_missing'):
         assert field in props, f'в confirm нет документированного поля {field}'
+    # Способа применить устаревший перечень быть не должно ни в схеме, ни в
+    # документации: актуальный каталог задаёт последний подтверждённый перечень.
+    assert 'allow_outdated' not in props, (
+        'в confirm не должно быть флага, отключающего проверку актуальности'
+    )
     assert '409' in operation['responses'], 'в confirm нет ответа 409'
+
+    # Документация может упоминать отсутствие флага, но не предлагать его:
+    # проверяем строку с телом запроса, где перечислены принимаемые поля.
+    responses_md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
+    request_lines = [
+        line for line in responses_md.splitlines()
+        if line.startswith('**Request body:**') and 'archive_missing' in line
+    ]
+    assert request_lines, 'в документации нет раздела с телом confirm'
+    for line in request_lines:
+        assert 'allow_outdated' not in line, (
+            'тело запроса confirm в документации обещает allow_outdated: ' + line
+        )
+    english = (ROOT / 'English.md').read_text(encoding='utf-8')
+    assert 'allow_outdated' not in english
 
     status_props = _fields(_json_body(PATHS['/api/v1/imports/{import_id}']['get']))
     assert 'confirm' in status_props, (
         'статус импорта должен отдавать итог применения, включая '
         'archive_skipped_reason'
     )
+
+
+def test_frontend_has_no_way_to_force_outdated():
+    """В панели не должно быть кнопки «применить устаревший перечень».
+
+    Даже если API откажет, интерфейс не должен предлагать действие, которого
+    нет в продукте: администратор увидел бы возможность вернуть каталог назад.
+    """
+    for path in FRONTEND.rglob('*.js'):
+        source = path.read_text(encoding='utf-8')
+        assert 'allow_outdated' not in source, f'{path.name}: allow_outdated'
+        assert 'Применить всё равно' not in source, (
+            f'{path.name}: кнопка принудительного применения'
+        )
 
 
 def test_legacy_status_route_is_not_documented_or_present():

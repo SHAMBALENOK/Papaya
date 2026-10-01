@@ -410,13 +410,30 @@ async def test_university_doc_type_cannot_be_imported(client):
 
 
 async def test_confirm_twice_is_rejected(client):
+    """Повторное подтверждение отклоняется и каталог не трогает.
+
+    Ответ — 409, а не 400: запрос корректный, но состояние прогона не позволяет
+    его применить. Раньше здесь был 400; различать «плохой запрос» и
+    «состояние не позволяет» нужно, чтобы второй параллельный confirm был
+    отличим от опечатки в теле.
+    """
     await admin_client(client)
     doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
     await run_import(client, doc['id'])
     assert (await client.post(f"/api/v1/imports/{doc['id']}/confirm", json={})).status_code == 200
 
+    catalog = await client.get('/api/v1/olympiads?include_archived=true')
+    before = sorted(
+        (row['name'], row['status']) for row in catalog.json()['olympiads']
+    )
+
     again = await client.post(f"/api/v1/imports/{doc['id']}/confirm", json={})
-    assert again.status_code == 400
+    assert again.status_code == 409, again.text
+
+    after = await client.get('/api/v1/olympiads?include_archived=true')
+    assert sorted(
+        (row['name'], row['status']) for row in after.json()['olympiads']
+    ) == before, 'отклонённое повторное подтверждение изменило каталог'
 
 
 async def test_import_status_and_list(client):

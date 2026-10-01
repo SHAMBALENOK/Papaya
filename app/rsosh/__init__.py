@@ -29,13 +29,20 @@ from app.rsosh.processor import (
     run_import,
     start_import,
 )
-from app.rsosh.types import Candidate, ExtractionResult, OlympiadRecord, RsoshError
+from app.rsosh.types import (
+    Candidate,
+    ExtractionResult,
+    OlympiadRecord,
+    RsoshConflictError,
+    RsoshError,
+)
 
 __all__ = [
     'RSOSH_DOC_TYPE',
     'Candidate',
     'ExtractionResult',
     'OlympiadRecord',
+    'RsoshConflictError',
     'RsoshError',
     'confirm_import',
     'document_path',
