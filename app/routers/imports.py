@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from app import database
 from app.core import deps
-from app.rsosh import processor, states
+from app.rsosh import persist, processor, states
 from app.rsosh.types import RsoshConflictError, RsoshError
 
 imports_page = APIRouter(
@@ -314,10 +314,13 @@ async def confirm(
     '/{import_id}/reject',
     responses={
         200: {'description': 'Import rejected (nothing persisted)'},
-        400: {'description': 'Import is not rejectable in its state'},
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         404: {'description': 'Import not found'},
+        # Состояние не позволяет отклонить: в частности, прогон уже применён
+        # (approved) — его нельзя ни подтвердить повторно, ни отклонить.
+        409: {'description': 'Import is already applied or is being processed'},
+        422: {'description': 'Validation error'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -325,26 +328,21 @@ async def reject(
     import_id: uuid.UUID,
     current_user: deps.AdminUser = None,
 ):
-    """Отклонить результаты импорта (в каталог ничего не пишется)."""
+    """Отклонить результаты импорта (в каталог ничего не пишется).
+
+    Отклонение меняет только состояние прогона, но делает это под той же
+    блокировкой, что и подтверждение: иначе ``reject`` мог бы отработать уже
+    после того, как ``confirm`` применил перечень, и прогон выглядел бы
+    отклонённым при уже изменённом каталоге.
+    """
     try:
-        doc = await _rsosh_doc(import_id)
-        section = states.rsosh_section(doc)
-        if section.get('state') not in states.REJECTABLE_STATES:
-            raise HTTPException(
-                status_code=400,
-                detail=f'Import state {section.get("state")} is not rejectable',
-            )
-        updated = await database.docs.edit_doc(
-            doc['id'],
-            {
-                'metadata': states.docs_metadata_with_section(
-                    doc,
-                    states.rejected_section(doc),
-                ),
-                'status': states.DOCS_STATUS['rejected'],
-            },
-        )
-        return _import_view(updated or doc)
+        await _rsosh_doc(import_id)
+        rejected = await persist.reject_confirmed_import(import_id)
+        return _import_view(rejected)
+    except RsoshConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception:

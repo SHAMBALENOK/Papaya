@@ -6,9 +6,11 @@
 """
 
 import asyncio
+import time
 import uuid
 
 import pytest
+from sqlalchemy import text
 
 from tests.conftest import (
     admin_client,
@@ -16,7 +18,22 @@ from tests.conftest import (
     create_university,
     university_rep_client,
 )
-from tests.rsosh_fixtures import xlsx_bytes
+from tests.rsosh_fixtures import (
+    xlsx_bytes,
+    xlsx_bytes_for,
+    xlsx_bytes_including,
+)
+
+
+def normalize_name(value: str) -> str:
+    """Тот же нормализатор, что у каталога.
+
+    Импортируется из приложения, а не дублируется в тесте: иначе проверка «эта
+    олимпиада попала в перечень» сравнивала бы строки по двум разным правилам.
+    """
+    from app.database.search import normalize_name as normalize
+
+    return normalize(value)
 
 
 # --------------------------- Гонка при создании связи ---------------------------
@@ -432,6 +449,157 @@ async def test_repeating_confirm_of_same_snapshot_is_refused(client):
     assert _catalog_fingerprint(after.json()['olympiads']) == snapshot_before
 
 
+# --------------------------- Смысл архива: MANUAL против RSOSH_ABSENT ---------
+
+
+async def test_manual_archive_is_not_resurrected_by_rsosh_import(client):
+    """Ручной архив — решение администратора, перечень РСОШ его не отменяет.
+
+    Раньше ``_upsert`` возвращал в ``PUBLISHED`` любую архивную запись, встретив-
+    шуюся в перечне, независимо от причины архива. Значит олимпиада, которую
+    администратор исключил руками (например, из-за ошибки в данных),
+    возвращалась в актуальный каталог при первом же импорте, где она
+    встретится, — и решение администратора переставало что-либо значить.
+    """
+    await admin_client(client)
+    university = await create_university(client, 'Университет для MANUAL')
+    olympiad = await create_olympiad(
+        client, '{} Ручная олимпиада'.format(university['name'])
+    )
+
+    archived = await client.post(
+        f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
+    )
+    assert archived.status_code == 200
+    assert archived.json()['status'] == 'ARCHIVED'
+    assert archived.json()['archive_reason'] == 'MANUAL', (
+        'ручной архив обязан помечаться причиной MANUAL'
+    )
+
+    # Перечень РСОШ, в котором эта олимпиада есть. Имена берём из самой
+    # олимпиады: перечень по умолчанию содержит других олимпиад, и тогда
+    # проверяемая ветка `_upsert` просто не выполнялась бы, а тест проходил в
+    #холостую.
+    doc = await _upload(
+        client,
+        'rsosh_with_manual.xlsx',
+        xlsx_bytes_including(olympiad['name']),
+    )
+    await _run(client, doc['id'])
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    assert any(
+        item['name_norm'] == normalize_name(olympiad['name'])
+        for item in preview.json()['candidates']
+    ), 'перечень должен содержать ручную олимпиаду, иначе тест ничего не проверяет'
+
+    confirmed = await _confirm(client, doc['id'])
+    assert confirmed.status_code == 200, confirmed.text
+
+    state = await _admin_olympiad(client, olympiad['id'])
+    assert state['status'] == 'ARCHIVED', (
+        'импорт РСОШ не должен был вернуть ручную архивную олимпиаду в '
+        'актуальные, status=' + str(state['status'])
+    )
+    assert state['archive_reason'] == 'MANUAL', (
+        'причину ручного архива импорт не должен сбрасывать: '
+        + str(state['archive_reason'])
+    )
+
+    # И в публичном каталоге её нет: олимпиада осталась исторической.
+    catalog = await client.get('/api/v1/olympiads')
+    assert olympiad['id'] not in [
+        row['id'] for row in catalog.json()['olympiads']
+    ], 'ручная архивная олимпиада вернулась в актуальный каталог'
+
+
+async def test_rsosh_absent_archive_is_restored_when_it_appears_again(client):
+    """Архив «нет в перечне РСОШ» импорт возвращает — это другой смысл.
+
+    Два теста должны явно различаться: ``RSOSH_ABSENT`` означает «перечень её не
+    содержал», и появление в новом перечне — это и есть основание вернуть её.
+    Ручной архив такого основания не имеет.
+    """
+    await admin_client(client)
+    full = await _upload(client, 'rsosh_all.xlsx', xlsx_bytes())
+    await _run(client, full['id'])
+    await _confirm(client, full['id'])
+
+    catalog = await client.get('/api/v1/olympiads?include_archived=true')
+    everything = [row for row in catalog.json()['olympiads']
+                  if row['status'] == 'PUBLISHED']
+    assert len(everything) >= 3
+    # Уходим в архив по перечню: короткий перечень без части олимпиад.
+    short = await _upload(client, 'rsosh_few.xlsx', xlsx_bytes(row_count=2))
+    await _run(client, short['id'])
+    second = await _confirm(client, short['id'])
+    assert second.status_code == 200
+    assert second.json()['result']['archived'], 'олимпиады должны были уйти в архив'
+
+    gone_id = second.json()['result']['archived'][0]
+    gone = await _admin_olympiad_by_name(client, gone_id)
+    assert gone['status'] == 'ARCHIVED'
+    assert gone['archive_reason'] == 'RSOSH_ABSENT'
+
+    # Олимпиада снова появляется в перечне — импорт возвращает её в актуальные.
+    again = await _upload(client, 'rsosh_all_again.xlsx', xlsx_bytes())
+    await _run(client, again['id'])
+    third = await _confirm(client, again['id'])
+    assert third.status_code == 200, third.text
+
+    restored = await _admin_olympiad(client, gone['id'])
+    assert restored['status'] == 'PUBLISHED', (
+        'олимпиада из архива «нет в перечне РСОШ» обязана вернуться в актуальные'
+    )
+    assert restored['archive_reason'] is None, 'причина архива обязана сброситься'
+
+
+async def test_manual_archive_keeps_its_bvi_history(client):
+    """Историческая связь ручной архивной олимпиады сохраняется.
+
+    Архив не отменяет того, что университет действительно давал БВИ, и новые
+    заявки за такую олимпиаду по-прежнему невозможны.
+    """
+    await admin_client(client)
+    university = await create_university(client, 'Университет истории БВИ')
+    olympiad = await create_olympiad(client, 'Олимпиада для истории БВИ')
+    await university_rep_client(client, university['id'])
+    link = await client.post(
+        f"/api/v1/universities/{university['id']}/bvi",
+        json={'olympiad_id': olympiad['id']},
+    )
+    assert link.status_code == 201
+    await admin_client(client)
+    confirmed = await client.post(
+        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/moderation",
+        json={'action': 'confirm'},
+    )
+    assert confirmed.status_code == 200
+
+    await client.post(
+        f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
+    )
+
+    # Перечень РСОШ с этой олимпиадой не возвращает её в актуальные.
+    doc = await _upload(
+        client,
+        'rsosh_bvi_history.xlsx',
+        xlsx_bytes_including(olympiad['name']),
+    )
+    await _run(client, doc['id'])
+    confirmed = await _confirm(client, doc['id'])
+    assert confirmed.status_code == 200, confirmed.text
+
+    state = await _admin_olympiad(client, olympiad['id'])
+    assert state['status'] == 'ARCHIVED'
+    assert state['archive_reason'] == 'MANUAL'
+
+    page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert page.status_code == 200
+    rows = [row for row in page.json()['olympiads'] if row['id'] == olympiad['id']]
+    assert len(rows) == 1, 'историческая связь должна была сохраниться'
+    assert rows[0]['is_historical'] is True
+
+
 # --------------------------- Гонки при подтверждении ---------------------------
 
 
@@ -556,6 +724,207 @@ async def test_parallel_confirm_of_different_snapshots_keeps_newest(client, monk
             f'{name_norm} вернулась в актуальные: каталог откатился назад '
             f'(status={status})'
         )
+
+
+async def test_parallel_confirm_and_reject_leave_one_consistent_state(
+    client, monkeypatch
+):
+    """Confirm и reject одного прогона не могут оба «победить».
+
+    Опасная последовательность была возможна: ``reject`` читал состояние и менял
+    его отдельной операцией, поэтому мог отработать уже после того, как
+    ``confirm`` применил перечень. Итог — каталог изменён, а прогон помечен
+    ``rejected``: по интерфейсу выглядит так, будто перечень отклонили, а данные
+    уже в каталоге.
+
+    Гонка выстроена детерминированно: ``confirm`` входит в транзакцию и
+    замирает на первой записи каталога, а в этот момент ``reject`` делает
+    запрос. При общей блокировке он обязан дождаться завершения и получить 409.
+    Без неё он проходит мимо и отклоняет уже применённый перечень.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_race_state.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    from app.rsosh import persist as persist_module
+    from app.main import app as fastapi_app
+
+    original_upsert = persist_module._upsert
+    inside_confirm = asyncio.Event()
+    release_confirm = asyncio.Event()
+
+    async def pausing_upsert(session, candidate, doc_id):
+        if not inside_confirm.is_set():
+            inside_confirm.set()
+            await release_confirm.wait()
+        return await original_upsert(session, candidate, doc_id)
+
+    monkeypatch.setattr(persist_module, '_upsert', pausing_upsert)
+
+    import httpx
+
+    async def confirm():
+        return await _confirm(client, doc['id'])
+
+    async def reject():
+        # Отдельное соединение: параллельный запрос должен быть настоящим
+        # параллельным, а не последовательным вызовом в том же клиенте.
+        transport = httpx.ASGITransport(app=fastapi_app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url='http://test',
+            cookies=dict(client.cookies),
+        ) as raw:
+            return await raw.post(f'/api/v1/imports/{doc["id"]}/reject')
+
+    confirm_task = asyncio.create_task(confirm())
+    try:
+        await asyncio.wait_for(inside_confirm.wait(), timeout=30)
+        reject_task = asyncio.create_task(reject())
+        # Ждём не «немного времени», а самого факта ожидания блокировки в БД:
+        # иначе reject может не успеть дойти до записи, и гонка не проверится.
+        waiting = await _wait_for_lock_wait()
+        assert waiting is not None, (
+            'второй запрос не упёрся в блокировку — гонка не была воспроизведена'
+        )
+        release_confirm.set()
+        confirm_response, reject_response = await asyncio.gather(
+            confirm_task, reject_task
+        )
+    finally:
+        release_confirm.set()
+        if not confirm_task.done():
+            await asyncio.gather(confirm_task, return_exceptions=True)
+
+    outcomes = {
+        'confirmed' if confirm_response.status_code == 200
+        else confirm_response.status_code,
+        'rejected' if reject_response.status_code == 200
+        else reject_response.status_code,
+    }
+    # Ровно один переход; второй получает конфликт. Сравниваем как множество:
+    # порядок не должен влиять на смысл проверки.
+    assert outcomes in (
+        {'confirmed', 409},
+        {'rejected', 409},
+    ), f'оба действия прошли, состояние противоречиво: {outcomes}'
+
+    state = await _import_state(doc['id'])
+    if 'confirmed' in outcomes:
+        # Каталог применён — состояние обязано быть approved.
+        assert state == 'approved', (
+            'каталог применён, а состояние прогона — ' + str(state)
+        )
+    else:
+        # Перечень отклонён — в каталоге не должно быть его олимпиад.
+        assert state == 'rejected', (
+            'перечень отклонён, а состояние прогона — ' + str(state)
+        )
+        assert not await _has_rsosh_olympiads(doc['id']), (
+            'отклонённый перечень всё же записался в каталог'
+        )
+
+
+async def test_reject_after_confirm_is_refused(client):
+    """Подтверждённый перечень отклонить нельзя — и наоборот.
+
+    Тот же инвариант, но проверяется по шагам, а не на гонке: так понятно,
+    какой именно переход запрещён.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_confirm_then_reject.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+    assert (await _confirm(client, doc['id'])).status_code == 200
+
+    response = await client.post(f'/api/v1/imports/{doc["id"]}/reject')
+    assert response.status_code == 409, response.text
+
+    status = await client.get(f'/api/v1/imports/{doc["id"]}')
+    assert status.json()['state'] == 'approved', (
+        'отклонение не должно было менять состояние применённого прогона'
+    )
+    assert status.json()['status'] == 'PROCESSED'
+
+
+async def test_parallel_start_import_runs_once(client):
+    """Два concurrent-запуска одного документа дают одну обработку.
+
+    Раньше чтение документа и переход в ``PROCESSING`` были отдельными
+    операциями: оба запроса успевали прочитать документ и оба запустить задачу.
+    Две обработки одного документа писали в один ``metadata['rsosh']``, и итог
+    зависел от того, кто закончил последним.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_start_race.xlsx', xlsx_bytes())
+
+    from app.rsosh import processor as processor_module
+    from app.rsosh.types import RsoshConflictError, RsoshError
+
+    async def start():
+        try:
+            await processor_module.start_import(doc['id'])
+            return 202
+        except RsoshConflictError:
+            return 409
+        except RsoshError:
+            return 400
+
+    codes = await asyncio.gather(start(), start(), start())
+    assert codes.count(202) == 1, f'запусков должно быть ровно один: {codes}'
+    refused = [code for code in codes if code != 202]
+    assert refused and all(code == 409 for code in refused), (
+        f'остальные должны получить 409: {codes}'
+    )
+
+    # Обработка действительно была одна: прогон дошёл до preview, а не
+    # остался в PROCESSING и не был перетёрт второй обработкой.
+    state = await _import_state(doc['id'])
+    assert state == 'review', 'после одной обработки ожидается preview, получено ' \
+        + str(state)
+
+
+async def test_start_import_again_after_finished_run_is_allowed(client):
+    """Повторный запуск после завершения — не то же самое, что гонка.
+
+    ``PROCESSING`` занят, а ``review``/``failed`` свободны: иначе после ошибки
+    разбора перечень нельзя было бы перезапустить без новой загрузки файла.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_restart.xlsx', xlsx_bytes())
+
+    first = await client.post('/api/v1/imports/rsosh', json={'doc_id': doc['id']})
+    assert first.status_code == 202
+    assert (await _import_state(doc['id'])) == 'review'
+
+    second = await client.post('/api/v1/imports/rsosh', json={'doc_id': doc['id']})
+    assert second.status_code == 202, second.text
+    assert (await _import_state(doc['id'])) == 'review'
+
+
+async def test_rejected_run_cannot_be_restarted_but_stays_consistent(client):
+    """Отклонённый прогон не перезапускается — и это поведение не менялось.
+
+    Проверяется намеренно: раньше ``REJECTED`` тоже не входил в стартовые
+    статусы, поэтому повторный запуск отклонённого документа отклонялся с 400 и
+    раньше. Менять это — значит менять продуктовое решение, чего в задаче нет.
+
+    Фиксируется здесь, чтобы изменение списка стартовых статусов не прошло
+    молча: если перезапуск отклонённого решат разрешить, тест об этом скажет.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_reject_restart.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+    assert await _import_state(doc['id']) == 'review'
+
+    rejected = await client.post(f'/api/v1/imports/{doc["id"]}/reject')
+    assert rejected.status_code == 200, rejected.text
+    assert await _import_state(doc['id']) == 'rejected'
+
+    restarted = await client.post('/api/v1/imports/rsosh', json={'doc_id': doc['id']})
+    assert restarted.status_code == 400, restarted.text
+    # Документ остался отклонённым, а каталог — нетронутым.
+    assert await _import_state(doc['id']) == 'rejected'
+    assert not await _has_rsosh_olympiads(doc['id'])
 
 
 # --------------------------- Изоляция строк импорта ---------------------------
@@ -915,6 +1284,79 @@ async def _replace_candidates(client, doc_id, candidates: list[dict]) -> None:
     Распознавание при этом не трогается.
     """
     await _patch_section(client, doc_id, {'candidates': candidates})
+
+
+async def _wait_for_lock_wait(timeout: float = 15.0) -> str | None:
+    """Дождаться, пока в БД реально кто-то ждёт блокировку.
+
+    Возвращает текст ждущего запроса или ``None``, если ожидания не было.
+
+    Нужно, чтобы гонка была воспроизводимой, а не вероятной: без этой проверки
+    тест мог бы отпустить первую транзакцию раньше, чем вторая дойдёт до
+    блокировки, и тогда даже неправильный код прошёл бы тест «по счастливой»
+    последовательности.
+
+    Соединение берётся из настроек приложения, а не задаётся строкой: тесты
+    идут и на локальной базе, и внутри Docker, где хост — ``postgres``.
+    """
+    from app.database.database import AsyncSessionLocal
+
+    deadline = time.monotonic() + timeout
+    query = (
+        'SELECT query FROM pg_stat_activity '
+        "WHERE wait_event_type = 'Lock' AND state = 'active' LIMIT 1"
+    )
+    while time.monotonic() < deadline:
+        async with AsyncSessionLocal() as session:
+            row = (
+                await session.execute(text(query))
+            ).scalar_one_or_none()
+        if row is not None:
+            return str(row)
+        await asyncio.sleep(0.05)
+    return None
+
+
+async def _admin_olympiad(client, olympiad_id) -> dict:
+    """Админская карточка олимпиады: с ``archive_reason``.
+
+    Публичный ответ ``archive_reason`` не отдаёт намеренно, поэтому причину
+    архива здесь смотреть негде.
+    """
+    response = await client.get(f'/api/v1/admin/olympiads')
+    assert response.status_code == 200, response.text
+    for item in response.json()['olympiads']:
+        if item['id'] == olympiad_id:
+            return item
+    raise AssertionError('олимпиада {} не найдена в панели'.format(olympiad_id))
+
+
+async def _admin_olympiad_by_name(client, name: str) -> dict:
+    for item in (await client.get('/api/v1/admin/olympiads')).json()['olympiads']:
+        if item['name'] == name:
+            return item
+    raise AssertionError('олимпиада {!r} не найдена в панели'.format(name))
+
+
+async def _has_rsosh_olympiads(doc_id) -> bool:
+    """Есть ли в каталоге олимпиады, созданные именно этим документом.
+
+    Источник важен: каталог может содержать чужие олимпиады, и их наличие не
+    говорит о том, что отклонённый перечень что-то записал.
+    """
+    from app.database.database import AsyncSessionLocal
+    from app.models.olympiads import Olympiads
+    from sqlalchemy import func, select
+
+    async with AsyncSessionLocal() as session:
+        count = (
+            await session.execute(
+                select(func.count())
+                .select_from(Olympiads)
+                .where(Olympiads.source_doc_id == uuid.UUID(str(doc_id)))
+            )
+        ).scalar_one()
+    return bool(count)
 
 
 async def _import_state(doc_id) -> str | None:

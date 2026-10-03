@@ -5,7 +5,9 @@
 - одна строка кандидата = одна запись каталога: дубли не создаются, а
   существующая олимпиада обновляется (merge);
 - олимпиада, присутствующая в новом перечне РСОШ, снова становится актуальной
-  (``PUBLISHED``, причина архива сбрасывается) — так возвращается из архива;
+  (``PUBLISHED``, причина архива сбрасывается) — так возвращается из архива.
+  **Исключение — ручной архив** (``archive_reason = MANUAL``): это решение
+  администратора, и перечень РСОШ его не отменяет (см. ``_upsert``);
 - олимпиада, **исчезнувшая** из перечня РСОШ, не удаляется, а переводится в
   ``ARCHIVED`` с причиной ``RSOSH_ABSENT`` (см. ``_archive_missing``);
 - записи, которые администратор снял в preview (``skip``), не считаются
@@ -59,6 +61,14 @@ ARCHIVE_MANUAL = 'MANUAL'
 #: каталога. Значение совпадает с ``processor.RSOSH_DOC_TYPE``, но продублировано
 #: намеренно: persist не должен импортировать процессор (тот импортирует persist).
 RSOSH_DOC_TYPE = 'RSOSH_LIST'
+
+#: Статусы документа, из которых импорт запустить можно.
+#:
+#: ``PROCESSING`` исключён осознанно: документ в обработке уже занят, и повторный
+#: запуск должен отказать (см. ``claim_import_start``). Воркер при этом
+#: проходит проверку типа и продолжает работу: он запускается после того, как
+#: переход в ``PROCESSING`` уже занял документ.
+STARTABLE_DOC_STATUSES = ('UPLOADED', 'NEEDS_REVIEW', 'FAILED', 'PROCESSED')
 
 #: Ключ advisory-блокировки, сериализующей применение перечней РСОШ.
 #:
@@ -279,6 +289,126 @@ async def apply_confirmed_import(
     }
 
 
+async def reject_confirmed_import(doc_id) -> dict:
+    """Отклонить результаты импорта под теми же блокировками, что и confirm.
+
+    Отклонение меняет только состояние документа, каталог не трогает, и
+    именно поэтому раньше оно выглядело безобидным. Но состояние прогона — это
+    и есть факт «этот перечень применён», поэтому менять его в обход
+    блокировок нельзя:
+
+    - ``confirm`` фиксирует применение перечня и состояние ``approved`` в одной
+      транзакции под advisory-блокировкой;
+    - ``reject`` раньше читал состояние, затем менял его отдельной операцией, и
+      мог сработать уже после коммита ``confirm``.
+
+    Итогом был документ, для которого каталог применён, а прогон помечен
+    ``rejected``: по интерфейсу выглядит так, будто перечень отклонили, а
+    олимпиады в каталоге уже изменены.
+
+    Здесь порядок тот же, что в ``apply_confirmed_import``: advisory-блокировка
+    → ``SELECT ... FOR UPDATE`` по документу → проверка состояния → запись →
+    commit. Поэтому возможен ровно один исход: либо отклонение, либо
+    подтверждение, и второе после первого получает 409.
+
+    Возвращает обновлённый документ.
+    """
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            section = states.rsosh_section(document)
+            if section.get('state') not in states.REJECTABLE_STATES:
+                # Сюда попадает и «уже применён» (approved): подтвердить и
+                # отклонить один и тот же прогон нельзя.
+                raise RsoshConflictError(
+                    f'Импорт в состоянии {section.get("state")} уже применён '
+                    'или не может быть отклонён'
+                )
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.status = states.DOCS_STATUS['rejected']
+            doc_row.meta = states.docs_metadata_with_section(
+                document, states.rejected_section(document)
+            )
+            return doc_to_dict(doc_row)
+
+
+async def claim_import_start(doc_id) -> dict:
+    """Атомарно занять документ под обработку: перевести его в ``PROCESSING``.
+
+    Запуск импорта раньше состоял из двух независимых операций — чтение
+    документа и запись состояния. Два одновременных запроса успевали оба
+    прочитать документ до перехода и оба запустить обработку: две задачи на
+    один документ писали в один и тот же ``docs.metadata['rsosh']``, и итог
+    зависел от того, кто финишировал последним.
+
+    Теперь переход выполняется под advisory-блокировкой и блокировкой строки
+    документа, поэтому он атомарен. Второй concurrent-запрос дожидается первого,
+    видит ``PROCESSING`` и получает 409: обработка уже идёт, запускать вторую
+    нельзя.
+
+    Повторный запуск после завершения (и после ошибки) остаётся возможным:
+    ``PROCESSING`` — единственное состояние, которое занято.
+
+    Возвращает документ в состоянии ``processing``.
+    """
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            if document.get('type') != RSOSH_DOC_TYPE:
+                raise RsoshError('Only RSOSH_LIST documents can be imported')
+
+            section = states.rsosh_section(document)
+            already_running = (
+                document.get('status') == states.DOCS_STATUS['processing']
+                or section.get('state') == 'processing'
+            )
+            if already_running:
+                raise RsoshConflictError(
+                    'Импорт этого документа уже запущен: дождитесь окончания '
+                    'или отклоните текущий прогон'
+                )
+            if document.get('status') not in STARTABLE_DOC_STATUSES:
+                raise RsoshError(
+                    'Import is not startable from status '
+                    + str(document.get('status'))
+                    + '; startable: ' + ', '.join(STARTABLE_DOC_STATUSES)
+                )
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.status = states.DOCS_STATUS['processing']
+            doc_row.meta = states.docs_metadata_with_section(
+                document, states.start_section(document)
+            )
+            return doc_to_dict(doc_row)
+
+
 async def _lock_snapshot_scope(session) -> None:
     """Заблокировать применение перечней РСОШ до конца транзакции.
 
@@ -444,9 +574,22 @@ async def _upsert(session, candidate: Candidate, doc_id):
         return olympiad_to_dict(olympiad)
 
     changed = False
-    if olympiad.status != 'PUBLISHED' or olympiad.archive_reason is not None:
+    if olympiad.archive_reason == ARCHIVE_MANUAL:
+        # Ручной архив — это решение администратора, а не вывод разбора РСОШ.
+        # Перечень РСОШ не отменяет его: иначе олимпиада, которую исключили
+        # руками (например, из-за ошибки в данных), возвращалась бы в актуальные
+        # при первом же импорте, где она встретится. Вернуть такую запись может
+        # только администратор через POST /admin/archive_olympiad.
+        #
+        # Остальные поля (описание, источник) при этом обновляются как обычно:
+        # перечень подтверждает, что олимпиада существует, и это не повод
+        # отказывать ей в актуальных данных.
+        pass
+    elif olympiad.status != 'PUBLISHED' or olympiad.archive_reason is not None:
         # Олимпиада снова встретилась в актуальном перечне: возвращаем её в
-        # актуальные и сбрасываем причину архива.
+        # актуальные и сбрасываем причину архива. Это относится только к
+        # архиву «нет в перечне РСОШ» (RSOSH_ABSENT) и к неконсистентным
+        # записям без причины.
         olympiad.status = 'PUBLISHED'
         olympiad.archive_reason = None
         changed = True

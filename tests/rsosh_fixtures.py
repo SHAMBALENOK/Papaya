@@ -37,23 +37,50 @@ def xlsx_bytes(row_count: int | None = None) -> bytes:
     смоделировать следующий, более короткий перечень РСОШ (олимпиады, исчезнувшие
     из него, должны уйти в архив).
     """
+    return xlsx_bytes_for(
+        OLYMPIAD_ROWS if row_count is None else OLYMPIAD_ROWS[:row_count]
+    )
+
+
+def xlsx_bytes_for(names) -> bytes:
+    """XLSX с перечнем из заданных названий.
+
+    Нужен, когда в перечень должна попасть олимпиада, созданная вне импорта:
+    иначе тест прошёл бы, ни разу не выполнив проверяемую ветку кода — такой
+    перечень просто не содержал бы проверяемой олимпиады.
+    """
     import openpyxl
 
-    rows = OLYMPIAD_ROWS if row_count is None else OLYMPIAD_ROWS[:row_count]
     book = openpyxl.Workbook()
     sheet = book.active
     sheet.title = 'Перечень'
     sheet.append(list(HEADER))
-    for name, profile, level, diploma in rows:
-        sheet.append([name, profile, level, diploma])
-
-    # Объединённая по вертикали ячейка: пустой предмет во второй строке.
-    if len(rows) > 1:
-        sheet.merge_cells(start_row=4, start_column=2, end_row=5, end_column=2)
+    for name in names:
+        if isinstance(name, tuple):
+            row = list(name)
+        else:
+            row = [name, 'Информатика', '1', 'Победитель или призер']
+        sheet.append(row)
 
     buffer = io.BytesIO()
     book.save(buffer)
     return buffer.getvalue()
+
+
+def xlsx_bytes_including(name: str, filler: int = 2) -> bytes:
+    """XLSX, в перечне которого есть олимпиада ``name`` плюс несколько строк.
+
+    Нужно, когда проверяется судьба олимпиады, созданной вне импорта: без неё в
+    перечне тест прошёл бы вхолостую, так как нужная ветка кода не выполнялась.
+
+    Строк всегда минимум три. Разбор считает таблицу из одной строки подписью
+    документа и пропускает её («Small table skipped: it looks like a document
+    caption, not a list»), поэтому одиночная олимпиада в перечне не доходит до
+    кандидатов. Проверяется поведение импорта, а не разбор, поэтому таблица
+    делается такой, какую разбор принимает.
+    """
+    filler = max(filler, 2)
+    return xlsx_bytes_for([name] + list(OLYMPIAD_ROWS[:filler]))
 
 
 def empty_xlsx_bytes() -> bytes:

@@ -272,18 +272,6 @@ async def apply_role_guarded(
         return user_to_dict(user)
 
 
-def demote_role(user: dict) -> str:
-    """Роль, которая должна остаться после снятия ADMIN.
-
-    Если пользователь привязан к университету, он продолжает быть его
-    представителем (``EDITOR``), иначе становится обычным пользователем
-    (``USER``). Так смена роли не оставляет противоречий: представитель не
-    может остаться без университета, а «просто пользователь» не получает
-    привязку, на которую он не подписан.
-    """
-    return ROLE_UNIVERSITY_REP if user.get('university_id') else ROLE_USER
-
-
 async def list_users(
     *,
     include_inactive: bool = False,

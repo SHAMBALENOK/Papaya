@@ -529,14 +529,25 @@ async def test_empty_url_becomes_absent(client):
 
 
 async def test_last_admin_cannot_be_demoted(client):
-    """Снятие роли у последнего активного администратора запрещено."""
+    """Защиту последнего администратора нельзя обойти другим маршрутом.
+
+    Раньше здесь стоял вызов ``/admin/demote_admin/{id}``. Маршрута больше нет,
+    и это часть защиты: снять роль можно только через ``/role``, где запрет на
+    последнего администратора проверяется атомарно. Сам запрет проверяет
+    ``test_last_admin_cannot_be_demoted_through_role_endpoint`` — здесь
+    удостоверяется, что обойти его нечем.
+    """
     # Ровно один вызов admin_client: он заводит администратора, повторный вызов
     # завёл бы второго, и понижение было бы законным.
     admin = await admin_client(client)
 
     response = await client.post(f"/api/v1/admin/demote_admin/{admin['id']}")
-    assert response.status_code == 409
-    assert 'администратор' in response.json()['detail'].lower()
+    assert response.status_code in (404, 405), response.text
+
+    # И по единственному существующему пути понижение всё ещё запрещено.
+    guarded = await set_user_role(client, admin['id'], 'USER')
+    assert guarded.status_code == 409
+    assert 'администратор' in guarded.json()['detail'].lower()
 
 
 async def test_last_admin_cannot_be_banned(client):
@@ -565,7 +576,7 @@ async def test_admin_can_be_demoted_when_another_remains(client):
     await admin_client(client)
     await set_user_role(client, second['id'], 'ADMIN')
 
-    response = await client.post(f"/api/v1/admin/demote_admin/{first['id']}")
+    response = await set_user_role(client, first['id'], 'USER')
     assert response.status_code == 200
     assert response.json()['role'] == 'USER'
 
@@ -611,6 +622,6 @@ async def test_demoting_inactive_admin_is_allowed(client):
         )
         await session.commit()
 
-    response = await client.post(f"/api/v1/admin/demote_admin/{user['id']}")
+    response = await set_user_role(client, user['id'], 'USER')
     assert response.status_code == 200
     assert response.json()['role'] == 'USER'
