@@ -117,10 +117,9 @@ const api = {
     },
     banUser(id)      { return this.post(`/admin/ban/${id}`); },
     unbanUser(id)    { return this.post(`/admin/unban/${id}`); },
-    grantAdmin(id)   { return this.post(`/admin/grant_admin/${id}`); },
-    demoteAdmin(id)  { return this.post(`/admin/demote_admin/${id}`); },
-    /* Единственный способ назначить/снять роль: роль и университет меняются
-       одним запросом, поэтому EDITOR без университета получить нельзя. */
+    /* Единственный способ назначить, снять или повысить роль: роль и
+       университет меняются одним запросом, поэтому EDITOR без университета
+       получить нельзя, а отдельных grant_admin/demote_admin в API нет. */
     setUserRole(id, role, universityId) {
         return this.post(`/admin/role/${id}`, {
             role,

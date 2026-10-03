@@ -106,8 +106,7 @@ async function handleAdminClick(e) {
     const calls = {
         ban: () => api.banUser(id),
         unban: () => api.unbanUser(id),
-        grant: () => api.grantAdmin(id),
-        demote: () => api.demoteAdmin(id),
+        toggleAdmin: () => toggleAdminRole(id),
         archive: () => api.archiveOlympiad(id, true),
         restore: () => api.archiveOlympiad(id, false),
         confirmBvi: () => api.moderateBvi(btn.dataset.university, id, 'confirm'),
@@ -127,8 +126,7 @@ async function handleAdminClick(e) {
     const messages = {
         ban: 'Пользователь заблокирован',
         unban: 'Пользователь разблокирован',
-        grant: 'Назначена роль администратора',
-        demote: 'Роль администратора снята',
+        toggleAdmin: 'Роль администратора изменена',
         archive: 'Олимпиада исключена из актуального каталога',
         restore: 'Олимпиада возвращена в актуальный каталог',
         confirmBvi: 'Связь БВИ подтверждена',
@@ -180,9 +178,9 @@ async function saveUserRole(userId, btn) {
     // - обычный пользователь не привязывается ни к какому вузу — при снятии
     //   роли представителя привязку нужно очистить, иначе сервер отклонит
     //   запрос (а «просто молча» оставить её нельзя);
-    // - администратору привязка не мешает, но она нужна, чтобы demote вернул
-    //   его в представители, а не в обычные пользователи. Поэтому при
-    //   назначении ADMIN не обнуляем то, что уже выбрано.
+    // - администратору привязка не мешает, поэтому при назначении ADMIN не
+    //   обнуляем то, что уже выбрано: снятие роли ниже само выбирает, кем
+    //   человек станет дальше.
     const universityId = role === 'USER' ? null : (universitySelect.value || null);
 
     if (role === 'EDITOR' && !universityId) {
@@ -197,6 +195,38 @@ async function saveUserRole(userId, btn) {
     btn.disabled = false;
     btn.textContent = originalText;
 
+    if (res.ok) {
+        showToast(`Роль обновлена: ${ROLE_LABELS[res.data.role] || res.data.role}`, 'success');
+        await reloadAdmin();
+        return;
+    }
+    showToast(errorText(res), 'error');
+}
+
+/**
+ * Быстрые кнопки «Сделать админом» / «Снять админа».
+ *
+ * Отдельных маршрутов для этого в API нет и не должно быть: роль меняется
+ * только через `/admin/role/{user_id}`, вместе с привязкой к университету.
+ * Кнопка лишь подставляет целевую роль в тот же запрос.
+ *
+ * Куда попадает человек после снятия ADMIN, выводится из уже выбранного в
+ * строке университета, а не из отдельной таблицы на клиенте: университет
+ * выбирается только для EDITOR (см. handleAdminChange), поэтому «привязан =
+ * EDITOR» уже следует из состояния формы. Инвариант проверяет сервер — если
+ * подстановка окажется неверной, придёт 400, а не повреждённые права.
+ */
+async function toggleAdminRole(userId) {
+    const roleSelect = document.querySelector(`[data-role-for="${CSS.escape(userId)}"]`);
+    const universitySelect = document.querySelector(`[data-university-for="${CSS.escape(userId)}"]`);
+    if (!roleSelect || !universitySelect) return;
+
+    const isAdmin = roleSelect.value === 'ADMIN';
+    const universityId = universitySelect.value || null;
+    const role = isAdmin ? (universityId ? 'EDITOR' : 'USER') : 'ADMIN';
+    const targetUniversity = role === 'USER' ? null : universityId;
+
+    const res = await api.setUserRole(userId, role, targetUniversity);
     if (res.ok) {
         showToast(`Роль обновлена: ${ROLE_LABELS[res.data.role] || res.data.role}`, 'success');
         await reloadAdmin();
@@ -263,7 +293,7 @@ function adminUsersHtml(users, universities) {
                 `<option value="${escAttr(item.id)}" ${String(u.university_id) === String(item.id) ? 'selected' : ''}>${escHtml(item.short_name || item.name)}</option>`).join('');
             return `
             <div class="${UI.card} px-8 py-7 flex flex-col xl:flex-row xl:items-center gap-6">
-                <div class="flex items-center gap-5 flex-1 min-w-0">
+                <div class="flex items-center gap-5 flex-1 min-w-[16rem]">
                     <div class="w-12 h-12 rounded bg-ember text-ink font-bold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(userInitials(u))}</div>
                     <div class="min-w-0">
                         <p class="font-bold text-ink truncate">${escHtml(u.name)} ${escHtml(u.surname)}${isSelf ? ' <span class="text-ink-faint font-medium">(вы)</span>' : ''}</p>
@@ -277,15 +307,15 @@ function adminUsersHtml(users, universities) {
                         </div>
                     </div>
                 </div>
-                <div class="flex flex-col sm:flex-row sm:items-center gap-3 shrink-0 xl:justify-end">
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap xl:justify-end">
                     <label class="sr-only" for="role-${escAttr(u.id)}">Роль: ${escHtml(u.email)}</label>
-                    <select id="role-${escAttr(u.id)}" data-role-for="${escAttr(u.id)}" class="${UI.input} !w-auto !py-2 text-sm">
+                    <select id="role-${escAttr(u.id)}" data-role-for="${escAttr(u.id)}" class="${UI.input} sm:!w-auto sm:max-w-[11rem] !py-2 text-sm">
                         ${Object.keys(ROLE_LABELS).map(role =>
                             `<option value="${role}" ${u.role === role ? 'selected' : ''}>${ROLE_LABELS[role]}</option>`).join('')}
                     </select>
                     <label class="sr-only" for="university-${escAttr(u.id)}">Университет: ${escHtml(u.email)}</label>
                     <select id="university-${escAttr(u.id)}" data-university-for="${escAttr(u.id)}"
-                            class="${UI.input} !w-auto !py-2 text-sm"
+                            class="${UI.input} sm:!w-auto sm:max-w-[15rem] !py-2 text-sm"
                             ${u.role === 'EDITOR' ? '' : 'disabled title="Университет назначается представителю"'}>
                         <option value="">Без университета</option>
                         ${universityOptions}
@@ -294,7 +324,7 @@ function adminUsersHtml(users, universities) {
                             ${isLastAdmin ? lockedAttrs : ''}>
                         Сохранить роль
                     </button>
-                    <button type="button" data-act="${u.role === 'ADMIN' ? 'demote' : 'grant'}" data-id="${escAttr(u.id)}"
+                    <button type="button" data-act="toggleAdmin" data-id="${escAttr(u.id)}"
                             class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}"
                             ${u.role === 'ADMIN' ? lockedAttrs : ''}>
                         ${u.role === 'ADMIN' ? 'Снять админа' : 'Сделать админом'}

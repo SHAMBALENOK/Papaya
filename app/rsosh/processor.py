@@ -36,7 +36,14 @@ from app.rsosh.types import RsoshError
 logger = logging.getLogger('papaya.rsosh.processor')
 
 RSOSH_DOC_TYPE = 'RSOSH_LIST'
-STARTABLE_DOC_STATUSES = ('UPLOADED', 'PROCESSING', 'NEEDS_REVIEW', 'FAILED', 'PROCESSED')
+
+#: Статусы, из которых ``run_import`` может продолжить обработку.
+#:
+#: Отличается от ``persist.STARTABLE_DOC_STATUSES``, который проверяет старт для
+#: пользователя: сюда входит и ``PROCESSING``, потому что воркер получает
+#: документ уже занятым под обработку (переход в PROCESSING делает
+#: ``persist.claim_import_start`` перед постановкой задачи).
+RESUMABLE_DOC_STATUSES = ('UPLOADED', 'PROCESSING', 'NEEDS_REVIEW', 'FAILED', 'PROCESSED')
 
 
 def document_path(doc: dict) -> Path:
@@ -56,10 +63,10 @@ def document_path(doc: dict) -> Path:
 def _validate_document(doc: dict) -> None:
     if doc.get('type') != RSOSH_DOC_TYPE:
         raise RsoshError('Only RSOSH_LIST documents can be imported')
-    if doc.get('status') not in STARTABLE_DOC_STATUSES:
+    if doc.get('status') not in RESUMABLE_DOC_STATUSES:
         raise RsoshError(
             'Import is not startable from status ' + str(doc.get('status'))
-            + '; startable: ' + ', '.join(STARTABLE_DOC_STATUSES)
+            + '; startable: ' + ', '.join(RESUMABLE_DOC_STATUSES)
         )
 
 
@@ -237,15 +244,22 @@ def _celery_available() -> bool:
 async def start_import(doc_id) -> tuple[dict, str]:
     """Запустить импорт в фоне (celery) или в текущем процессе (inline).
 
-    Документ сразу переводится в состояние ``PROCESSING``, чтобы интерфейс
-    не показывал устаревший результат предыдущего прогона, пока задача стоит
-    в очереди. Возвращает ``(документ, способ запуска)``.
+    Документ переводится в ``PROCESSING`` до постановки задачи, чтобы интерфейс
+    не показывал устаревший результат предыдущего прогона, пока задача стоит в
+    очереди.
+
+    Переход выполняется через ``persist.claim_import_start``, то есть атомарно
+    под блокировкой. Раньше чтение документа и запись состояния были отдельными
+    операциями, и два одновременных запроса запускали две обработки одного
+    документа — они писали в один и тот же ``docs.metadata['rsosh']``, и
+    результат зависел от того, кто закончил последним. Теперь второй запрос
+    получает 409 и лишней задачи не создаётся.
+
+    Возвращает ``(документ, способ запуска)``.
     """
-    doc = await db_docs.get_doc(doc_id)
-    if not doc:
-        raise RsoshError(f'Document {doc_id} not found')
-    _validate_document(doc)
-    doc = await _set_state(doc, states.start_section(doc))
+    from app.rsosh import persist
+
+    doc = await persist.claim_import_start(doc_id)
 
     mode = RSOSH_EXECUTION or 'auto'
     if mode == 'celery' or (mode == 'auto' and _celery_available()):

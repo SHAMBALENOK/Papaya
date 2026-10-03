@@ -444,3 +444,53 @@ def test_import_result_shows_archive_skipped_reason():
     source = _read('pages', 'admin.js')
     assert 'archive_skipped_reason' in source
     assert 'Архивирование пропущено' in source
+
+
+def test_frontend_has_no_legacy_role_endpoints():
+    """Управление ролью идёт только через /admin/role/{id}.
+
+    Отдельные ``grant_admin``/``demote_admin`` удалены из API: они меняли роль
+    без привязки, то есть давали второй путь, на котором инварианты роли могли
+    разойтись. В интерфейсе таких вызовов быть не должно, а возможность повысить
+    и снять роль остаётся через ``setUserRole``.
+    """
+    api = _read('api.js')
+    assert '/admin/grant_admin/' not in api
+    assert '/admin/demote_admin/' not in api
+    assert 'grantAdmin' not in api
+    assert 'demoteAdmin' not in api
+    # Канонический вызов остался.
+    assert '/admin/role/' in api
+
+    for name in ('admin.js', 'myuniversity.js', 'profile.js', 'app.js'):
+        source = _read('pages', name) if name != 'app.js' else _read('app.js')
+        for banned in ('grantAdmin', 'demoteAdmin', 'grant_admin', 'demote_admin'):
+            assert banned not in source, '{}: {}'.format(name, banned)
+
+    # Кнопка «Сделать админом»/«Снять админа» сохранена и ходит в тот же
+    # эндпоинт: возможность повысить и снять роль не должна была исчезнуть.
+    admin = _read('pages', 'admin.js')
+    assert 'Сделать админом' in admin
+    assert 'Снять админа' in admin
+    assert 'setUserRole' in admin
+
+
+def test_admin_ui_shows_manual_archive_distinction():
+    """Панель различает причины архива, иначе решение не объяснимо.
+
+    Ручной архив администратора и «нет в перечне РСОШ» — разные вещи: первый
+    возвращается только руками, второй — импортом. Если панель показывает
+    одинаковое «Архивная», решение администратора выглядит отменённым при
+    первом же импорте, и вернуть олимпиаду потом нечем.
+
+    Тексты живут в общем помощнике ``archiveReasonText``, а в списке олимпиад
+    панели ветка ``RSOSH_ABSENT`` выбирается явно, поэтому проверяются оба.
+    """
+    app_js = _read('app.js')
+    assert 'MANUAL' in app_js, 'в панели должно быть объяснение ручного архива'
+    assert 'RSOSH_ABSENT' in app_js or 'RSOSH_ABSENT' in _read('pages', 'admin.js'), (
+        'в панели должно быть объяснение архива «нет в перечне РСОШ»'
+    )
+    # Формулировки обеих причин должны говорить, что с ними будет.
+    assert 'Вернуть её в актуальные можно' in app_js
+    assert 'вернётся автоматически' in app_js.lower()

@@ -209,47 +209,71 @@ async def test_role_endpoint_requires_admin(client):
     assert response.status_code == 403
 
 
-async def test_demote_admin_keeps_representative_role(client):
-    """Снятие ADMIN возвращает роль представителя, а не голого пользователя."""
+async def test_role_endpoint_is_the_only_way_to_change_role(client):
+    """Legacy-маршруты смены роли удалены и не должны вернуться.
+
+    ``grant_admin``/``demote_admin`` меняли роль, не трогая привязку к
+    университету, то есть давали второй путь, на котором инварианты роли
+    могли разойтись с тем, что проверяет ``/role``. Возможность повысить и
+    снять роль осталась — через ``/role``, см. тесты выше и ниже.
+    """
+    await admin_client(client)
+    user = await register_user(client)
+    await admin_client(client)
+
+    for path in ('grant_admin', 'demote_admin'):
+        response = await client.post(f"/api/v1/admin/{path}/{user['id']}")
+        # 404 — пути нет вовсе, 405 — путь совпал, но метод другой. В обоих
+        # случаях изменить роль этим нельзя.
+        assert response.status_code in (404, 405), (path, response.status_code)
+
+    schema = await client.get('/openapi.json')
+    paths = schema.json()['paths']
+    assert not [p for p in paths if 'grant_admin' in p or 'demote_admin' in p], (
+        'в схеме API не должно быть отдельных маршрутов смены роли'
+    )
+
+    # Пока маршрутов нет, роль по-прежнему меняется одной операцией.
+    still_works = await set_user_role(client, user['id'], 'ADMIN')
+    assert still_works.status_code == 200
+    assert still_works.json()['role'] == 'ADMIN'
+
+
+async def test_role_change_keeps_or_drops_university_by_target_role(client):
+    """Роль и привязка меняются вместе: результат задаёт целевая роль.
+
+    Раньше «куда попадёт человек после снятия ADMIN» решал сервер внутри
+    ``demote_admin``. Теперь решение принимает администратор в том же запросе,
+    а инвариант («EDITOR обязан быть привязан, USER — не привязан») проверяет
+    сервер. Здесь проверяются оба допустимых исхода.
+    """
     await admin_client(client)
     university = await create_university(client, 'Университет ИТМО')
     rep = await register_user(client)
     await admin_client(client)
     await set_user_role(client, rep['id'], 'EDITOR', university['id'])
 
-    await admin_client(client)
-    granted = await client.post(f"/api/v1/admin/grant_admin/{rep['id']}")
-    assert granted.status_code == 200
-    assert granted.json()['role'] == 'ADMIN'
-    # Права администратора от привязки не зависят, но привязка сохранена.
-    assert granted.json()['university_id'] == university['id']
+    # Повышение до ADMIN сохраняет привязку: она ему не мешает.
+    promoted = await set_user_role(
+        client, rep['id'], 'ADMIN', university['id']
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()['role'] == 'ADMIN'
+    assert promoted.json()['university_id'] == university['id']
 
-    demoted = await client.post(f"/api/v1/admin/demote_admin/{rep['id']}")
-    assert demoted.status_code == 200
-    assert demoted.json()['role'] == 'EDITOR'
-    assert demoted.json()['university_id'] == university['id']
+    # Возврат к представителю — вместе с университетом.
+    back_to_rep = await set_user_role(
+        client, rep['id'], 'EDITOR', university['id']
+    )
+    assert back_to_rep.status_code == 200
+    assert back_to_rep.json()['role'] == 'EDITOR'
+    assert back_to_rep.json()['university_id'] == university['id']
 
-
-async def test_demote_admin_without_university_becomes_user(client):
-    await admin_client(client)
-    admin = await register_user(client)
-    await admin_client(client)
-    await client.post(f"/api/v1/admin/grant_admin/{admin['id']}")
-
-    demoted = await client.post(f"/api/v1/admin/demote_admin/{admin['id']}")
-    assert demoted.status_code == 200
-    assert demoted.json()['role'] == 'USER'
-    assert demoted.json()['university_id'] is None
-
-
-async def test_demote_admin_rejects_non_admin(client):
-    await admin_client(client)
-    user = await register_user(client)
-    await admin_client(client)
-
-    response = await client.post(f"/api/v1/admin/demote_admin/{user['id']}")
-    assert response.status_code == 409
-    assert response.json()['detail'] == 'User is not ADMIN'
+    # Обычный пользователь привязки не получает: привязку нужно снять явно.
+    dropped = await set_user_role(client, rep['id'], 'USER', None)
+    assert dropped.status_code == 200
+    assert dropped.json()['role'] == 'USER'
+    assert dropped.json()['university_id'] is None
 
 
 async def test_admin_role_management(client):
@@ -258,16 +282,33 @@ async def test_admin_role_management(client):
     # Возвращаем сессию администратору: у клиента одна cookie-сессия.
     await login_user(client, admin['email'])
 
-    granted = await client.post(f"/api/v1/admin/grant_admin/{user['id']}")
+    granted = await set_user_role(client, user['id'], 'ADMIN')
     assert granted.status_code == 200
     assert granted.json()['role'] == 'ADMIN'
 
-    repeated = await client.post(f"/api/v1/admin/grant_admin/{user['id']}")
-    assert repeated.status_code == 409
+    # Повторное назначение той же роли — тоже успех, а не ошибка: запрос
+    # идемпотентен по смыслу (роль уже такая).
+    repeated = await set_user_role(client, user['id'], 'ADMIN')
+    assert repeated.status_code == 200
+    assert repeated.json()['role'] == 'ADMIN'
 
-    demoted = await client.post(f"/api/v1/admin/demote_admin/{user['id']}")
+    demoted = await set_user_role(client, user['id'], 'USER')
     assert demoted.status_code == 200
     assert demoted.json()['role'] == 'USER'
+
+
+async def test_editor_without_university_is_rejected(client):
+    """EDITOR без университета отклоняется — это инвариант, а не деталь UI."""
+    await admin_client(client)
+    user = await register_user(client)
+    await admin_client(client)
+
+    response = await client.post(
+        f"/api/v1/admin/role/{user['id']}",
+        json={'role': 'EDITOR', 'university_id': None},
+    )
+    assert response.status_code == 400, response.text
+    assert 'университет' in response.json()['detail'].lower()
 
 
 async def test_ban_and_unban_user(client):

@@ -338,13 +338,17 @@ async def _apply_role(
     """Назначить роль с проверкой инвариантов и сбросом кэша.
 
     Инварианты (``EDITOR`` требует вуз, ``USER`` не привязывается) проверяет
-    слой доступа, существование университета — здесь: ошибка 404 должна
+    слой доступа, существование университета — здесь: ошибка 404 должен
     говорить администратору, что такого вуза в каталоге нет.
 
     Запрет на снятие роли у последнего активного администратора проверяется
-    атомарно в слое данных, а не отдельным предварительным подсчётом: этот путь
-    доступен и через ``/role``, и через ``/demote_admin``, и оба должны вести
-    себя одинаково и не должны гоняться.
+    атомарно в слое данных, а не отдельным предварительным подсчётом: счёт
+    разъезжается с фактическим состоянием при параллельных запросах.
+
+    Единственная точка изменения роли — ``/role``. Отдельные ``/grant_admin`` и
+    ``/demote_admin`` удалены: они меняли бы роль и привязку разными
+    операциями, то есть давали второй путь, на котором инварианты могли бы
+    разойтись с тем, что проверяет ``/role``.
     """
     if university_id and role == users_db.ROLE_UNIVERSITY_REP:
         university = await database.universities.get_university(university_id)
@@ -390,97 +394,18 @@ async def assign_role(
 ):
     """Назначить пользователю роль: ``USER``, ``EDITOR`` или ``ADMIN``.
 
-    Роль и университет меняются одним запросом — это единственный способ
-    назначить представителя, поэтому нельзя случайно получить ``EDITOR``
-    без университета или привязать вуз обычному пользователю.
+    Это единственный способ изменить роль, и роль вместе с университетом
+    меняется одним запросом: так нельзя случайно получить ``EDITOR`` без
+    университета или привязать вуз обычному пользователю.
+
+    Повысить до ``ADMIN`` и понизить можно только здесь — отдельных
+    ``grant_admin``/``demote_admin`` в API нет.
     """
     try:
         return await _apply_role(
             user_id,
             payload.role,
             payload.university_id,
-            r,
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(status_code=500, detail='Internal server error')
-
-
-@admin_page.post(
-    '/grant_admin/{user_id}',
-    response_model=schemas.users.UserResponse,
-    responses={
-        200: {'description': 'Admin role granted'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
-        404: {'description': 'User not found'},
-        409: {'description': 'User is already ADMIN'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def grant_admin(
-    user_id: uuid.UUID,
-    r: aioredis.Redis = Depends(get_redis),
-    current_user: deps.AdminUser = None,
-):
-    """Назначить роль ADMIN (привязка к университету, если была, сохраняется)."""
-    try:
-        to_user = await users_db.find_user_by_id(user_id)
-        if not to_user:
-            raise HTTPException(status_code=404, detail='User not found')
-        if to_user.get('role') == users_db.ROLE_ADMIN:
-            raise HTTPException(status_code=409, detail='User is already ADMIN')
-        return await _apply_role(
-            user_id,
-            users_db.ROLE_ADMIN,
-            to_user.get('university_id'),
-            r,
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(status_code=500, detail='Internal server error')
-
-
-@admin_page.post(
-    '/demote_admin/{user_id}',
-    response_model=schemas.users.UserResponse,
-    responses={
-        200: {'description': 'Admin role removed'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
-        404: {'description': 'User not found'},
-        409: {'description': 'User is not ADMIN, or is the last active admin'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def demote_admin(
-    user_id: uuid.UUID,
-    r: aioredis.Redis = Depends(get_redis),
-    current_user: deps.AdminUser = None,
-):
-    """Снять роль ADMIN.
-
-    Роль, которая остаётся дальше, выбирается по привязке: привязанный к
-    университету пользователь продолжает быть его представителем
-    (``EDITOR``), остальные становятся обычными пользователями (``USER``).
-
-    Последнего активного администратора понизить нельзя (409) — иначе зайти в
-    панель будет некому.
-    """
-    try:
-        to_user = await users_db.find_user_by_id(user_id)
-        if not to_user:
-            raise HTTPException(status_code=404, detail='User not found')
-        if to_user.get('role') != users_db.ROLE_ADMIN:
-            raise HTTPException(status_code=409, detail='User is not ADMIN')
-        return await _apply_role(
-            user_id,
-            users_db.demote_role(to_user),
-            to_user.get('university_id'),
             r,
         )
     except HTTPException:
