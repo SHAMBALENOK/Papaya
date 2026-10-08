@@ -9,6 +9,7 @@
 Важно: до ``confirm`` импорт не пишет в каталог ничего.
 """
 
+import subprocess
 import uuid
 
 from tests.conftest import (
@@ -608,3 +609,142 @@ async def test_skipped_matched_candidate_protects_existing_olympiad(client):
     assert detail.json()['status'] == 'PUBLISHED', (
         'снятый в preview кандидат не должен архивировать олимпиаду'
     )
+
+
+# ------------------------------------------------------- lifecycle: крайние случаи
+
+
+async def test_reject_of_processing_import_is_conflict(client):
+    """Отклонить работающий импорт нельзя: 409, а не отклонение «поверх» обработки.
+
+    Документ принудительно занят под обработку (как это делает старт импорта),
+    затем приходит ``reject``. Он должен получить конфликт: если бы отклонение
+    прошло, обработка дописала бы результат уже после «отклонён».
+    """
+    await admin_client(client)
+    doc = await upload_document(client, 'busy.pdf', b'%PDF-1.4 fake')
+
+    from app.rsosh import persist
+
+    claimed = await persist.claim_import_start(doc['id'])
+    assert claimed['status'] == 'PROCESSING'
+
+    response = await client.post(f"/api/v1/imports/{doc['id']}/reject")
+    assert response.status_code == 409, response.text
+    assert 'ещё обрабатывается' in response.json()['detail'], response.text
+
+    fresh = await client.get(f"/api/v1/imports/{doc['id']}")
+    assert fresh.json()['state'] == 'processing'
+
+
+async def test_pre_pipeline_failure_marks_import_failed(client, monkeypatch):
+    """Ошибка «до конвейера» (нет файла) заканчивается FAILED, а не PROCESSING.
+
+    Раньше ``run_import`` валидировал документ и искал файл до ``try``: любая
+    ошибка на этом этапе оставляла документ в PROCESSING навсегда. Теперь
+    документ, занятый под импорт, обязан уйти в ``failed``.
+    """
+    import app.rsosh.processor as processor_module
+    from app.rsosh.types import RsoshError
+
+    await admin_client(client)
+    doc = await upload_document(client, 'missing.pdf', b'%PDF-1.4 fake')
+
+    def no_file(doc_dict):
+        raise RsoshError('Document file not found: fake_key')
+
+    monkeypatch.setattr(processor_module, 'document_path', no_file)
+
+    started = await client.post('/api/v1/imports/rsosh', json={'doc_id': doc['id']})
+    assert started.status_code == 202, started.text
+    body = started.json()
+    assert body['state'] == 'failed', body
+
+
+async def test_reject_processing_and_failed_does_not_flip_previous_result(client):
+    """После нормального FAILED исправление воркера ничего не перетирает."""
+    from app.rsosh import persist
+
+    await admin_client(client)
+    doc = await upload_document(client, 'plain.pdf', b'%PDF-1.4 fake')
+    await persist.claim_import_start(doc['id'])
+
+    marked = await persist.mark_import_failed_if_stuck(
+        doc['id'], error='Не удалось обработать документ.'
+    )
+    assert marked is True
+
+    # Повторная пометка уже не имеет силы: результат первого прогона остаётся.
+    second = await persist.mark_import_failed_if_stuck(
+        doc['id'], error='Совсем другая ошибка, не трогать.'
+    )
+    assert second is False
+    found = await client.get(f"/api/v1/imports/{doc['id']}")
+    assert found.json()['state'] == 'failed'
+    assert found.json()['error'] == 'Не удалось обработать документ.'
+
+
+async def test_mark_import_failed_if_stuck_ignores_unclaimed_docs(client):
+    """Ошибочный вызов воркера по не занятому документу ничего не меняет."""
+    from app.rsosh import persist
+
+    await admin_client(client)
+    doc = await upload_document(client, 'idle.pdf', b'%PDF-1.4 fake')
+    marked = await persist.mark_import_failed_if_stuck(
+        doc['id'], error='crash'
+    )
+    assert marked is False
+    found = await client.get(f"/api/v1/imports/{doc['id']}")
+    assert found.json()['status'] == 'UPLOADED'
+
+
+async def test_worker_marks_crashed_import_failed(monkeypatch):
+    """Падение подпроцесса воркера (код != 0) помечает документ failed."""
+    from app.rsosh import worker
+
+    calls = []
+    monkeypatch.setattr(
+        worker, '_mark_crashed_import_failed', lambda doc_id: calls.append(doc_id)
+    )
+    monkeypatch.setattr(
+        subprocess,
+        'run',
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], returncode=1),
+    )
+    worker.rsosh_import_task.run('doc-crashed')
+    assert calls == ['doc-crashed']
+
+
+async def test_worker_leaves_successful_run_alone(monkeypatch):
+    """Успешный подпроцесс (код 0) не трогает документ."""
+    from app.rsosh import worker
+
+    calls = []
+    monkeypatch.setattr(
+        worker, '_mark_crashed_import_failed', lambda doc_id: calls.append(doc_id)
+    )
+    monkeypatch.setattr(
+        subprocess,
+        'run',
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], returncode=0),
+    )
+    worker.rsosh_import_task.run('doc-ok')
+    assert calls == []
+
+
+async def test_worker_reenumerates_when_subprocess_missing(monkeypatch):
+    """Незапустившийся воркер — тоже падение: пометка failed + исходная ошибка."""
+    from app.rsosh import worker
+
+    import pytest
+
+    calls = []
+
+    def missing_interpreter(*args, **kwargs):
+        raise OSError('cannot start process')
+
+    monkeypatch.setattr(worker, '_mark_crashed_import_failed', lambda doc_id: calls.append(doc_id))
+    monkeypatch.setattr(subprocess, 'run', missing_interpreter)
+    with pytest.raises(OSError):
+        worker.rsosh_import_task.run('doc-broken')
+    assert calls == ['doc-broken']

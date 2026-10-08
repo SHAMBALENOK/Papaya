@@ -460,9 +460,16 @@ async def reject_confirmed_import(doc_id) -> dict:
             section = states.rsosh_section(document)
             if section.get('state') not in states.REJECTABLE_STATES:
                 # Сюда попадает и «уже применён» (approved): подтвердить и
-                # отклонить один и тот же прогон нельзя.
+                # отклонить один и тот же прогон нельзя. Работающий импорт
+                # (processing) тоже нельзя отклонить: обработка ещё идёт и
+                # её результат перетёр бы отклонение (наоборот тоже).
+                state = section.get('state')
+                if state == 'processing':
+                    raise RsoshConflictError(
+                        'Импорт ещё обрабатывается: дождитесь окончания обработки'
+                    )
                 raise RsoshConflictError(
-                    f'Импорт в состоянии {section.get("state")} уже применён '
+                    f'Импорт в состоянии {state} уже применён '
                     'или не может быть отклонён'
                 )
 
@@ -520,7 +527,7 @@ async def claim_import_start(doc_id) -> dict:
             if already_running:
                 raise RsoshConflictError(
                     'Импорт этого документа уже запущен: дождитесь окончания '
-                    'или отклоните текущий прогон'
+                    'обработки'
                 )
             if document.get('status') not in STARTABLE_DOC_STATUSES:
                 raise RsoshError(
@@ -536,6 +543,56 @@ async def claim_import_start(doc_id) -> dict:
                 document, states.start_section(document)
             )
             return doc_to_dict(doc_row)
+
+
+async def mark_import_failed_if_stuck(doc_id, *, error: str) -> bool:
+    """Перевести импорт в ``FAILED``, если после падения процесса он завис.
+
+    Воркер — отдельный процесс (``python -m app.rsosh.worker_run``). Если он
+    упал до записи результата (исключение вне ``run_import``, kill, OOM),
+    документ остаётся в ``PROCESSING`` навсегда: перезапустить его нельзя
+    (409 «уже запущен»), отклонить тоже (409 «обрабатывается»). Эта функция —
+    страховка родительской Celery-задачи, которая видит ненулевой код
+    завершения подпроцесса.
+
+    Пометка ставится только если документ действительно застрял: если
+    процесс успел записать ``review``/``failed``/``rejected`` (или документ
+    уже перезапустили), ничего не меняется — иначе чужой результат был бы
+    перетёрт на ``failed``. Порядок блокировок как в остальных писателях:
+    advisory → ``SELECT ... FOR UPDATE`` → проверка → запись.
+
+    Возвращает ``True``, если документ переведён в ``failed``.
+    """
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                return False
+
+            document = doc_to_dict(doc_row)
+            if document.get('status') != states.DOCS_STATUS['processing']:
+                logger.info(
+                    'rsosh: import %s already resolved as %s — not touching',
+                    doc_id,
+                    document.get('status'),
+                )
+                return False
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.status = states.DOCS_STATUS['failed']
+            doc_row.meta = states.docs_metadata_with_section(
+                document, states.failed_section(document, error=error)
+            )
+            return True
 
 
 async def _lock_snapshot_scope(session) -> None:

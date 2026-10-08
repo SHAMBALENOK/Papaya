@@ -276,3 +276,65 @@ def test_legacy_status_route_is_not_documented_or_present():
     assert '/bvi/{olympiad_id}/status' not in text
     english = (ROOT / 'English.md').read_text(encoding='utf-8')
     assert 'bvi/<olympiad_id>/status' not in english
+
+
+def _section(md: str, start: str, end: str) -> str:
+    """Текст раздела ``## {start}`` до ``## {end}`` (без первого заголовка)."""
+    begin = md.index(f'## {start}')
+    finish = md.index(f'## {end}', begin)
+    return md[begin:finish]
+
+
+def test_docs_cover_banned_accounts():
+    """Блокировка аккаунта описана в правилах, входе и профиле."""
+    md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
+
+    rules = _section(md, 'Общие правила', 'GET /')
+    assert 'isActive=false' in rules, 'в правилах нет блокировки аккаунта'
+    assert 'Account is blocked' in rules
+
+    login = _section(md, 'POST /auth/login', 'GET /user/{user_id}')
+    assert '403' in login and 'Аккаунт заблокирован' in login, (
+        'в login нет ответа о блокировке'
+    )
+
+    profile = _section(md, 'GET /', 'POST /auth/register')
+    assert 'Account is blocked' in profile
+
+    # В схеме маршруты с токеном обязаны иметь 403 (заблокированный не проходит).
+    for path in ('/api/v1/', '/api/v1/user/{user_id}', '/api/v1/auth/login'):
+        assert '403' in PATHS[path].get('get', PATHS[path].get('post', {})).get(
+            'responses', {}
+        ), f'{path}: нет ответа 403'
+
+
+def test_docs_reject_uses_conflict_not_client_error():
+    """Отклонение прогона не «запуск» и не «400»: 409 с объяснением состояния."""
+    md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
+    reject = _section(md, 'POST /imports/{import_id}/reject', 'GET /admin/users')
+    assert '| 409 |' in reject, 'в reject нет 409'
+    assert 'ещё обрабатывается' in reject, (
+        'документация должна объяснять запрет отклонять работающий импорт'
+    )
+    assert '| 400 |' not in reject, 'reject больше не отдаёт 400'
+
+
+def test_docs_bvi_remove_cover_admin_only_confirmed():
+    """Снятие подтверждённой связи — только администратором, и это описано."""
+    md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
+    section = _section(
+        md,
+        'POST /universities/{university_id}/bvi/remove',
+        'POST /universities/{university_id}/bvi/{olympiad_id}/moderation',
+    )
+    assert '| 409 |' in section
+    assert 'только администратор' in section
+
+
+def test_docs_import_start_cover_conflict_and_auth():
+    """Запуск импорта описывает «уже обрабатывается», токен и права."""
+    md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
+    start = _section(md, 'POST /imports/rsosh', 'GET /imports/{import_id}')
+    assert '| 409 |' in start
+    assert 'уже запущен' in start
+    assert '| 401 |' in start

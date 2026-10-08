@@ -1,6 +1,6 @@
 """Регистрация, вход и выход: жизненный цикл сессии."""
 
-from tests.conftest import register_user
+from tests.conftest import admin_client, login_user, register_user
 
 
 async def test_register_success(client):
@@ -140,3 +140,72 @@ async def test_auth_status(client):
     await register_user(client)
     response = await client.get('/api/v1/auth/')
     assert response.status_code == 403
+
+
+async def _banned_user(client) -> dict:
+    """Зарегистрировать пользователя и заблокировать его администратором."""
+    target = await register_user(client)
+    await admin_client(client)
+    resp = await client.post(f"/api/v1/admin/ban/{target['id']}")
+    assert resp.status_code == 200, resp.text
+    return target
+
+
+async def test_banned_login_is_403(client):
+    """Заблокированный пользователь не может войти даже с верным паролем."""
+    target = await _banned_user(client)
+    client.cookies.clear()
+    response = await client.post(
+        '/api/v1/auth/login',
+        json={'email': target['email'], 'password': 'StrongPass123!'},
+    )
+    assert response.status_code == 403
+    assert response.json()['detail'] == 'Account is blocked'
+    assert 'access_jwt' not in client.cookies
+
+
+async def test_banned_wrong_password_still_401(client):
+    """Неверный пароль заблокированного — 401, а не 403: не раскрываем аккаунт."""
+    target = await _banned_user(client)
+    client.cookies.clear()
+    response = await client.post(
+        '/api/v1/auth/login',
+        json={'email': target['email'], 'password': 'WrongPass123!'},
+    )
+    assert response.status_code == 401
+
+
+async def test_banned_existing_session_stops_working(client):
+    """Валидная JWT-сессия не переживает блокировку: дальше — 403 на всё."""
+    target = await register_user(client)
+    target_cookies = dict(client.cookies)
+    await admin_client(client)
+    resp = await client.post(f"/api/v1/admin/ban/{target['id']}")
+    assert resp.status_code == 200, resp.text
+
+    client.cookies.clear()
+    for key, value in target_cookies.items():
+        client.cookies.set(key, value)
+
+    for path in ('/api/v1/', f"/api/v1/user/{target['id']}"):
+        response = await client.get(path)
+        assert response.status_code == 403, (path, response.text)
+        assert response.json()['detail'] == 'Account is blocked', path
+
+    # Проверка «есть ли сессия» не врёт: заблокированный — «не вошёшь».
+    response = await client.get('/api/v1/auth/')
+    assert response.status_code == 200
+
+
+async def test_unban_restores_access(client):
+    """После разблокировки вход и профиль снова работают."""
+    target = await _banned_user(client)
+    resp = await client.post(f"/api/v1/admin/unban/{target['id']}")
+    assert resp.status_code == 200, resp.text
+
+    client.cookies.clear()
+    await login_user(client, target['email'])
+    profile = await client.get('/api/v1/')
+    assert profile.status_code == 200
+    assert profile.json()['id'] == target['id']
+    assert profile.json()['isActive'] is True

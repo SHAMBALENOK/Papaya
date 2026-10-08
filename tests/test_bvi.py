@@ -5,6 +5,7 @@
 выбирает существующие олимпиады и не создаёт новые.
 """
 
+import asyncio
 import uuid
 
 from tests.conftest import (
@@ -456,3 +457,105 @@ async def test_link_to_unknown_olympiad_is_404(client):
         json={'olympiad_id': str(uuid.uuid4())},
     )
     assert response.status_code == 404
+
+
+# --------------------------------------------------------- гонки модерации
+
+
+async def _pending_link(client, university, olympiad) -> None:
+    """Создать PENDING-заявку от имени представителя вуза."""
+    await university_rep_client(client, university['id'])
+    created = await client.post(
+        f"/api/v1/universities/{university['id']}/bvi",
+        json={'olympiad_id': olympiad['id']},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()['status'] == 'PENDING'
+
+
+async def test_parallel_confirm_only_one_wins(client):
+    """Два параллельных ``confirm`` одной заявки: ровно один применяется.
+
+    Строка связи читается под ``SELECT ... FOR UPDATE``: второй запрос
+    дожидается первого и видит уже подтверждённую связь → 409. Без
+    блокировки оба прочитали бы ``PENDING`` и подтвердили бы «дважды».
+    """
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await _pending_link(client, university, olympiad)
+    await admin_client(client)
+
+    first, second = await asyncio.gather(
+        client.post(
+            f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/moderation",
+            json={'action': 'confirm'},
+        ),
+        client.post(
+            f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/moderation",
+            json={'action': 'confirm'},
+        ),
+    )
+    codes = sorted([first.status_code, second.status_code])
+    assert codes == [200, 409], (first.text, second.text)
+    winner = first if first.status_code == 200 else second
+    assert winner.json()['result'] == 'CONFIRMED'
+
+
+async def test_parallel_remove_and_confirm_are_consistent(client):
+    """Удаление заявки представителем и подтверждение администратором не расходятся.
+
+    Раньше роутер читал связь, проверял статус и удалял её отдельной операцией:
+    подтверждение успевало пройти между чтением и удалением, и подтверждённая
+    связь исчезала по правилу для неподтверждённых заявок. Теперь удаление
+    делает всё в одной транзакции под блокировкой строки, поэтому возможен
+    ровно один исход:
+
+    - удаление первым → подтверждение не находит связь (404);
+    - подтверждение первым → удаление видит ``CONFIRMED`` и отказывает (409).
+    """
+    import httpx
+
+    from app.main import app as fastapi_app
+
+    university = await create_university(client, 'Университет ИТМО')
+    olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    await _pending_link(client, university, olympiad)
+    rep_cookies = dict(client.cookies)
+    await admin_client(client)
+    admin_cookies = dict(client.cookies)
+
+    async def remove():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=fastapi_app),
+            base_url='http://test',
+            cookies=rep_cookies,
+        ) as raw:
+            return await raw.post(
+                f"/api/v1/universities/{university['id']}/bvi/remove",
+                json={'olympiad_id': olympiad['id']},
+            )
+
+    async def confirm():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=fastapi_app),
+            base_url='http://test',
+            cookies=admin_cookies,
+        ) as raw:
+            return await raw.post(
+                f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/moderation",
+                json={'action': 'confirm'},
+            )
+
+    rem, conf = await asyncio.gather(remove(), confirm())
+
+    if rem.status_code == 200:
+        assert conf.status_code == 404, (rem.text, conf.text)
+        page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+        assert page.json()['olympiads'] == []
+        return
+
+    assert rem.status_code == 409, (rem.text, conf.text)
+    assert 'может только администратор' in rem.json()['detail'], rem.text
+    assert conf.status_code == 200, (rem.text, conf.text)
+    page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    assert [item['id'] for item in page.json()['olympiads']] == [olympiad['id']]

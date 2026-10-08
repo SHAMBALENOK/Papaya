@@ -523,6 +523,65 @@ def test_import_review_banners_for_finished_states():
         assert phrase in admin, phrase
 
 
+def test_rejected_import_cannot_be_restarted_from_frontend():
+    """Кнопка «Запустить импорт» не рисуется для отклонённого прогона.
+
+    ``REJECTED`` невозможно перезапустить по правилам бэкенда (повторный
+    ``claim`` возвращает 409/400), поэтому фронтенд не предлагает действие,
+    которое гарантированно упадёт. Кнопка остаётся для всех остальных
+    состояний.
+    """
+    admin = _read('pages', 'admin.js')
+    assert 'runImportAction' in admin, 'обработчик должен оставаться'
+    guard = re.search(
+        r"\$\{state === 'rejected' \? '' : `<button data-act=\"runImport\"",
+        admin,
+    )
+    assert guard, (
+        'кнопка runImport должна быть условной для REJECTED: '
+        "`state === 'rejected' ? '' : '...'`"
+    )
+    # Баннер отклонённого прогона не обещает перезапуск.
+    start = admin.index('Результаты импорта отклонены')
+    rejected_branch = admin[start:admin.index("if (state === 'failed')", start)]
+    assert 'перезапустить нельзя' in rejected_branch
+    assert 'Запустите импорт заново' not in rejected_branch
+
+
+def test_approved_import_stats_come_from_confirm_result():
+    """Счётчики применённого импорта читаются из факта подтверждения.
+
+    Для ``approved`` кандидаты — прошлый план: применённое известно только из
+    ``imp.confirm`` (created/updated/archived/skipped) и read-only. Для
+    ``failed`` блока статистики нет вовсе.
+    """
+    admin = _read('pages', 'admin.js')
+    body = re.search(r'function statsHtml\(\) \{(.*?)\n    \}', admin, re.S)
+    assert body, 'statsHtml не найден'
+
+    segment = body.group(1)
+    assert "state === 'approved'" in segment
+    assert 'cr.created' in segment
+    assert 'cr.updated' in segment
+    assert 'cr.archived' in segment
+    assert 'cr.skipped' in segment
+    assert "state === 'failed'" in segment
+
+
+def test_finished_import_stats_read_plan_from_candidates():
+    """Вне review счётчики «Объединено/Новых» считаются из самих кандидатов.
+
+    У завершённого прогона подтверждений нет (confirmedKeys пуст), поэтому
+    план должен браться из ``action`` кандидатов, а не из пустого выбора.
+    """
+    admin = _read('pages', 'admin.js')
+    body = re.search(r'function stats\(\) \{(.*?)\n    \}', admin, re.S)
+    assert body, 'stats() не найден'
+    assert 'reviewable' in body.group(1)
+    assert "c.action === 'merge'" in body.group(1)
+    assert "c.action === 'create'" in body.group(1)
+
+
 def test_import_review_is_readonly_for_finished_imports():
     """Завершённые импорты показывают результаты без интерактивных кнопок.
 

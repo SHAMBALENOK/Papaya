@@ -1,11 +1,9 @@
 import logging
 import uuid
-from typing import Annotated
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Cookie, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
 from app.caching.main import (
@@ -13,9 +11,8 @@ from app.caching.main import (
     get_cached_user,
     get_redis,
 )
+from app.core import deps
 from app.core.cache_guard import safe_cache_write
-from app.database.database import get_db
-import app.middlewares.tokenz.main as tokenz
 
 
 user_page = APIRouter(
@@ -32,20 +29,25 @@ logger = logging.getLogger('papaya.user')
     responses={
         200: {'description': 'User profile'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Invalid token'},
+        403: {'description': 'Invalid token or account is blocked'},
         404: {'description': 'User not found'},
         500: {'description': 'Internal server error'},
     },
 )
 async def user_details(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
+    current_user: dict = Depends(deps.get_current_user),
 ):
+    """Профиль пользователя по id.
+
+    Авторизация — общий механизм ``get_current_user``: валидный токен и
+    незаблокированный автор. Раньше здесь стоял собственный ``jwt_check``,
+    который не смотрел на ``isActive``: заблокированный продолжал бы читать
+    профили действующей сессией. Читать профиль по id может любой
+    вошедший пользователь — как и раньше.
+    """
     try:
-        await tokenz.jwt_check(access_jwt, refresh_jwt)
         user_obj = await get_cached_user(
             r,
             user_id,
@@ -70,7 +72,12 @@ async def user_details(
     responses={
         200: {'description': 'Profile updated'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Cannot edit other user\'s profile'},
+        403: {
+            'description': (
+                'Cannot edit other user\'s profile, invalid token '
+                'or account is blocked'
+            ),
+        },
         404: {'description': 'User not found'},
         500: {'description': 'Internal server error'},
     },
@@ -78,14 +85,11 @@ async def user_details(
 async def user_edit_details(
     user_id: uuid.UUID,
     user: schemas.users.UserUpdate,
-    db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
+    current_user: dict = Depends(deps.get_current_user),
 ):
     try:
-        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        current_user_id = str(jwt_data.get('sub'))
+        current_user_id = str(current_user.get('id'))
         if str(user_id) != current_user_id:
             raise HTTPException(
                 status_code=403,

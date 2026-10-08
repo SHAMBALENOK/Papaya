@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
+from app.database.users import ROLE_ADMIN
 from app.middlewares.serializers import (
     bvi_link_to_dict,
     olympiad_to_dict,
@@ -295,6 +296,12 @@ async def moderate_bvi_link(
     очереди как новую.
 
     Возвращает ``{'result': 'CONFIRMED'|'removed'}``; ``None``, если связи нет.
+
+    Строка связи читается с блокировкой (``SELECT ... FOR UPDATE``): без неё
+    параллельные ``confirm`` и ``reject`` успевали прочитать ``PENDING``
+    оба, и отклонение удаляло связь уже после того, как подтверждение её
+    записало — связь исчезала из каталога вместе с ``confirmedBy``. Под
+    блокировкой возможен ровно один исход: либо подтверждение, либо удаление.
     """
     if action not in MODERATION_ACTIONS:
         raise ValueError(f'Unsupported BVI moderation action: {action}')
@@ -305,10 +312,12 @@ async def moderate_bvi_link(
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(UniversityBvi).where(
+            select(UniversityBvi)
+            .where(
                 UniversityBvi.olympiad_id == olympiad_uuid,
                 UniversityBvi.university_id == university_uuid,
             )
+            .with_for_update()
         )
         link = result.scalar_one_or_none()
         if not link:
@@ -347,18 +356,61 @@ async def moderate_bvi_link(
         return {'result': 'removed', 'link': None}
 
 
-async def delete_bvi_link(olympiad_id, university_id) -> bool:
-    """Удалить связь целиком (и заявку, и подтверждение)."""
+class BviRemoveError(ValueError):
+    """Связь нельзя удалить запросившему пользователю.
+
+    Как и ``BviRequestError``, несёт ``status_code`` и ``detail``: HTTP-слой
+    подставляет их в ответ, не дублируя правило. Текст объясняет администратору
+    причину, а не называет код ошибки базы.
+    """
+
+    def __init__(self, detail: str, *, status_code: int = 409):
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
+
+
+async def remove_bvi_link(
+    olympiad_id,
+    university_id,
+    *,
+    requested_by_role=None,
+) -> bool:
+    """Удалить связь целиком одной атомарной операцией под блокировкой строки.
+
+    Роль запросившего передаётся сюда, а не проверяется роутером отдельным
+    чтением: раньше роутер читал связь, проверял статус и удалял отдельной
+    операцией, и параллельное подтверждение успевало превратить ``PENDING`` в
+    ``CONFIRMED`` ровно между проверкой и удалением — подтверждённая связь
+    исчезала по правилу, действующему для неподтверждённых заявок.
+
+    Правила, проверяемые уже под блокировкой:
+
+    - связи нет → ``False`` (роутер отвечает 404);
+    - ``CONFIRMED`` удаляет только администратор, иначе ``BviRemoveError``
+      (409): подтверждение администратора — публичный факт, и представитель
+      не снимает его одним запросом;
+    - остальное удаляется → ``True`` (``PENDING``-заявка представителем
+      своего вуза либо любое состояние по решению администратора).
+    """
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(UniversityBvi).where(
-                UniversityBvi.olympiad_id == _as_uuid(olympiad_id),
-                UniversityBvi.university_id == _as_uuid(university_id),
-            )
-        )
-        link = result.scalar_one_or_none()
-        if not link:
-            return False
-        await session.delete(link)
-        await session.commit()
-        return True
+        async with session.begin():
+            link = (
+                await session.execute(
+                    select(UniversityBvi)
+                    .where(
+                        UniversityBvi.olympiad_id == _as_uuid(olympiad_id),
+                        UniversityBvi.university_id == _as_uuid(university_id),
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if link is None:
+                return False
+            if link.status == 'CONFIRMED' and requested_by_role != ROLE_ADMIN:
+                raise BviRemoveError(
+                    'Связь подтверждена администратором: снять подтверждение '
+                    'может только администратор'
+                )
+            await session.delete(link)
+            return True

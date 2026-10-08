@@ -1,22 +1,19 @@
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Annotated
 
-import redis.asyncio as aioredis
-from fastapi import Cookie, Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import validate_config
 from app.core.errors import install_exception_handlers
 
 validate_config()
-from app import database, schemas
-from app.caching.main import get_cached_user, get_redis, redis_lifespan
-from app.database.database import db_lifespan, get_db
-import app.middlewares.tokenz.main as tokenz
+from app import schemas
+from app.caching.main import redis_lifespan
+from app.core import deps
+from app.database.database import db_lifespan
 from app.routers import (
     admin,
     auth,
@@ -55,57 +52,26 @@ app.include_router(admin.admin_page, prefix='/api/v1')
 app.include_router(health.health_page)
 
 
-async def get_user_from_cache_or_db(
-    user_id: str,
-    r: aioredis.Redis,
-    db: AsyncSession,
-) -> dict | None:
-    """Получить актуальную версию пользователя из Redis или БД."""
-    return await get_cached_user(
-        r,
-        user_id,
-        lambda: database.users.find_user_by_id(user_id),
-    )
-
-
 @app.get(
     '/api/v1/',
     response_model=schemas.users.UserResponse,
     responses={
         200: {'description': 'Current user profile'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Invalid token'},
+        403: {'description': 'Invalid token or account is blocked'},
         404: {'description': 'User not found'},
         500: {'description': 'Internal server error'},
     },
 )
-async def main(
-    db: AsyncSession = Depends(get_db),
-    r: aioredis.Redis = Depends(get_redis),
-    access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
-):
-    try:
-        jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        user_dict = await get_user_from_cache_or_db(
-            jwt_data.get('sub'),
-            r,
-            db,
-        )
-        if not user_dict:
-            raise HTTPException(status_code=404, detail='User not found')
-        # Возвращаем словарь, а не JSONResponse: объявленный response_model
-        # отфильтрует ответ по контракту UserResponse. Явный JSONResponse
-        # отдавал бы весь словарь из БД как есть и обходил бы схему.
-        return user_dict
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(
-            status_code=500,
-            detail='Internal server error',
-        )
+async def main(current_user: dict = Depends(deps.get_current_user)):
+    """Профиль текущего пользователя.
+
+    Авторизация через общий механизм ``get_current_user``: единая проверка
+    токена и блокировки аккаунта вместо собственного ``jwt_check``. Словарь
+    возвращается как есть — ``response_model`` отфильтрует его по контракту
+    ``UserResponse``.
+    """
+    return current_user
 
 
 FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), 'frontend'))
