@@ -487,35 +487,114 @@ async def test_merge_unknown_target_is_rejected(client):
     assert confirmed.status_code == 400, confirmed.text
 
 
-async def test_manual_olympiad_is_added_on_confirm(client):
-    """Добавленная вручную олимпиада создаётся вместе с подтверждёнными.
+async def test_duplicate_merge_target_is_rejected(client):
+    """Одна олимпиада каталога не может быть целью объединения двух строк.
 
-    ``manual`` — олимпиады, которых не оказалось в перечне: админ добавил их
-    через плавающую кнопку. Они создаются в той же транзакции, что и остальные
-    подтверждённые кандидаты, и не должны зависеть от длины перечня.
+    ``merge`` — {исходный name_norm: id олимпиады}: две строки, слитые в одну
+    цель, молча перезаписывали бы её последней по очереди. Запрос отклоняется
+    целиком, до записи каталога, чтобы частичных изменений не оставалось.
     """
     await admin_client(client)
-    doc = await _upload(client, 'rsosh_full.xlsx', xlsx_bytes())
+    existing = await create_olympiad(client, 'Единственная цель объединения')
+
+    doc = await _upload(client, 'rsosh_dup_merge.xlsx', xlsx_bytes())
     await _run(client, doc['id'])
 
     preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    assert preview.status_code == 200, preview.text
     candidates = preview.json()['candidates']
-    skipped = [item['name_norm'] for item in candidates]
+    first, second = candidates[0], candidates[1]
+    assert first['name_norm'] != second['name_norm']
 
-    manual = [{
-        'name': 'Межвузовская олимпиада по экономике (резерв)',
-        'description': 'Добавлена администратором вручную',
-    }]
-    confirmed = await _confirm(client, doc['id'], {'skip': skipped, 'manual': manual})
+    before = (await client.get(
+        '/api/v1/olympiads?include_archived=true'
+    )).json()['olympiads']
+
+    confirmed = await _confirm(client, doc['id'], {
+        'merge': {
+            first['name_norm']: existing['id'],
+            second['name_norm']: existing['id'],
+        },
+    })
+    assert confirmed.status_code == 400, confirmed.text
+    assert 'merge target' in confirmed.json()['detail'].lower()
+
+    # Каталог не изменился, прогон остался готовым к повторной попытке.
+    after = (await client.get(
+        '/api/v1/olympiads?include_archived=true'
+    )).json()['olympiads']
+    assert _catalog_fingerprint(after) == _catalog_fingerprint(before)
+    assert await _import_state(doc['id']) == 'review'
+
+
+async def test_skip_excludes_candidate_from_merge_validation(client):
+    """Снятая строка исключается из правок и их проверок целиком.
+
+    ``skip`` — «не трогать»: снятая строка не создаётся, не обновляется и не
+    архивируется. Правки (rename/merge/descriptions), оставшиеся от неё, не
+    проверяются и не применяются — иначе неверная цель объединения в снятой
+    строке запрещала бы подтверждение импорта.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_skip_merge.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    assert preview.status_code == 200, preview.text
+    candidates = preview.json()['candidates']
+    assert len(candidates) >= 2, 'нужно минимум две строки для проверки'
+    skipped, applied = candidates[0], candidates[1]
+
+    confirmed = await _confirm(client, doc['id'], {
+        'skip': [skipped['name_norm']],
+        # У снятой строки цель объединения — несуществующая олимпиада. Раньше
+        # проверка цели выполнялась для любого merge-ключа; теперь снятая
+        # строка исключена целиком, и подтверждение проходит.
+        'merge': {skipped['name_norm']: str(uuid.uuid4())},
+    })
     assert confirmed.status_code == 200, confirmed.text
     result = confirmed.json()['result']
     assert result['errors'] == []
-    assert manual[0]['name'] in result['created'], result['created']
+    # Снятая строка не создана.
+    assert skipped['name'] not in result['created'], result['created']
+    names = {row['name'] for row in (
+        await client.get('/api/v1/olympiads')
+    ).json()['olympiads']}
+    assert skipped['name'] not in names, names
 
-    olympiads = (await client.get('/api/v1/admin/olympiads')).json()['olympiads']
-    row = next(item for item in olympiads if item['name'] == manual[0]['name'])
-    olympiad = (await client.get(f"/api/v1/olympiads/{row['id']}")).json()
-    assert olympiad['description'] == manual[0]['description']
+
+async def test_manual_olympiad_is_added_through_admin_endpoint(client):
+    """Ручное создание олимпиад живёт в админском каталоге, а не в импорте.
+
+    Раньше «добавить вручную» можно было из окна preview импорта РСОШ
+    (``ConfirmRequest.manual``). Так появились два способа записать олимпиаду
+    без перечня, и олимпиада, созданная внутри ручного добавления импорта,
+    отличалась от обычной ручной записи. Теперь ручное создание — один путь:
+    ``POST /api/v1/olympiads/add_olympiad``.
+    """
+    await admin_client(client)
+    created = await client.post('/api/v1/olympiads/add_olympiad', json={
+        'name': 'Олимпиада вручную (вне импорта РСОШ)',
+        'description': 'Создана администратором напрямую',
+    })
+    assert created.status_code == 201, created.text
+    olympiad = created.json()
+    assert olympiad['status'] == 'PUBLISHED'
+
+    # У ручной записи нет документа-источника РСОШ — это не строка перечня.
+    assert olympiad['source_doc_id'] is None
+
+    # Импорт РСОШ не архивирует ручные записи: массовый архив касается только
+    # олимпиад из перечней (source_doc_id задан). Ручная олимпиада не была
+    # «в перечне», поэтому её отсутствие в перечне ничего не значит.
+    doc = await _upload(client, 'rsosh_manual_out.xlsx', xlsx_bytes(row_count=2))
+    await _run(client, doc['id'])
+    confirmed = await _confirm(client, doc['id'])
+    assert confirmed.status_code == 200, confirmed.text
+    assert olympiad['name'] not in confirmed.json()['result']['archived']
+
+    state = await _admin_olympiad(client, olympiad['id'])
+    assert state['status'] == 'PUBLISHED', state['status']
 
 
 # --------------------------- Порядок снимков ---------------------------
@@ -593,6 +672,25 @@ async def test_confirm_request_has_no_way_to_force_outdated(client):
     assert any(row['status'] == 'ARCHIVED' for row in rows), (
         'каталог не должен откатываться даже с неизвестным флагом в теле'
     )
+
+
+async def test_confirm_contract_has_no_manual_olympiad(client):
+    """Ручное добавление олимпиад не входит в контракт подтверждения импорта.
+
+    ``manual`` был вторым способом записать олимпиаду в каталог без перечня.
+    Он удалён: ручное создание — единственный путь
+    ``POST /api/v1/olympiads/add_olympiad``.
+    """
+    schema = await client.get('/openapi.json')
+    body = schema.json()['components']['schemas']
+    for definition in body.values():
+        props = definition.get('properties') or {}
+        if 'archive_missing' in props:
+            assert 'manual' not in props, (
+                'ConfirmRequest не должен содержать manual: ручное создание '
+                'живёт в POST /api/v1/olympiads/add_olympiad'
+            )
+            break
 
 
 async def test_repeating_confirm_of_same_snapshot_is_refused(client):
@@ -719,6 +817,60 @@ async def test_rsosh_absent_archive_is_restored_when_it_appears_again(client):
         'олимпиада из архива «нет в перечне РСОШ» обязана вернуться в актуальные'
     )
     assert restored['archive_reason'] is None, 'причина архива обязана сброситься'
+
+
+async def test_manual_archive_cannot_override_rsosh_absent(client):
+    """Ручная пометка «в архив» не отменяет архив «нет в перечне РСОШ».
+
+    ``archive_olympiad?archived=true`` раньше безусловно ставил ``MANUAL``:
+    олимпиада в архиве РСОШ, повторно помеченная рукой, «застревала» —
+    импорт не мог вернуть её по появлению в перечне, а ручной «вернуть» давал
+    бы 409 по причине RSOSH_ABSENT. Теперь повторная пометка идемпотентна и
+    причину архива не меняет.
+    """
+    await admin_client(client)
+    full = await _upload(client, 'rsosh_abs_bypass.xlsx', xlsx_bytes())
+    await _run(client, full['id'])
+    assert (await _confirm(client, full['id'])).status_code == 200
+
+    preview = await client.get(f"/api/v1/imports/{full['id']}/preview")
+    candidates = preview.json()['candidates']
+    assert candidates, 'ожидались кандидаты'
+
+    # Короткий перечень без части олимпиад: часть уходит в архив RSOSH_ABSENT.
+    short = await _upload(client, 'rsosh_abs_few.xlsx', xlsx_bytes(row_count=2))
+    await _run(client, short['id'])
+    confirmed = await _confirm(client, short['id'])
+    assert confirmed.status_code == 200, confirmed.text
+    archived_names = confirmed.json()['result']['archived']
+    assert archived_names, 'олимпиады должны были уйти в архив RSOSH_ABSENT'
+
+    gone = await _admin_olympiad_by_name(client, archived_names[0])
+    assert gone['status'] == 'ARCHIVED'
+    assert gone['archive_reason'] == 'RSOSH_ABSENT'
+
+    # Повторная пометка archived=true — идемпотентный no-op, причина не
+    # меняется на MANUAL.
+    again = await client.post(
+        f"/api/v1/admin/archive_olympiad/{gone['id']}?archived=true"
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()['status'] == 'ARCHIVED'
+    assert again.json()['archive_reason'] == 'RSOSH_ABSENT', (
+        'ручная пометка не должна превращать RSOSH_ABSENT в MANUAL: '
+        + str(again.json()['archive_reason'])
+    )
+
+    # Вернуть вручную нельзя (409): это делает только импорт РСОШ.
+    refused = await client.post(
+        f"/api/v1/admin/archive_olympiad/{gone['id']}?archived=false"
+    )
+    assert refused.status_code == 409, refused.text
+
+    # Олимпиада осталась в архиве РСОШ, а не в ручном.
+    state = await _admin_olympiad(client, gone['id'])
+    assert state['status'] == 'ARCHIVED'
+    assert state['archive_reason'] == 'RSOSH_ABSENT'
 
 
 async def test_manual_archive_keeps_its_bvi_history(client):
@@ -1067,6 +1219,54 @@ async def test_start_import_again_after_finished_run_is_allowed(client):
     second = await client.post('/api/v1/imports/rsosh', json={'doc_id': doc['id']})
     assert second.status_code == 202, second.text
     assert (await _import_state(doc['id'])) == 'review'
+
+
+async def test_start_import_marks_failed_when_celery_cannot_enqueue(
+    client, monkeypatch
+):
+    """Сбой постановки задачи в celery-режиме не оставляет документ в PROCESSING.
+
+    ``start_import`` переводит документ в ``PROCESSING`` до постановки задачи.
+    Если ``apply_async`` падает (брокер недоступен) в явном режиме
+    ``RSOSH_EXECUTION=celery``, документ обязан вернуться в ``FAILED`` с
+    понятной причиной: иначе он навсегда завис бы в PROCESSING и импорт нельзя
+    было бы ни перезапустить, ни прочитать.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_celery_fail.xlsx', xlsx_bytes())
+
+    from app.rsosh import processor as processor_module
+    from app.rsosh import worker as worker_module
+    from app.rsosh.types import RsoshError
+
+    def failing_apply_async(*args, **kwargs):
+        raise ConnectionError('simulated broker outage')
+
+    monkeypatch.setattr(processor_module, 'RSOSH_EXECUTION', 'celery')
+    monkeypatch.setattr(
+        worker_module.rsosh_import_task, 'apply_async', failing_apply_async
+    )
+
+    with pytest.raises(RsoshError) as raised:
+        await processor_module.start_import(doc['id'])
+    # Отказ понятен и без внутренностей брокера.
+    assert 'брокер' in str(raised.value)
+    assert 'simulated' not in str(raised.value)
+
+    # Документ не завис в PROCESSING: он в FAILED.
+    state = await _import_state(doc['id'])
+    assert state == 'failed', (
+        'после сбоя постановки задачи документ должен уйти в FAILED, '
+        'получено ' + str(state)
+    )
+
+    # FAILED стартует заново: возвращаем реальный режим и перезапускаем.
+    monkeypatch.undo()
+    restarted = await client.post(
+        '/api/v1/imports/rsosh', json={'doc_id': doc['id']}
+    )
+    assert restarted.status_code == 202, restarted.text
+    assert await _import_state(doc['id']) == 'review'
 
 
 async def test_rejected_run_cannot_be_restarted_but_stays_consistent(client):

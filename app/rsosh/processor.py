@@ -201,7 +201,6 @@ async def confirm_import(
     rename: dict | None = None,
     descriptions: dict | None = None,
     merge: dict | None = None,
-    manual: list | None = None,
     archive_missing: bool = True,
 ) -> dict:
     """Применить импорт: создать/обновить олимпиады и архивировать пропавшие.
@@ -227,7 +226,6 @@ async def confirm_import(
         rename=dict(rename or {}),
         descriptions=dict(descriptions or {}),
         merge=dict(merge or {}),
-        manual=list(manual or []),
         archive_missing=archive_missing,
     )
     return {
@@ -278,9 +276,22 @@ async def start_import(doc_id) -> tuple[dict, str]:
                 lambda: rsosh_import_task.apply_async(args=[str(doc_id)])
             )
             return await db_docs.get_doc(doc_id), 'celery'
-        except Exception:  # noqa: BLE001 - нет брокера, делаем импорт здесь
+        except Exception as exc:  # noqa: BLE001 - нет брокера, делаем импорт здесь
             if mode == 'celery':
-                raise
+                # Документ уже переведён в ``PROCESSING``, а задача не
+                # поставлена: без возврата в ``FAILED`` он завис бы в
+                # PROCESSING навсегда, и импорт невозможно было бы ни
+                # перезапустить, ни прочитать. Возвращаем документ в стартовое
+                # состояние с безопасным текстом (без деталей брокера).
+                safe = (
+                    'Не удалось отправить импорт в очередь: брокер задач '
+                    'недоступен. Повторите запуск.'
+                )
+                logger.exception('rsosh: failed to enqueue import %s', doc_id)
+                await _set_state(
+                    doc, states.failed_section(doc, error=safe)
+                )
+                raise RsoshError(safe) from exc
             logger.warning('rsosh: celery unavailable, running import inline')
     return await run_import(doc_id), 'inline'
 

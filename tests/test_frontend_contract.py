@@ -494,3 +494,89 @@ def test_admin_ui_shows_manual_archive_distinction():
     # Формулировки обеих причин должны говорить, что с ними будет.
     assert 'Вернуть её в актуальные можно' in app_js
     assert 'вернётся автоматически' in app_js.lower()
+
+
+def test_preview_import_is_a_side_effect_action():
+    """Вход в preview — переход по маршруту, а не обработка ответа API.
+
+    ``previewImport`` вызывает ``navigate`` (возвращает ``undefined``). Если он
+    не в ``ADMIN_SIDE_EFFECT_ACTIONS``, ``handleAdminClick`` читает ``res.ok`` у
+    ``undefined`` и показывает ложную «Сетевую ошибку» после каждого перехода.
+    """
+    admin = _read('pages', 'admin.js')
+    body = re.search(
+        r'const ADMIN_SIDE_EFFECT_ACTIONS = new Set\(\[(.*?)\]\);',
+        admin,
+        re.S,
+    )
+    assert body, 'ADMIN_SIDE_EFFECT_ACTIONS не найден'
+    assert 'previewImport' in body.group(1), (
+        'previewImport должен быть в ADMIN_SIDE_EFFECT_ACTIONS'
+    )
+
+
+def test_import_review_banners_for_finished_states():
+    """Состояния вне review объясняются баннерами, а не падают ошибкой."""
+    admin = _read('pages', 'admin.js')
+    for phrase in ('Импорт уже применён', 'Результаты импорта отклонены',
+                   'Импорт ещё обрабатывается'):
+        assert phrase in admin, phrase
+
+
+def test_import_review_is_readonly_for_finished_imports():
+    """Завершённые импорты показывают результаты без интерактивных кнопок.
+
+    Кандидаты подтверждённого/отклонённого/упавшего импорта рендерятся
+    отдельной карточкой без ``data-ri``-кнопок: изменять выбор уже нельзя.
+    """
+    admin = _read('pages', 'admin.js')
+    body = re.search(
+        r'function readonlyCandidateCardHtml\(c\) \{(.*?)\n    \}',
+        admin,
+        re.S,
+    )
+    assert body, 'readonlyCandidateCardHtml не найден'
+    assert 'data-ri=' not in body.group(1), (
+        'read-only карточка не должна содержать интерактивных кнопок'
+    )
+    # Интерактивные действия остаются, но только для review-ветки.
+    assert 'data-ri="confirm"' in admin
+    assert 'data-ri="delete"' in admin
+    assert 'data-ri="edit"' in admin
+    assert 'data-ri="unconfirm"' in admin
+
+
+def test_import_review_has_no_manual_olympiad_flow():
+    """Ручное добавление олимпиад убрано из окна импорта РСОШ.
+
+    Остался один способ ручного создания — каталог олимпиад
+    (``add_olympiad``). Из preview импорта «добавить вручную» исключено: это
+    был второй путь записи олимпиады, не имеющей отношения к перечню.
+    """
+    admin = _read('pages', 'admin.js')
+    for needle in ('openManualAdd', 'openManualEdit', 'manualCardHtml',
+                   'confirm-manual', 'unconfirm-manual', 'delete-manual',
+                   'edit-manual', 'data-ri="add"', 'Добавить олимпиаду вручную'):
+        assert needle not in admin, needle
+
+
+def test_modal_close_always_removes_keydown_listener():
+    """Закрытие модалки снимает слушатель клавиатуры из любого пути.
+
+    Раньше ``removeEventListener('keydown', onEsc)`` выполнялся только внутри
+    обработчика Escape: закрытие по крестику или клику по подложке оставляло
+    перехватчик нажатий. Снятие переехало в ``close()``, и оно идемпотентно.
+    """
+    app_js = _read('app.js')
+    start = app_js.index('document.body.appendChild(overlay);')
+    end = app_js.index('return { overlay, close };')
+    tail = app_js[start:end]
+    assert "if (e.key === 'Escape') close();" in tail, (
+        'обработчик Escape только вызывает close, не снимает слушатель сам'
+    )
+    assert "document.removeEventListener('keydown', onEsc)" in tail, (
+        'close() обязана снимать слушатель клавиатуры'
+    )
+    assert 'isConnected' in tail, (
+        'close() должна быть идемпотентной (guard isConnected для повтора)'
+    )
