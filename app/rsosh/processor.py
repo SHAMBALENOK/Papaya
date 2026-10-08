@@ -198,6 +198,10 @@ async def confirm_import(
     doc_id,
     *,
     skip: list[str] | None = None,
+    rename: dict | None = None,
+    descriptions: dict | None = None,
+    merge: dict | None = None,
+    manual: list | None = None,
     archive_missing: bool = True,
 ) -> dict:
     """Применить импорт: создать/обновить олимпиады и архивировать пропавшие.
@@ -220,6 +224,10 @@ async def confirm_import(
     applied = await persist.apply_confirmed_import(
         doc_id=doc_id,
         skip=list(skip or []),
+        rename=dict(rename or {}),
+        descriptions=dict(descriptions or {}),
+        merge=dict(merge or {}),
+        manual=list(manual or []),
         archive_missing=archive_missing,
     )
     return {

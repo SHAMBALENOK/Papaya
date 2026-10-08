@@ -350,6 +350,174 @@ async def test_skipped_candidate_is_not_archived(client):
     )
 
 
+async def test_rename_corrects_name_before_apply(client):
+    """Исправленное в окне результата название записывается в каталог.
+
+    ``rename`` в подтверждении — {исходный name_norm: новое название}: админ
+    чинит распознанное имя, и в каталог попадает исправленное, а не то, что
+    прочитал OCR. Ключ всегда исходный name_norm, он не меняется от правки.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    assert preview.status_code == 200, preview.text
+    candidates = preview.json()['candidates']
+    target = next(item for item in candidates if 'Физтех' in item['name'])
+    fixed = 'Олимпиада школьников «Физтех» (исправлено)'
+
+    confirmed = await _confirm(client, doc['id'], {
+        'rename': {target['name_norm']: fixed},
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    result = confirmed.json()['result']
+    assert result['errors'] == []
+    assert fixed in result['created'], result['created']
+
+    catalog = await client.get('/api/v1/olympiads')
+    names = [row['name'] for row in catalog.json()['olympiads']]
+    assert fixed in names
+    assert target['name'] not in names
+
+
+async def test_rename_unknown_key_is_rejected(client):
+    """Переименование несуществующего кандидата — это 400, а не тихая запись.
+
+    Опечатка в клавише не должна привести к созданию олимпиады со старым
+    распознанным именем под видом исправленного.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    confirmed = await _confirm(client, doc['id'], {
+        'rename': {'не существующий name_norm': 'Новое название'},
+    })
+    assert confirmed.status_code == 400, confirmed.text
+
+
+async def test_explicit_selection_applies_only_confirmed(client):
+    """Подтверждаются только непропущенные кандидаты — остальные не создаются.
+
+    В окне результата админ отмечает олимпиады по одной; ``skip`` — всё, что
+    осталось неподтверждённым. Подтверждение — это объединение «подтверждённые
+    + manual», а не «весь перечень минус снятые»: именно список неподтверж-
+    дённого отвечает за пропуск строк, а не наоборот.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    assert preview.status_code == 200, preview.text
+    candidates = preview.json()['candidates']
+    assert len(candidates) == 5
+    target = next(item for item in candidates if 'Физтех' in item['name'])
+    skipped = [item['name_norm'] for item in candidates if item is not target]
+
+    confirmed = await _confirm(client, doc['id'], {'skip': skipped})
+    assert confirmed.status_code == 200, confirmed.text
+    result = confirmed.json()['result']
+    assert result['errors'] == []
+    assert target['name'] in result['created'], result['created']
+    assert set(confirmed.json()['skipped']) == set(skipped)
+
+    catalog = (await client.get('/api/v1/olympiads')).json()['olympiads']
+    names = {row['name'] for row in catalog}
+    assert target['name'] in names
+    for other in candidates:
+        if other is not target:
+            assert other['name'] not in names
+
+
+async def test_forced_merge_updates_chosen_olympiad(client):
+    """Принудительное объединение обновляет выбранную олимпиаду из перечня.
+
+    ``merge`` — {исходный name_norm: id существующей олимпиады}: админ в окне
+    результата указывает, в какую олимпиаду каталога слить распознанную строку.
+    Целевая олимпиада получает имя, описание и источник из документа, дубликат
+    не создаётся.
+    """
+    await admin_client(client)
+    existing = await create_olympiad(client, 'Олимпиада школьников «Ломоносов» (дубль)')
+
+    doc = await _upload(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    assert preview.status_code == 200, preview.text
+    candidates = preview.json()['candidates']
+    target = next(item for item in candidates if 'Ломоносов' in item['name'])
+    skipped = [item['name_norm'] for item in candidates if item is not target]
+
+    confirmed = await _confirm(client, doc['id'], {
+        'skip': skipped,
+        'merge': {target['name_norm']: existing['id']},
+        'descriptions': {target['name_norm']: 'Правка администратора из окна результата'},
+    })
+    assert confirmed.status_code == 200, confirmed.text
+    result = confirmed.json()['result']
+    assert result['errors'] == []
+    # Целевая олимпиада обновлена данными кандидата, дубликат не создан.
+    assert target['name'] in result['updated'], result['updated']
+
+    olympiad = (await client.get(f"/api/v1/olympiads/{existing['id']}")).json()
+    assert olympiad['name'] == target['name']
+    assert olympiad['description'] == 'Правка администратора из окна результата'
+
+
+async def test_merge_unknown_target_is_rejected(client):
+    """Объединение с несуществующей олимпиадой — это 400, а не тихий create.
+
+    Опечатка или устаревший id цели не должны превратиться в самостоятельную
+    олимпиаду: админ явно выбрал «слить в существующее».
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    candidates = preview.json()['candidates']
+    target = candidates[0]
+
+    confirmed = await _confirm(client, doc['id'], {
+        'merge': {target['name_norm']: str(uuid.uuid4())},
+    })
+    assert confirmed.status_code == 400, confirmed.text
+
+
+async def test_manual_olympiad_is_added_on_confirm(client):
+    """Добавленная вручную олимпиада создаётся вместе с подтверждёнными.
+
+    ``manual`` — олимпиады, которых не оказалось в перечне: админ добавил их
+    через плавающую кнопку. Они создаются в той же транзакции, что и остальные
+    подтверждённые кандидаты, и не должны зависеть от длины перечня.
+    """
+    await admin_client(client)
+    doc = await _upload(client, 'rsosh_full.xlsx', xlsx_bytes())
+    await _run(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    candidates = preview.json()['candidates']
+    skipped = [item['name_norm'] for item in candidates]
+
+    manual = [{
+        'name': 'Межвузовская олимпиада по экономике (резерв)',
+        'description': 'Добавлена администратором вручную',
+    }]
+    confirmed = await _confirm(client, doc['id'], {'skip': skipped, 'manual': manual})
+    assert confirmed.status_code == 200, confirmed.text
+    result = confirmed.json()['result']
+    assert result['errors'] == []
+    assert manual[0]['name'] in result['created'], result['created']
+
+    olympiads = (await client.get('/api/v1/admin/olympiads')).json()['olympiads']
+    row = next(item for item in olympiads if item['name'] == manual[0]['name'])
+    olympiad = (await client.get(f"/api/v1/olympiads/{row['id']}")).json()
+    assert olympiad['description'] == manual[0]['description']
+
+
 # --------------------------- Порядок снимков ---------------------------
 
 

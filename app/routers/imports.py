@@ -14,7 +14,7 @@
 
 import logging
 import uuid
-from typing import List
+from typing import Dict, List
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -36,14 +36,26 @@ class RsoshStartRequest(BaseModel):
     doc_id: uuid.UUID
 
 
-class ConfirmRequest(BaseModel):
-    """Подтверждение импорта с выборочным исключением кандидатов.
+class ManualOlympiad(BaseModel):
+    """Вручную добавленная олимпиада, которой не оказалось в перечне."""
 
-    ``skip`` — список ``name_norm``, которые НЕ нужно создавать/обновлять
-    (администратор снял галочку в окне проверки). Пустое тело — подтвердить
-    всё. ``archive_missing`` — перевести в архив олимпиады, исчезнувшие из
-    перечня РСОШ (по умолчанию включено; при неполном распознавании
-    архивирование автоматически отключается и причина попадает в отчёт).
+    name: str
+    description: str | None = None
+
+
+class ConfirmRequest(BaseModel):
+    """Подтверждение импорта с выборочным применением кандидатов.
+
+    Применяются только подтверждённые кандидаты: всё, чего нет в ``skip``,
+    создаётся/обновляется, ``manual`` добавляется отдельно. ``skip`` — список
+    ``name_norm``, которые НЕ нужно создавать/обновлять (администратор снял их
+    в окне проверки). ``rename``/``descriptions``/``merge`` — правки распознанных
+    кандидатов до записи в каталог: исправленное название, описание и
+    принудительное объединение с существующей олимпиадой (её данные обновляются
+    из документа) соответственно. Ключи этих словарей — исходные ``name_norm``.
+    ``archive_missing`` — перевести в архив олимпиады, исчезнувшие из перечня
+    РСОШ (по умолчанию включено; при неполном распознавании архивирование
+    автоматически отключается и причина попадает в отчёт).
 
     Способа «применить устаревший перечень» здесь нет намеренно: подтверждение
     документа, загруженного раньше уже подтверждённого, вернуло бы каталог к
@@ -52,6 +64,16 @@ class ConfirmRequest(BaseModel):
 
     skip: List[str] = Field(default_factory=list)
     archive_missing: bool = True
+    # {исходный name_norm: исправленное название} — правка распознанного имени
+    # до записи в каталог (см. confirm в persist).
+    rename: Dict[str, str] = Field(default_factory=dict)
+    # {исходный name_norm: описание}.
+    descriptions: Dict[str, str] = Field(default_factory=dict)
+    # {исходный name_norm: id существующей олимпиады} — принудительное
+    # объединение с олимпиадой из каталога.
+    merge: Dict[str, str] = Field(default_factory=dict)
+    # Олимпиады, добавленные администратором вручную (не найденные в перечне).
+    manual: List[ManualOlympiad] = Field(default_factory=list)
 
 
 class ImportListItem(BaseModel):
@@ -286,6 +308,16 @@ async def confirm(
         result = await processor.confirm_import(
             import_id,
             skip=chosen.skip,
+            rename=chosen.rename,
+            descriptions=chosen.descriptions,
+            merge=chosen.merge,
+            manual=[
+                {
+                    'name': item.name,
+                    'description': item.description,
+                }
+                for item in chosen.manual
+            ],
             archive_missing=chosen.archive_missing,
         )
         doc = result['document']

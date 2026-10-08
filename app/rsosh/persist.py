@@ -170,6 +170,10 @@ async def apply_confirmed_import(
     *,
     doc_id,
     skip: list[str] | None = None,
+    rename: dict | None = None,
+    descriptions: dict | None = None,
+    merge: dict | None = None,
+    manual: list | None = None,
     archive_missing: bool = True,
 ) -> dict:
     """Применить подтверждённый перечень целиком, в одной транзакции.
@@ -195,6 +199,18 @@ async def apply_confirmed_import(
     старым перечнем, который сочтётся самым свежим по состоянию документов.
 
     Возвращает ``{'document': dict, 'result': dict, 'skipped': [name_norm]}``.
+
+    ``skip`` — исходные ``name_norm`` кандидатов, которые не нужно
+    создавать/обновлять (администратор снял их в preview); ``rename`` — ``{исходный
+    name_norm: исправленное название}`` для правки распознанного имени до записи;
+    ``descriptions`` — ``{исходный name_norm: описание}``; ``merge`` —
+    ``{исходный name_norm: id существующей олимпиады}`` для принудительного
+    объединения с системной олимпиадой (её данные обновляются из документа);
+    ``manual`` — список ``{'name': …, 'description': …}`` добавленных вручную
+    олимпиад, которых не оказалось в перечне. Ключи ``skip``/``rename``/
+    ``descriptions``/``merge`` — всегда исходные ``name_norm`` кандидата, они не
+    меняются от правок соседей. Подтверждение применяет только объединение
+    «подтверждённые + manual»; всё снятое защищается от архива.
     """
     skip_list = [str(item) for item in (skip or [])]
     doc_uuid = _as_uuid(doc_id)
@@ -242,25 +258,146 @@ async def apply_confirmed_import(
                 Candidate.from_dict(item)
                 for item in (section.get('candidates') or [])
             ]
+            # Поправки администратора из preview. ``skip`` — исходные name_norm,
+            # которые не нужно создавать/обновлять; ``rename`` — исходный
+            # name_norm → исправленное название (админ чинит распознанное имя до
+            # записи в каталог). Оба ключа всегда исходные name_norm кандидата:
+            # они не меняются от переименования соседа, поэтому проверяются по
+            # ним же.
+            original_names = {item.name_norm for item in candidates}
+            # Ключ skip — исходный name_norm кандидата, а не результат
+            # переименования: фиксация решения админа до применения правок.
+            original_key_of = {id(item): item.name_norm for item in candidates}
+            rename_map = {
+                str(key): str(value).strip()
+                for key, value in (rename or {}).items()
+            }
+            rename_map = {
+                key: value for key, value in rename_map.items()
+                if value and value != key
+            }
+            descriptions_map = {
+                str(key): (str(value).strip() or None)
+                for key, value in (descriptions or {}).items()
+            }
+            merge_map = {
+                str(key): str(value).strip()
+                for key, value in (merge or {}).items()
+            }
+            merge_map = {
+                key: value for key, value in merge_map.items() if value
+            }
+            edits_keys = (
+                set(rename_map) | set(descriptions_map) | set(merge_map)
+            )
+            unknown_edits = edits_keys - original_names
+            if unknown_edits:
+                raise RsoshError(
+                    'Unknown candidates in edits: '
+                    + ', '.join(sorted(unknown_edits))
+                )
+            for item in candidates:
+                original_key = original_key_of[id(item)]
+                new_name = rename_map.get(original_key)
+                if new_name:
+                    item.name = new_name
+                    item.name_norm = normalize_name(new_name)
+                if original_key in descriptions_map:
+                    item.description = descriptions_map[original_key]
+                if original_key in merge_map:
+                    item.action = 'merge'
+                    item.matched_olympiad_id = merge_map[original_key]
+                    # Принудительное слияние, выбранное администратором в окне
+                    # результата: в отличие от автоматического сопоставления,
+                    # оно обновляет существующую олимпиаду данными перечня
+                    # (имя, описание), а не оставляет каноническое имя.
+                    item.forced_merge = True
+
+            if merge_map:
+                target_ids: set = set()
+                for target in merge_map.values():
+                    try:
+                        target_ids.add(_as_uuid(target))
+                    except Exception as exc:
+                        raise RsoshError(f'Invalid merge target: {target}') from exc
+                rows = await session.execute(
+                    select(Olympiads.id).where(
+                        Olympiads.id.in_(target_ids)
+                    )
+                )
+                # Сравниваем по текстовому виду: id из БД приходит объектом драйвера
+                # (asyncpg UUID), а не ``uuid.UUID``, и разность множеств по нему
+                # не сработала бы.
+                known_ids = {str(row[0]) for row in rows}
+                missing = sorted(
+                    value for value in merge_map.values()
+                    if str(_as_uuid(value)) not in known_ids
+                )
+                if missing:
+                    raise RsoshError(
+                        'Unknown merge target: ' + ', '.join(missing)
+                    )
+
+            # Две строки не могут остаться под одним ключом: иначе одна
+            # олимпиада молча перезапишет другую.
+            norms = [item.name_norm for item in candidates]
+            duplicates = {norm for norm in norms if norms.count(norm) > 1}
+            if duplicates:
+                raise RsoshError(
+                    'Rename collision: ' + ', '.join(sorted(duplicates))
+                )
+
             skip_set = set(skip_list)
-            unknown = skip_set - {item.name_norm for item in candidates}
+            unknown = skip_set - original_names
             if unknown:
                 raise RsoshError(
                     'Unknown candidates in skip: ' + ', '.join(sorted(unknown))
                 )
 
             selected = [
-                item for item in candidates if item.name_norm not in skip_set
+                item
+                for item in candidates
+                if original_key_of[id(item)] not in skip_set
             ]
             # Кандидаты, снятые администратором в preview, защищаются от
             # автоматического архивирования: «не подтвердил» не значит «нет в
             # перечне РСОШ» (чаще всего снятие — это реакция на ошибку
-            # распознавания).
+            # распознавания). Ключ — исходный name_norm: skip задан по нему, и
+            # переименованный кандидат снятым не станет.
             protected_ids = {
                 item.matched_olympiad_id
                 for item in candidates
-                if item.name_norm in skip_set and item.matched_olympiad_id
+                if original_key_of[id(item)] in skip_set
+                and item.matched_olympiad_id
             }
+
+            manual_candidates = [
+                Candidate(
+                    name=str(item['name']).strip(),
+                    name_norm='',
+                    description=(
+                        str(item['description']).strip() or None
+                        if item.get('description')
+                        else None
+                    ),
+                    action='create',
+                )
+                for item in (manual or [])
+                if str(item['name']).strip()
+            ]
+            for item in manual_candidates:
+                item.name_norm = normalize_name(item.name)
+            selected += manual_candidates
+            applied_norms = [item.name_norm for item in selected]
+            applied_dups = {
+                norm
+                for norm in applied_norms
+                if norm and applied_norms.count(norm) > 1
+            }
+            if applied_dups:
+                raise RsoshError(
+                    'Duplicate olympiad: ' + ', '.join(sorted(applied_dups))
+                )
 
             result = await _apply_candidates(
                 session,
@@ -573,7 +710,14 @@ async def _upsert(session, candidate: Candidate, doc_id):
         await session.flush()
         return olympiad_to_dict(olympiad)
 
+    forced = getattr(candidate, 'forced_merge', False)
     changed = False
+    if forced:
+        # Принудительное слияние: имя и описание олимпиады обновляются данными
+        # перечня, а не сохраняют канонические значения каталога.
+        olympiad.name = candidate.name
+        olympiad.name_norm = candidate.name_norm or normalize_name(candidate.name)
+        changed = True
     if olympiad.archive_reason == ARCHIVE_MANUAL:
         # Ручной архив — это решение администратора, а не вывод разбора РСОШ.
         # Перечень РСОШ не отменяет его: иначе олимпиада, которую исключили
@@ -593,7 +737,7 @@ async def _upsert(session, candidate: Candidate, doc_id):
         olympiad.status = 'PUBLISHED'
         olympiad.archive_reason = None
         changed = True
-    if candidate.description and not olympiad.description:
+    if candidate.description and (not olympiad.description or forced):
         olympiad.description = candidate.description
         changed = True
     if olympiad.source_doc_id != doc_id:
