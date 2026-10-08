@@ -159,12 +159,14 @@ function selectField({ id, label, name, options, value = '' }) {
 
 /* ---------- Модальные окна ---------- */
 
-function openModal(title, bodyHtml, { wide = false } = {}) {
+function openModal(title, bodyHtml, { wide = false, size = '' } = {}) {
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-50 bg-ink/40 flex items-center justify-center p-4 md:p-8';
+    const widths = { lg: 'max-w-4xl', xl: 'max-w-6xl' };
+    const widthClass = wide ? 'max-w-3xl' : (widths[size] || 'max-w-lg');
     overlay.innerHTML = `
     <div role="dialog" aria-modal="true" aria-label="${escAttr(title)}"
-         class="bg-white shadow-elev-3 w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} max-h-[85vh] overflow-y-auto modal-scroll">
+         class="bg-white shadow-elev-3 w-full ${widthClass} max-h-[85vh] overflow-y-auto modal-scroll">
         <div class="p-8 md:p-12">
             <div class="flex items-start justify-between gap-6 mb-10">
                 <h2 class="text-2xl font-bold tracking-tight text-ink">${escHtml(title)}</h2>

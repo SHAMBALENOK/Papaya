@@ -162,6 +162,7 @@ def mentions_olympiad(value: str) -> bool:
 def normalize_olympiad_name(value: str) -> str:
     """Название олимпиады для каталога: человекочитаемое и устойчивое к OCR."""
     text = maybe_reverse(value)
+    text = text.replace('|', ' ')
     text = _SPACES.sub(' ', text)
     return text.strip().strip('«»"“”„')
 
