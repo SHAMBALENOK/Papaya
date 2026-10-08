@@ -451,6 +451,12 @@ async def archive_olympiad(
             raise HTTPException(status_code=404, detail='Olympiad not found')
 
         if archived:
+            # Ручной архив уже стоит (или причина другая) — повторный запрос
+            # ничего не меняет. Нельзя перезаписывать ``RSOSH_ABSENT`` на
+            # ``MANUAL``: архив «нет в перечне РСОШ» снимается только импортом,
+            # и ручная пометка забрала бы у него эту возможность.
+            if olympiad.get('status') == 'ARCHIVED':
+                return olympiad
             updated = await database.olympiads.edit_olympiad(
                 olympiad_id,
                 {'status': 'ARCHIVED', 'archive_reason': ARCHIVE_MANUAL},

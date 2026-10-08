@@ -88,7 +88,7 @@ async function loadAdminTab(tab) {
 /* Действия, которые открывают модалку или сами показывают результат. */
 const ADMIN_SIDE_EFFECT_ACTIONS = new Set([
     'newUniversity', 'editUniversity', 'newOlympiad', 'editOlympiad',
-    'newImport', 'runImport',
+    'newImport', 'runImport', 'previewImport',
 ]);
 
 async function handleAdminClick(e) {
@@ -593,8 +593,9 @@ async function renderImportReview(importId) {
 
     let data = null;
     const olympiadMap = new Map();
+    let preview = null;
     try {
-        const preview = await api.importPreview(importId);
+        preview = await api.importPreview(importId);
         if (!preview.ok) throw new Error(errorText(preview));
         data = preview.data;
         const list = await api.adminOlympiads();
@@ -602,6 +603,20 @@ async function renderImportReview(importId) {
             for (const o of (list.data.olympiads || [])) olympiadMap.set(o.id, o);
         }
     } catch (err) {
+        if (preview && preview.status === 409) {
+            // Preview для документа в обработке отдаёт 409 — это не ошибка, а
+            // состояние «ещё нет результатов». Показываем баннер вместо падения.
+            page.innerHTML = `
+            <div class="max-w-content mx-auto pt-4 pb-12">
+                <a href="#/admin/imports" class="text-sm text-ink-soft hover:text-ink">← К списку импортов</a>
+                <div class="rounded bg-sand/50 px-6 py-4 mt-6 mb-8 text-sm leading-relaxed" role="status">
+                    <p class="font-semibold text-ink mb-1">Импорт ещё обрабатывается</p>
+                    <p class="text-ink-soft">Результаты появятся, когда обработка завершится. Обновите страницу позже.</p>
+                </div>
+                <a href="#/admin/imports" class="${UI.btn} ${UI.btnGhost}">К списку импортов</a>
+            </div>`;
+            return;
+        }
         page.innerHTML = `
         <div class="max-w-content mx-auto pt-4 pb-12">
             ${alertHtml(String((err && err.message) || err), 'error')}
@@ -624,12 +639,11 @@ async function renderImportReview(importId) {
     const ordinal = new Map(docOrder.map((c, i) => [c.name_norm, i + 1]));
 
     // Сценарий администратора: что подтверждено, что удалено, какие правки
-    // названий/описаний/объединений сделаны, что добавлено вручную.
+    // названий/описаний/объединений сделаны.
     const excluded = new Set();      // удалённые строки: не применяются и не архивируются
     const confirmedKeys = new Set(); // подтверждённые кандидаты (по исходному name_norm)
     const edits = {};                // name_norm -> {name, description}
     const merges = {};               // name_norm -> id олимпиады для объединения
-    let manual = [];                 // {id, name, description, confirmed}
     let sortMode = 'order';          // order | confidence
     let query = '';
 
@@ -641,13 +655,11 @@ async function renderImportReview(importId) {
     function candidateById(key) { return candidates.find(c => c.name_norm === key) || null; }
 
     function confirmedCount() {
-        return [...confirmedKeys].filter(key => !excluded.has(key)).length
-            + manual.filter(m => m.confirmed).length;
+        return [...confirmedKeys].filter(key => !excluded.has(key)).length;
     }
 
     function unconfirmedTotal() {
-        return candidates.filter(c => !confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).length
-            + manual.filter(m => !m.confirmed).length;
+        return candidates.filter(c => !confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).length;
     }
 
     function stats() {
@@ -659,7 +671,6 @@ async function renderImportReview(importId) {
             if (merges[c.name_norm] || (c.action === 'merge' && c.matched_olympiad_id)) merged++;
             else fresh++;
         }
-        fresh += manual.filter(m => m.confirmed).length;
         return { total: candidates.length, merged, fresh, lowConf };
     }
 
@@ -669,11 +680,6 @@ async function renderImportReview(importId) {
         return (c.name || '').toLowerCase().includes(q)
             || (c.description || '').toLowerCase().includes(q)
             || (c.issues || []).some(i => i.toLowerCase().includes(q));
-    }
-    function manualMatches(m) {
-        if (!query) return true;
-        return (m.name || '').toLowerCase().includes(query.toLowerCase())
-            || (m.description || '').toLowerCase().includes(query.toLowerCase());
     }
 
     function sortCandidates(list) {
@@ -740,26 +746,26 @@ async function renderImportReview(importId) {
             </div>`;
     }
 
-    function manualCardHtml(m, confirmed) {
-        const confirmedBadge = confirmed
-            ? `<span class="${UI.badge} ${UI.badgePending}">Подтверждена</span>` : '';
+    function readonlyCandidateCardHtml(c) {
+        const actionBadge = c.action === 'create'
+            ? `<span class="${UI.badge} ${UI.badgeSuccess}">Новая</span>`
+            : `<span class="${UI.badge} ${UI.badgeNeutral}">Объединение</span>`;
+        const reviewBadge = reviewed(c)
+            ? `<span class="${UI.badge} ${UI.badgeDanger}">Малодостоверная</span>`
+            : `<span class="${UI.badge} ${UI.badgeSuccess}">Распознана</span>`;
+        const page = c.page ? `стр. ${c.page}` : '—';
+        const ord = ordinal.get(c.name_norm);
         return `
-            <div class="${UI.card} px-6 py-5 ${confirmed ? 'border-2 border-sage' : ''}">
+            <div class="${UI.card} px-6 py-5">
                 <div class="flex flex-wrap items-start justify-between gap-4">
                     <div class="flex-1 min-w-0">
                         <div class="flex flex-wrap items-center gap-2.5">
-                            <span class="${UI.badge} ${UI.badgePending}">Добавлена вручную</span>${confirmedBadge}
-                            <span class="text-xs text-ink-faint">— · № —</span>
+                            ${actionBadge}${reviewBadge}
+                            <span class="text-xs text-ink-faint">${escHtml(page)} · № ${ord || '—'}</span>
                         </div>
-                        <p class="mt-2.5 font-semibold text-ink leading-snug break-words">${escHtml(m.name)}</p>
-                        ${m.description ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(String(m.description).slice(0, 180))}</p>` : ''}
-                    </div>
-                    <div class="flex flex-wrap gap-2 shrink-0">
-                        ${confirmed
-                            ? `<button type="button" data-ri="unconfirm-manual" data-manual="${escAttr(m.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Отменить подтверждение</button>`
-                            : `<button type="button" data-ri="edit-manual" data-manual="${escAttr(m.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Изменить</button>
-                               <button type="button" data-ri="delete-manual" data-manual="${escAttr(m.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Удалить</button>
-                               <button type="button" data-ri="confirm-manual" data-manual="${escAttr(m.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить</button>`}
+                        <p class="mt-2.5 font-semibold text-ink leading-snug break-words">${escHtml(c.name || '')}</p>
+                        ${mergedNoteFor(c)}
+                        ${issuesHtml(c)}
                     </div>
                 </div>
             </div>`;
@@ -829,72 +835,6 @@ async function renderImportReview(importId) {
         });
     }
 
-    function extractManual(form) {
-        const fd = new FormData(form);
-        return {
-            name: (fd.get('name') || '').trim(),
-            description: (fd.get('description') || '').trim(),
-        };
-    }
-
-    function openManualAdd() {
-        const body = `
-        <div id="modal-alert"></div>
-        <form id="ri-manual-form">
-            ${inputField({ id: 'rm-name', name: 'name', label: 'Название олимпиады', required: true, placeholder: 'Олимпиада, которой нет в перечне' })}
-            ${textareaField({ id: 'rm-desc', name: 'description', label: 'Описание' })}
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
-                <button type="button" data-ri-close class="${UI.btn} ${UI.btnGhost}">Отменить</button>
-                <button type="button" data-ri-save class="${UI.btn} ${UI.btnSecondary}">Сохранить</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Подтвердить</button>
-            </div>
-        </form>`;
-        const { overlay, close } = openModal('Новая олимпиада (вручную)', body, { size: 'lg' });
-        const commit = confirmed => {
-            const v = extractManual(overlay.querySelector('#ri-manual-form'));
-            if (!v.name) return;
-            manual.push({
-                id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                name: v.name,
-                description: v.description,
-                confirmed,
-            });
-            close();
-            refresh();
-        };
-        overlay.querySelector('[data-ri-close]').addEventListener('click', close);
-        overlay.querySelector('[data-ri-save]').addEventListener('click', () => commit(false));
-        overlay.querySelector('#ri-manual-form').addEventListener('submit', e => {
-            e.preventDefault();
-            commit(true);
-        });
-    }
-
-    function openManualEdit(manualId) {
-        const m = manual.find(x => x.id === manualId);
-        if (!m) return;
-        const body = `
-        <div id="modal-alert"></div>
-        <form id="ri-manual-form">
-            ${inputField({ id: 'rm-name', name: 'name', label: 'Название олимпиады', required: true, value: m.name })}
-            ${textareaField({ id: 'rm-desc', name: 'description', label: 'Описание', value: m.description || '' })}
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
-                <button type="button" data-ri-close class="${UI.btn} ${UI.btnGhost}">Отменить</button>
-                <button type="button" data-ri-save class="${UI.btn} ${UI.btnSecondary}">Сохранить</button>
-            </div>
-        </form>`;
-        const { overlay, close } = openModal('Редактирование олимпиады', body, { size: 'lg' });
-        overlay.querySelector('[data-ri-close]').addEventListener('click', close);
-        overlay.querySelector('[data-ri-save]').addEventListener('click', () => {
-            const v = extractManual(overlay.querySelector('#ri-manual-form'));
-            if (!v.name) return;
-            m.name = v.name;
-            m.description = v.description;
-            close();
-            refresh();
-        });
-    }
-
     function stateBannerHtml() {
         if (reviewable) return '';
         if (state === 'approved') {
@@ -903,7 +843,7 @@ async function renderImportReview(importId) {
             const updated = (cr.updated || []).length;
             const archived = (cr.archived || []).length;
             return `<div class="rounded bg-sage/30 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
-                <p class="font-semibold text-ink mb-1">Перечень уже применён</p>
+                <p class="font-semibold text-ink mb-1">Импорт уже применён</p>
                 <p class="text-ink-soft">Создано: ${created}, обновлено: ${updated}, в архив: ${archived}.
                    Изменить исполнение можно только через загрузку актуального перечня.</p>
             </div>`;
@@ -914,9 +854,15 @@ async function renderImportReview(importId) {
                 <p class="text-ink-soft">Каталог не изменён. Запустите импорт заново, чтобы вернуть результаты на проверку.</p>
             </div>`;
         }
+        if (state === 'failed') {
+            return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
+                <p class="font-semibold text-ink mb-1">Импорт завершился ошибкой</p>
+                <p class="text-ink-soft">Каталог не изменён. Запустите импорт заново — обработка начинается с начала.</p>
+            </div>`;
+        }
         return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
-            <p class="font-semibold text-ink mb-1">Ожидание обработки</p>
-            <p class="text-ink-soft">Результаты ещё не готовы к проверке: подтвердить или отклонить их пока нельзя.</p>
+            <p class="font-semibold text-ink mb-1">Импорт ещё обрабатывается</p>
+            <p class="text-ink-soft">Результаты появятся, когда обработка завершится. Обновите страницу позже.</p>
         </div>`;
     }
 
@@ -953,10 +899,8 @@ async function renderImportReview(importId) {
 
     function searchCountsHtml() {
         if (!query) return '';
-        const un = candidates.filter(c => !confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).filter(matchesQuery).length
-            + manual.filter(m => !m.confirmed && manualMatches(m)).length;
-        const co = candidates.filter(c => confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).filter(matchesQuery).length
-            + manual.filter(m => m.confirmed && manualMatches(m)).length;
+        const un = candidates.filter(c => !confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).filter(matchesQuery).length;
+        const co = candidates.filter(c => confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).filter(matchesQuery).length;
         return `<p class="text-sm text-ink-faint mt-3">Совпадений: неподтверждённые — <span class="font-semibold text-ink">${un}</span>, подтверждённые — <span class="font-semibold text-ink">${co}</span></p>`;
     }
 
@@ -982,11 +926,9 @@ async function renderImportReview(importId) {
 
     function unconfirmedBodyHtml() {
         const cands = candidates.filter(c => !confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).filter(matchesQuery);
-        const man = manual.filter(m => !m.confirmed && manualMatches(m));
         const cards = sortCandidates(cands)
-            .map(c => candidateCardHtml(c, false))
-            .concat(man.map(m => manualCardHtml(m, false)));
-        const count = cands.length + man.length;
+            .map(c => candidateCardHtml(c, false));
+        const count = cands.length;
         return `
             <div class="flex items-center justify-between gap-3">
                 <p class="${UI.eyebrow} mb-0">Неподтверждённые (${count})</p>
@@ -1001,11 +943,9 @@ async function renderImportReview(importId) {
 
     function confirmedBodyHtml() {
         const cands = candidates.filter(c => confirmedKeys.has(c.name_norm) && !excluded.has(c.name_norm)).filter(matchesQuery);
-        const man = manual.filter(m => m.confirmed && manualMatches(m));
         const cards = sortCandidates(cands)
-            .map(c => candidateCardHtml(c, true))
-            .concat(man.map(m => manualCardHtml(m, true)));
-        const count = cands.length + man.length;
+            .map(c => candidateCardHtml(c, true));
+        const count = cands.length;
         return `
         <div class="rounded bg-sage/25 border border-sage px-6 py-6">
             <div class="flex items-center justify-between gap-3">
@@ -1040,7 +980,7 @@ async function renderImportReview(importId) {
         </div>
         ${stateBannerHtml()}
         ${imp.error ? alertHtml(imp.error, 'error') : ''}
-        ${reviewable ? `
+    ${reviewable ? `
         <p class="text-sm text-ink-faint mb-8 leading-relaxed">
             В каталог ничего не записано, пока вы не нажмёте «Подтвердить импорт». Удалённая
             строка не создаётся и не архивируется; подтверждённая олимпиада создаётся
@@ -1051,16 +991,13 @@ async function renderImportReview(importId) {
         ${statsHtml()}
         ${searchHtml()}
         <div id="ri-unconfirmed">${unconfirmedBodyHtml()}</div>
-        <div id="ri-confirmed" class="mt-10">${confirmedBodyHtml()}</div>
-        <button type="button" data-ri="add"
-                class="fixed bottom-8 right-8 z-40 w-14 h-14 rounded-full bg-ink text-white shadow-elev-3 hover:bg-ink-deep transition flex items-center justify-center"
-                aria-label="Добавить олимпиаду вручную" title="Добавить олимпиаду вручную">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-        </button>` : `
+        <div id="ri-confirmed" class="mt-10">${confirmedBodyHtml()}</div>` : `
         ${importNoticesHtml(warnings)}
         ${statsHtml()}
-        <div id="ri-unconfirmed">${unconfirmedBodyHtml()}</div>
-        <div id="ri-confirmed" class="mt-10">${confirmedBodyHtml()}</div>`}`;
+        <p class="${UI.eyebrow} mb-2 mt-10">Результаты импорта</p>
+        ${candidates.length
+            ? `<div class="space-y-3 mt-4">${candidates.map(c => readonlyCandidateCardHtml(c)).join('')}</div>`
+            : `<div class="mt-4">${emptyHtml('Результатов нет', 'Для этого прогона кандидаты не сохранены.')}</div>`}`}`;
     }
 
     function refresh() {
@@ -1080,7 +1017,6 @@ async function renderImportReview(importId) {
         for (const c of candidates) {
             if (!excluded.has(c.name_norm)) confirmedKeys.add(c.name_norm);
         }
-        for (const m of manual) m.confirmed = true;
     }
 
     function buildPayload() {
@@ -1106,9 +1042,6 @@ async function renderImportReview(importId) {
             rename,
             descriptions,
             merge,
-            manual: manual
-                .filter(m => m.confirmed)
-                .map(m => ({ name: (m.name || '').trim(), description: (m.description || '').trim() || null })),
             archive_missing: true,
         };
     }
@@ -1159,17 +1092,11 @@ async function renderImportReview(importId) {
         if (!btn || btn.disabled) return;
         const act = btn.dataset.ri;
         const key = btn.dataset.key;
-        const manualId = btn.dataset.manual;
 
         if (act === 'confirm') { confirmedKeys.add(key); excluded.delete(key); refresh(); }
         else if (act === 'unconfirm') { confirmedKeys.delete(key); refresh(); }
         else if (act === 'delete') { confirmedKeys.delete(key); excluded.add(key); refresh(); }
         else if (act === 'edit') { openCandidateEdit(key); }
-        else if (act === 'confirm-manual') { const m = manual.find(x => x.id === manualId); if (m) m.confirmed = true; refresh(); }
-        else if (act === 'unconfirm-manual') { const m = manual.find(x => x.id === manualId); if (m) m.confirmed = false; refresh(); }
-        else if (act === 'delete-manual') { manual = manual.filter(x => x.id !== manualId); refresh(); }
-        else if (act === 'edit-manual') { openManualEdit(manualId); }
-        else if (act === 'add') { openManualAdd(); }
         else if (act === 'confirmAll') { confirmAll(); refresh(); }
         else if (act === 'sort-order') { sortMode = 'order'; refresh(); }
         else if (act === 'sort-confidence') { sortMode = 'confidence'; refresh(); }

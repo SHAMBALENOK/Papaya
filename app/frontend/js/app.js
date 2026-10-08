@@ -178,12 +178,19 @@ function openModal(title, bodyHtml, { wide = false, size = '' } = {}) {
     </div>`;
     document.body.appendChild(overlay);
 
-    const close = () => overlay.remove();
+    const onEsc = e => {
+        if (e.key === 'Escape') close();
+    };
+    const close = () => {
+        // close() идемпотентна и в любом случае снимает слушатель клавиатуры:
+        // иначе закрытие по крестику или клику по подложке оставляло бы
+        // обработчик, перехватывающий Escape.
+        if (!overlay.isConnected) return;
+        document.removeEventListener('keydown', onEsc);
+        overlay.remove();
+    };
     overlay.querySelector('[data-modal-close]').addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    const onEsc = e => {
-        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); }
-    };
     document.addEventListener('keydown', onEsc);
 
     const first = overlay.querySelector('input, textarea, select');
