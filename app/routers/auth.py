@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_cached_user, get_redis
+from app.core import deps
 from app.core.cache_guard import safe_cache_write
 from app.core.config import COOKIE_SECURE
+from app.core.deps import ACCOUNT_BLOCKED_DETAIL
 from app.database.database import get_db
 import app.middlewares.re_check as re_check
 import app.middlewares.tokenz.main as tokenz
@@ -77,30 +79,47 @@ def _clear_auth_cookies(response: Response) -> None:
     '/',
     responses={
         200: {'description': 'OK — not signed in'},
-        403: {'description': 'Already signed in'},
+        403: {'description': 'Already signed in or invalid token'},
         500: {'description': 'Internal server error'},
     },
 )
 async def auth(
     db: AsyncSession = Depends(get_db),
+    r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
     refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
+    """Проверка «есть ли активная сессия».
+
+    Использует общий механизм ``get_current_user``: сессия есть только если
+    пользователь существует и не заблокирован. Заблокированный с валидной
+    кукой — «не вошёшь» (200), иначе фронтенд показывал бы экран
+    «уже залогинен» аккаунту, который не может выполнить ни одного
+    авторизованного действия.
+    """
     try:
-        token = await tokenz.jwt_check(access_jwt, refresh_jwt)
-        if token:
-            raise HTTPException(status_code=403, detail='Already signed in')
-        return JSONResponse(status_code=200, content=None)
-    except HTTPException as e:
-        if e.status_code == 401:
+        await deps.get_current_user(r, access_jwt, refresh_jwt)
+    except HTTPException as exc:
+        # Нет токена либо пользователь удалён/заблокирован — не вошли.
+        if exc.status_code in (401, 404):
             return JSONResponse(status_code=200, content=None)
-        raise
+        if exc.status_code == 403 and exc.detail == ACCOUNT_BLOCKED_DETAIL:
+            return JSONResponse(status_code=200, content=None)
+        if exc.status_code == 403:
+            # Невалидный токен — как и раньше, ошибка, а не «не вошли».
+            raise
+        logger.exception('Unhandled error')
+        raise HTTPException(
+            status_code=500,
+            detail='Internal server error',
+        )
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(
             status_code=500,
             detail='Internal server error',
         )
+    raise HTTPException(status_code=403, detail='Already signed in')
 
 
 @auth_page.post(
@@ -165,6 +184,7 @@ async def register(
     responses={
         200: {'description': 'Login successful'},
         401: {'description': 'Invalid email or password'},
+        403: {'description': 'Account is blocked'},
         422: {'description': 'Validation error'},
         500: {'description': 'Internal server error'},
     },
@@ -187,6 +207,11 @@ async def login(
                 status_code=401,
                 detail='Invalid email or password',
             )
+        # Блокировка проверяется после пароля: неверный пароль остаётся 401 и
+        # не превращается в подтверждение существования заблокированного
+        # аккаунта. С правильным паролем залогиниться всё равно нельзя.
+        if db_user.get('isActive') is False:
+            raise HTTPException(status_code=403, detail=ACCOUNT_BLOCKED_DETAIL)
 
         _set_auth_cookies(
             response,

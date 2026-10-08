@@ -328,22 +328,20 @@ async def remove_bvi(
     (или удалить связь целиком) может администратор.
     """
     try:
-        link = await database.bvi.get_link(body.olympiad_id, university_id)
-        if not link:
-            raise HTTPException(status_code=404, detail='BVI link not found')
-        if (
-            link['status'] == 'CONFIRMED'
-            and current_user.get('role') != deps.ROLE_ADMIN
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    'Связь подтверждена администратором: снять подтверждение '
-                    'может только администратор'
-                ),
+        # Правило «подтверждённую связь снимает только администратор» и само
+        # удаление выполняются в слое данных под одной блокировкой строки:
+        # отдельное чтение здесь оставило бы гонку «проверил PENDING →
+        # параллельный confirm → удалил CONFIRMED».
+        try:
+            removed = await database.bvi.remove_bvi_link(
+                body.olympiad_id,
+                university_id,
+                requested_by_role=current_user.get('role'),
             )
-
-        removed = await database.bvi.delete_bvi_link(body.olympiad_id, university_id)
+        except database.bvi.BviRemoveError as exc:
+            raise HTTPException(
+                status_code=exc.status_code, detail=exc.detail
+            ) from exc
         if not removed:
             raise HTTPException(status_code=404, detail='BVI link not found')
         return {'status': 'removed', 'olympiad_id': str(body.olympiad_id)}

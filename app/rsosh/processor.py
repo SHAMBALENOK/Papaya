@@ -83,21 +83,50 @@ async def _set_state(doc: dict, section: dict) -> dict:
     return updated or doc
 
 
+async def _mark_failed(doc: dict, section: dict) -> dict:
+    """Перевести документ в ``failed``, только пока он ещё ``PROCESSING``.
+
+    Проверка статуса нужна для ошибок «до конвейера» (тип документа, путь к
+    файлу, запись стартового состояния): раньше эти исходы вылетали до
+    ``try`` и документ оставался в ``PROCESSING`` навсегда — его нельзя было
+    ни перезапустить, ни отклонить. Но записывать ``failed`` вслепую тоже
+    нельзя: если документ уже ушёл из ``PROCESSING``, ``failed`` перетёр бы
+    чужой результат. Поэтому состояние читается заново и решение принимается
+    уже по нему.
+    """
+    fresh = await db_docs.get_doc(doc['id'])
+    if not fresh:
+        return doc
+    if fresh.get('status') != 'PROCESSING':
+        logger.warning(
+            'rsosh: not marking %s failed — status is %s',
+            doc['id'],
+            fresh.get('status'),
+        )
+        return fresh
+    return await _set_state(fresh, section)
+
+
 async def run_import(doc_id) -> dict:
     """Обработать документ РСОШ и подготовить preview.
 
     Возвращает документ с разделом ``rsosh`` в состоянии ``review`` (или
     ``failed`` с причиной). Олимпиады в каталог на этом шаге не пишутся.
+
+    Вся подготовка — валидация типа/статуса, поиск файла, запись стартового
+    состояния — выполняется внутри ``try``: любая ошибка на этом этапе
+    должна закончиться статусом ``FAILED``, а не вечным ``PROCESSING``.
     """
     doc = await db_docs.get_doc(doc_id)
     if not doc:
         raise RsoshError(f'Document {doc_id} not found')
-    _validate_document(doc)
-
-    path = document_path(doc)
-    doc = await _set_state(doc, states.start_section(doc))
 
     try:
+        _validate_document(doc)
+
+        path = document_path(doc)
+        doc = await _set_state(doc, states.start_section(doc))
+
         pages = await asyncio.to_thread(extraction.extract_document, str(path))
         records, warnings = parsing.parse_pages(pages)
         page_confidence = _page_confidence(pages)
@@ -141,7 +170,7 @@ async def run_import(doc_id) -> dict:
         # Тексты RsoshError написаны вручную и предназначены для показа, но
         # даже они могут содержать путь к файлу (см. _document_path).
         logger.warning('rsosh: import of %s failed: %s', doc_id, exc)
-        return await _set_state(
+        return await _mark_failed(
             doc, states.failed_section(doc, error=_public_error(exc))
         )
     except Exception:  # noqa: BLE001 - любая ошибка не должна ронять импорт
@@ -150,7 +179,7 @@ async def run_import(doc_id) -> dict:
         # подключения, а этот текст отдаётся в API и рисуется в панели.
         # Подробности остаются в логе.
         logger.exception('rsosh: unexpected failure while importing %s', doc_id)
-        return await _set_state(
+        return await _mark_failed(
             doc,
             states.failed_section(
                 doc,

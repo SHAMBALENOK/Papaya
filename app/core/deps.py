@@ -27,6 +27,7 @@ from app.database.users import ROLE_ADMIN, ROLE_UNIVERSITY_REP, ROLE_USER
 import app.middlewares.tokenz.main as tokenz
 
 __all__ = [
+    'ACCOUNT_BLOCKED_DETAIL',
     'ROLE_ADMIN',
     'ROLE_UNIVERSITY_REP',
     'ROLE_USER',
@@ -38,6 +39,14 @@ __all__ = [
     'require_university_rep',
 ]
 
+#: Ответ для заблокированного пользователя (``isActive == false``).
+#:
+#: Единый текст для входа и всех авторизованных маршрутов: иначе клиент не
+#: мог бы отличить «заблокирован» от «нет прав» и показывал бы неверную
+#: причину. Строка не содержит «token», чтобы фронтенд не принял её за
+#: протухшую сессию и не сбрасывал куки (см. ``isJwtAuthError`` в api.js).
+ACCOUNT_BLOCKED_DETAIL = 'Account is blocked'
+
 
 async def get_current_user(
     r: aioredis.Redis = Depends(get_redis),
@@ -48,6 +57,12 @@ async def get_current_user(
 
     Бросает 401 без токена и 404, если пользователь больше не существует
     (например, удалён администратором).
+
+    Заблокированный пользователь (``isActive == false``) получает 403 с
+    ``ACCOUNT_BLOCKED_DETAIL``: токен у него остаётся валидным до истечения
+    срока, и без этой проверки действующая сессия продолжала бы работать
+    после блокировки. Проверка стоит здесь, один раз для всех маршрутов,
+    использующих ``get_current_user``/``require_*``.
     """
     jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
     user_obj = await get_cached_user(
@@ -57,6 +72,8 @@ async def get_current_user(
     )
     if not user_obj:
         raise HTTPException(status_code=404, detail='User not found')
+    if user_obj.get('isActive') is False:
+        raise HTTPException(status_code=403, detail=ACCOUNT_BLOCKED_DETAIL)
     return user_obj
 
 

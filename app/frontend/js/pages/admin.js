@@ -478,7 +478,7 @@ function adminImportsHtml(imports) {
                     ${item.error ? `<p class="mt-3 text-sm text-crimson">${escHtml(item.error)}</p>` : ''}
                 </div>
                 <div class="flex flex-wrap gap-3 shrink-0">
-                    <button data-act="runImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Запустить импорт</button>
+                    ${state === 'rejected' ? '' : `<button data-act="runImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Запустить импорт</button>`}
                     <button data-act="previewImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Открыть результаты</button>
                 </div>
             </div>
@@ -666,10 +666,19 @@ async function renderImportReview(importId) {
         const lowConf = candidates.filter(c => reviewed(c)).length;
         let merged = 0;
         let fresh = 0;
-        for (const c of candidates) {
-            if (!confirmedKeys.has(c.name_norm) || excluded.has(c.name_norm)) continue;
-            if (merges[c.name_norm] || (c.action === 'merge' && c.matched_olympiad_id)) merged++;
-            else fresh++;
+        if (reviewable) {
+            for (const c of candidates) {
+                if (!confirmedKeys.has(c.name_norm) || excluded.has(c.name_norm)) continue;
+                if (merges[c.name_norm] || (c.action === 'merge' && c.matched_olympiad_id)) merged++;
+                else fresh++;
+            }
+        } else {
+            // Для завершённых прогонов выбора уже нет (confirmedKeys пуст),
+            // поэтому план читается из самих кандидатов, а не из подтверждений.
+            for (const c of candidates) {
+                if (c.action === 'merge' && c.matched_olympiad_id) merged++;
+                else if (c.action === 'create') fresh++;
+            }
         }
         return { total: candidates.length, merged, fresh, lowConf };
     }
@@ -851,7 +860,7 @@ async function renderImportReview(importId) {
         if (state === 'rejected') {
             return `<div class="rounded bg-mist px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
                 <p class="font-semibold text-ink mb-1">Результаты импорта отклонены</p>
-                <p class="text-ink-soft">Каталог не изменён. Запустите импорт заново, чтобы вернуть результаты на проверку.</p>
+                <p class="text-ink-soft">Каталог не изменён. Отклонённый прогон перезапустить нельзя: загрузите документ заново, чтобы провести новый импорт.</p>
             </div>`;
         }
         if (state === 'failed') {
@@ -882,19 +891,35 @@ async function renderImportReview(importId) {
     }
 
     function statsHtml() {
-        const s = stats();
         const stat = (label, value) => `
         <div class="bg-white rounded px-5 py-4 shadow-elev-1">
             <p class="${UI.eyebrow} mb-1">${escHtml(label)}</p>
             <p class="text-3xl font-extrabold tabular-nums">${value}</p>
         </div>`;
-        return `
+        const grid = (cards) => `
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            ${cards}
+        </div>`;
+        if (state === 'failed') return '';
+        if (state === 'approved') {
+            // Счётчики применённого читаются из факта подтверждения
+            // (imp.confirm): кандидаты approved-прогона — прошлый план, а
+            // знают применённое только результаты confirm. Read-only: после
+            // применения изменить их уже нельзя.
+            const cr = imp.confirm || {};
+            const len = (v) => (Array.isArray(v) ? v.length : 0);
+            return grid(`
+            ${stat('Создано', len(cr.created))}
+            ${stat('Обновлено', len(cr.updated))}
+            ${stat('В архив', len(cr.archived))}
+            ${stat('Пропущено', len(cr.skipped))}`);
+        }
+        const s = stats();
+        return grid(`
             ${stat('Распознано', s.total)}
             ${stat('Объединено', s.merged)}
             ${stat('Новых', s.fresh)}
-            ${stat('Малодостоверных', s.lowConf)}
-        </div>`;
+            ${stat('Малодостоверных', s.lowConf)}`);
     }
 
     function searchCountsHtml() {

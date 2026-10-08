@@ -37,7 +37,12 @@ DOCS_STATUS = {
 
 STARTABLE_STATES = ('processing', 'review', 'failed')
 CONFIRMABLE_STATES = ('review',)
-REJECTABLE_STATES = ('review', 'processing')
+#: Отклонить можно только уже готовый к проверке прогон. ``processing`` сюда
+#: не входит намеренно: пока идёт обработка, ``reject`` и воркер пишут в один
+#: и тот же прогон, и гонка заканчивалась бы документом, отклонённым «поверх»
+#: свежезаписанного результата (или результатом, перетёршим отклонение).
+#: Отклонение работающего импорта — 409 из ``reject_confirmed_import``.
+REJECTABLE_STATES = ('review',)
 
 
 def _now() -> str:
