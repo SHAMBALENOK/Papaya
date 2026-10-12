@@ -26,6 +26,16 @@ except ImportError:  # pragma: no cover - подстраховка на случ
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+if DATABASE_URL:
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace(
+            "postgres://", "postgresql+asyncpg://", 1
+        )
+    elif DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace(
+            "postgresql://", "postgresql+asyncpg://", 1
+        )
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
