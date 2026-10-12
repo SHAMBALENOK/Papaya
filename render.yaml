@@ -1,15 +1,16 @@
 services:
   - type: web
     name: papaya
-    env: docker
+    runtime: docker
+    repo: https://github.com/SHAMBALENOK/Papaya
+    branch: patch-0.8
     region: frankfurt
     plan: free
-    repo: https://github.com/SHAMBALENOK/Papaya
-    branch: main
     dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: >-
+      /bin/sh -c 'exec gunicorn --bind 0.0.0.0:10000 --timeout 300 --graceful-timeout 120 --workers 1 --worker-class uvicorn.workers.UvicornWorker --preload app.main:app'
     healthCheckPath: /api/v1/health
-    # Оптимизация для 512MB RAM: 1 воркер, preload моделей, увеличенный таймаут
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 --graceful-timeout 120 --workers 1 --preload app.main:app
     envVars:
       - key: ENVIRONMENT
         value: "production"
@@ -23,13 +24,10 @@ services:
         value: "30"
       - key: COOKIE_SECURE
         value: "true"
-      # Импорт РСОШ без брокера выполняется в процессе API.
       - key: RSOSH_EXECUTION
         value: "inline"
-      # OCR на бесплатном плане считают медленно: ниже разрешение рендеринга.
       - key: RSOSH_PDF_DPI
         value: "200"
-      # Ограничение потоков для экономии памяти на CPU
       - key: OMP_NUM_THREADS
         value: "1"
       - key: MKL_NUM_THREADS
@@ -37,6 +35,8 @@ services:
 
 databases:
   - name: papaya-db
+    region: frankfurt
     databaseName: papaya
     user: papaya
+    postgresMajorVersion: "16"
     plan: free
