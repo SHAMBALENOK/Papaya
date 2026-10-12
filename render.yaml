@@ -3,7 +3,7 @@ services:
     name: papaya
     runtime: docker
     repo: https://github.com/SHAMBALENOK/Papaya
-    branch: patch-0.8
+    branch: main
     region: frankfurt
     plan: free
     dockerfilePath: ./Dockerfile
