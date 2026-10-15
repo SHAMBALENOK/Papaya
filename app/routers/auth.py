@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_cached_user, get_redis
-from app.core import deps
+from app.core import auth_session, deps
 from app.core.cache_guard import safe_cache_write
 from app.core.config import COOKIE_SECURE
 from app.core.deps import ACCOUNT_BLOCKED_DETAIL
@@ -40,7 +40,7 @@ def _set_auth_cookies(response: Response, access_jwt: str, refresh_jwt: str) -> 
     response.set_cookie(
         key='access_jwt',
         value=access_jwt,
-        max_age=600,
+        max_age=tokenz.ACCESS_TOKEN_TTL_SECONDS,
         httponly=True,
         samesite='lax',
         secure=COOKIE_SECURE,
@@ -49,7 +49,7 @@ def _set_auth_cookies(response: Response, access_jwt: str, refresh_jwt: str) -> 
     response.set_cookie(
         key='refresh_jwt',
         value=refresh_jwt,
-        max_age=1209600,
+        max_age=tokenz.REFRESH_TOKEN_TTL_SECONDS,
         httponly=True,
         samesite='lax',
         secure=COOKIE_SECURE,
@@ -75,6 +75,33 @@ def _clear_auth_cookies(response: Response) -> None:
     )
 
 
+async def _issue_session(
+    r: aioredis.Redis,
+    response: Response,
+    user_id: str,
+) -> None:
+    """Создать сессию обновления и выставить куки access+refresh.
+
+    Refresh-токен подписывается сразу, затем сессия сохраняется в Redis с
+    этим токеном как актуальным: с этого момента ``POST /auth/refresh``
+    принимает только его (и ротирует).
+    """
+    session = await auth_session.create_session(r, user_id=str(user_id))
+    await auth_session.store_session(
+        r,
+        sid=session['sid'],
+        user_id=user_id,
+        refresh_token=session['refresh_token'],
+    )
+    _set_auth_cookies(
+        response,
+        access_jwt=await tokenz.create_jwt(
+            ins={'sub': str(user_id), 'sid': session['sid']},
+        ),
+        refresh_jwt=session['refresh_token'],
+    )
+
+
 @auth_page.get(
     '/',
     responses={
@@ -87,7 +114,6 @@ async def auth(
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
     """Проверка «есть ли активная сессия».
 
@@ -98,7 +124,7 @@ async def auth(
     авторизованного действия.
     """
     try:
-        await deps.get_current_user(r, access_jwt, refresh_jwt)
+        await deps.get_current_user(r, access_jwt)
     except HTTPException as exc:
         # Нет токена либо пользователь удалён/заблокирован — не вошли.
         if exc.status_code in (401, 404):
@@ -159,14 +185,7 @@ async def register(
             raise HTTPException(status_code=409, detail='You already have account')
         await safe_cache_write(cache_user_after_write(r, user_data))
 
-        _set_auth_cookies(
-            response,
-            access_jwt=await tokenz.create_jwt(ins={'sub': user_data['id']}),
-            refresh_jwt=await tokenz.create_jwt(
-                ins={'sub': user_data['id']},
-                is_refresh=True,
-            ),
-        )
+        await _issue_session(r, response, user_data['id'])
         return user_data
     except HTTPException:
         raise
@@ -213,14 +232,7 @@ async def login(
         if db_user.get('isActive') is False:
             raise HTTPException(status_code=403, detail=ACCOUNT_BLOCKED_DETAIL)
 
-        _set_auth_cookies(
-            response,
-            access_jwt=await tokenz.create_jwt(ins={'sub': db_user['id']}),
-            refresh_jwt=await tokenz.create_jwt(
-                ins={'sub': db_user['id']},
-                is_refresh=True,
-            ),
-        )
+        await _issue_session(r, response, db_user['id'])
 
         # Заполняем новую версию через общий cache-aside helper. Пароль в Redis
         # не попадает, а конкурентное изменение профиля не может быть затёрто.
@@ -243,23 +255,90 @@ async def login(
 
 
 @auth_page.post(
-    '/logout',
+    '/refresh',
     responses={
-        200: {'description': 'Logged out successfully'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Invalid token'},
+        200: {'description': 'Tokens rotated; new cookies set'},
+        401: {'description': 'Refresh token missing, expired or revoked'},
+        403: {'description': 'Invalid refresh token or account is blocked'},
         500: {'description': 'Internal server error'},
     },
 )
-async def logout(
-    access_jwt: Annotated[str | None, Cookie()] = None,
+async def refresh(
+    r: aioredis.Redis = Depends(get_redis),
     refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
+    """Продлить сессию: ротировать refresh-токен, выдать новый access.
+
+    Ротация — не формальность: предъявленный токен сверяется с серверной
+    сессией в Redis (``papaya:session:{sid}``). Успешное обновление делает
+    предъявленный токен старым (предыдущим) с коротким grace-окном для
+    конкурентных запросов из других вкладок. Повтор предъявления уже
+    ротированного токена вне grace-окна — признак кражи: сессия отзывается
+    целиком, клиент должен войти заново.
+
+    Access-токен здесь не требуется: именно ради его истечения клиент и
+    приходит сюда с refresh-кукой.
+    """
     try:
-        await tokenz.jwt_check(access_jwt, refresh_jwt)
-        response = JSONResponse(status_code=200, content=None)
-        _clear_auth_cookies(response)
-        return response
+        if not refresh_jwt:
+            raise HTTPException(
+                status_code=401,
+                detail='Refresh token missing',
+                headers={'location': '/auth'},
+            )
+        claims = tokenz.decode_jwt(refresh_jwt, expected_typ=tokenz.TYP_REFRESH)
+        sid = claims.get('sid')
+        if not sid:
+            raise HTTPException(
+                status_code=401,
+                detail='Refresh token expired',
+                headers={'location': '/auth'},
+            )
+
+        rotated = await auth_session.rotate_refresh_token(
+            r,
+            sid=str(sid),
+            presented_token=refresh_jwt,
+        )
+        if rotated is None:
+            # Нет сессии, не тот токен или reuse вне grace-окна.
+            raise HTTPException(
+                status_code=401,
+                detail='Refresh token expired',
+                headers={'location': '/auth'},
+            )
+        new_refresh, sid = rotated
+
+        # Ротация не должна продлевать сессию удалённого или заблокированного
+        # пользователя: токены уже выданы, поэтому сессия сразу отзывается.
+        user_id = str(claims.get('sub'))
+        user_obj = await get_cached_user(
+            r,
+            user_id,
+            lambda: database.users.find_user_by_id(user_id),
+        )
+        if not user_obj or user_obj.get('isActive') is False:
+            await auth_session.revoke_session(r, sid)
+            if user_obj:
+                raise HTTPException(
+                    status_code=403,
+                    detail=ACCOUNT_BLOCKED_DETAIL,
+                )
+            raise HTTPException(
+                status_code=401,
+                detail='Refresh token expired',
+                headers={'location': '/auth'},
+            )
+
+        rotated_response = JSONResponse(status_code=200, content=None)
+        _set_auth_cookies(
+            rotated_response,
+            access_jwt=await tokenz.create_jwt(
+                ins={'sub': user_id, 'sid': sid},
+            ),
+            refresh_jwt=new_refresh,
+        )
+        return rotated_response
     except HTTPException:
         raise
     except Exception:
@@ -268,3 +347,39 @@ async def logout(
             status_code=500,
             detail='Internal server error',
         )
+
+
+@auth_page.post(
+    '/logout',
+    responses={
+        200: {'description': 'Logged out successfully'},
+        401: {'description': 'Access token missing'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def logout(
+    r: aioredis.Redis = Depends(get_redis),
+    access_jwt: Annotated[str | None, Cookie()] = None,
+    refresh_jwt: Annotated[str | None, Cookie()] = None,
+):
+    """Выйти: отозвать сессию обновления и снять куки.
+
+    Ревокация идёт по ``sid`` из refresh-токена (срок не важен — отзываем
+    всё равно), поэтому logout действует немедленно: старый refresh-токен
+    после выхода не даёт себе новую сессию. Access-токен при этом может ещё
+    быть непросроченным — он stateless и живёт до своего TTL; новые
+    действия им невозможны после отзыва refresh-сессии и снятия кук.
+    """
+    if not access_jwt and not refresh_jwt:
+        raise HTTPException(
+            status_code=401,
+            detail='Access token missing',
+            headers={'location': '/auth'},
+        )
+    if refresh_jwt:
+        sid = await auth_session.sid_from_refresh_cookie(refresh_jwt)
+        if sid:
+            await auth_session.revoke_session(r, sid)
+    response = JSONResponse(status_code=200, content=None)
+    _clear_auth_cookies(response)
+    return response

@@ -20,7 +20,7 @@ import uuid
 from typing import List
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 
@@ -90,6 +90,9 @@ class AdminBviListItem(BaseModel):
 
 class AdminBviResponse(BaseModel):
     links: List[AdminBviListItem]
+    # Всего связей под фильтром — сколько бы ни вернула страница. Нужно панели,
+    # чтобы отличить «связей нет» от «показана только первая страница».
+    total: int = 0
 
 
 class RoleAssignment(BaseModel):
@@ -202,6 +205,8 @@ async def list_olympiads(current_user: deps.AdminUser = None):
 )
 async def list_bvi_links(
     status: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     current_user: deps.AdminUser = None,
 ):
     """Очередь модерации: заявки университетов на связи БВИ.
@@ -210,30 +215,17 @@ async def list_bvi_links(
     актуальность олимпиады: по архивной заявку уже нельзя подать, но
     подтверждение администратора по ней может быть и историческим, и
     осмысленным.
+
+    Страница ограничена ``limit``/``offset``, а названия вуза и олимпиады
+    подтягиваются одним JOIN-ом: очередь не должна замедляться линейно с ростом
+    каталога. ``total`` отвечает, сколько связей есть под фильтром всего.
     """
     try:
-        links = await database.bvi.list_links(status=status)
-        enriched: list[dict] = []
-        for link in links:
-            university = await database.universities.get_university(
-                link['university_id']
-            )
-            olympiad = await database.olympiads.get_olympiad(link['olympiad_id'])
-            enriched.append(
-                {
-                    'id': link.get('id'),
-                    'university_id': link.get('university_id'),
-                    'university_name': (university or {}).get('name'),
-                    'olympiad_id': link.get('olympiad_id'),
-                    'olympiad_name': (olympiad or {}).get('name'),
-                    'olympiad_status': (olympiad or {}).get('status'),
-                    'status': link.get('status'),
-                    'createdBy': link.get('createdBy'),
-                    'confirmedBy': link.get('confirmedBy'),
-                    'createdAt': link.get('createdAt'),
-                }
-            )
-        return {'links': enriched}
+        links = await database.bvi.list_links_enriched(
+            status=status, limit=limit, offset=offset
+        )
+        total = await database.bvi.count_links(status=status)
+        return {'links': links, 'total': total}
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')

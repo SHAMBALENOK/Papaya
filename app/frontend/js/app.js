@@ -139,6 +139,21 @@ function inputField({ id, label, name, type = 'text', value = '', placeholder = 
     </div>`;
 }
 
+function passwordField({ id, label, name, placeholder = '', required = false, autocomplete = '' }) {
+    // Кнопка «Показать/Скрыть» — часть поля, а не отдельный элемент: пароль
+    // вводится вслепую, и возможность проверить ввод убирает опечатки.
+    return `<div class="${UI.field}">
+        <label for="${id}" class="${UI.label}">${label}${required ? ' <span class="text-crimson" aria-hidden="true">*</span>' : ''}</label>
+        <div class="relative">
+            <input id="${id}" name="${name}" type="password" class="${UI.input} pr-24"
+                   placeholder="${escAttr(placeholder)}"
+                   ${required ? 'required' : ''} ${autocomplete ? `autocomplete="${autocomplete}"` : ''}>
+            <button type="button" data-toggle-password="${id}" aria-pressed="false" aria-controls="${id}"
+                    class="absolute inset-y-0 right-0 flex items-center px-4 text-sm font-semibold text-ink-soft hover:text-ink rounded-r focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Показать</button>
+        </div>
+    </div>`;
+}
+
 function textareaField({ id, label, name, value = '', rows = 4, placeholder = '', required = false }) {
     return `<div class="${UI.field}">
         <label for="${id}" class="${UI.label}">${label}${required ? ' <span class="text-crimson" aria-hidden="true">*</span>' : ''}</label>
@@ -159,7 +174,7 @@ function selectField({ id, label, name, options, value = '' }) {
 
 /* ---------- Модальные окна ---------- */
 
-function openModal(title, bodyHtml, { wide = false, size = '' } = {}) {
+function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } = {}) {
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-50 bg-ink/40 flex items-center justify-center p-4 md:p-8';
     const widths = { lg: 'max-w-4xl', xl: 'max-w-6xl' };
@@ -186,6 +201,12 @@ function openModal(title, bodyHtml, { wide = false, size = '' } = {}) {
         // иначе закрытие по крестику или клику по подложке оставляло бы
         // обработчик, перехватывающий Escape.
         if (!overlay.isConnected) return;
+        // Защита от потери несохранённых правок: все пути закрытия (Escape,
+        // крестик, клик по подложке) идут сюда, поэтому проверка живёт здесь,
+        // а не в каждом обработчике по отдельности.
+        if (isDirty && isDirty() && !window.confirm('Изменения не сохранены. Закрыть окно без сохранения?')) {
+            return;
+        }
         document.removeEventListener('keydown', onEsc);
         overlay.remove();
     };
@@ -226,6 +247,7 @@ function showToast(message, type = 'info', duration = 3500) {
 
 function openUniversityFormModal(university, onDone) {
     const isEdit = !!university;
+    let dirty = false;
     const body = `
         <div id="modal-alert"></div>
         <form id="university-form">
@@ -240,7 +262,12 @@ function openUniversityFormModal(university, onDone) {
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary}">${isEdit ? 'Сохранить' : 'Создать университет'}</button>
             </div>
         </form>`;
-    const { overlay, close } = openModal(isEdit ? 'Редактирование университета' : 'Новый университет', body);
+    const { overlay, close } = openModal(
+        isEdit ? 'Редактирование университета' : 'Новый университет',
+        body,
+        { isDirty: () => dirty }
+    );
+    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
 
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
     overlay.querySelector('#university-form').addEventListener('submit', async e => {
@@ -261,6 +288,7 @@ function openUniversityFormModal(university, onDone) {
                 ? await api.editUniversity(university.id, payload)
                 : await api.addUniversity(payload);
             if (res.ok) {
+                dirty = false;
                 close();
                 showToast(isEdit ? 'Университет обновлён' : 'Университет создан', 'success');
                 if (onDone) onDone();
@@ -276,6 +304,7 @@ function openUniversityFormModal(university, onDone) {
 
 function openOlympiadFormModal(olympiad, onDone) {
     const isEdit = !!olympiad;
+    let dirty = false;
     const body = `
         <div id="modal-alert"></div>
         <form id="olympiad-form">
@@ -294,7 +323,12 @@ function openOlympiadFormModal(olympiad, onDone) {
             Ручное создание — резервный способ. Основной путь наполнения каталога —
             импорт официальных документов РСОШ (вкладка «Импорт РСОШ»).
         </p>`;
-    const { overlay, close } = openModal(isEdit ? 'Редактирование олимпиады' : 'Новая олимпиада', body);
+    const { overlay, close } = openModal(
+        isEdit ? 'Редактирование олимпиады' : 'Новая олимпиада',
+        body,
+        { isDirty: () => dirty }
+    );
+    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
 
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
     overlay.querySelector('#olympiad-form').addEventListener('submit', async e => {
@@ -315,6 +349,7 @@ function openOlympiadFormModal(olympiad, onDone) {
                 ? await api.editOlympiad(olympiad.id, payload)
                 : await api.addOlympiad(payload);
             if (res.ok) {
+                dirty = false;
                 close();
                 showToast(isEdit ? 'Олимпиада обновлена' : 'Олимпиада создана', 'success');
                 if (onDone) onDone();

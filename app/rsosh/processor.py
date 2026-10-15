@@ -31,7 +31,7 @@ from pathlib import Path
 from app.core.config import DOCS_DIR, RSOSH_EXECUTION
 from app.database import docs as db_docs
 from app.rsosh import extraction, matching, parsing, states, validation
-from app.rsosh.types import RsoshError
+from app.rsosh.types import OlympiadRecord, RsoshError
 
 logger = logging.getLogger('papaya.rsosh.processor')
 
@@ -42,8 +42,12 @@ RSOSH_DOC_TYPE = 'RSOSH_LIST'
 #: Отличается от ``persist.STARTABLE_DOC_STATUSES``, который проверяет старт для
 #: пользователя: сюда входит и ``PROCESSING``, потому что воркер получает
 #: документ уже занятым под обработку (переход в PROCESSING делает
-#: ``persist.claim_import_start`` перед постановкой задачи).
-RESUMABLE_DOC_STATUSES = ('UPLOADED', 'PROCESSING', 'NEEDS_REVIEW', 'FAILED', 'PROCESSED')
+#: ``persist.claim_import_start`` перед постановкой задачи), и ``PAUSED``,
+#: потому что возобновление возвращает документ в PROCESSING до вызова
+#: ``run_import`` (см. ``persist.claim_resume``).
+RESUMABLE_DOC_STATUSES = (
+    'UPLOADED', 'PROCESSING', 'PAUSED', 'NEEDS_REVIEW', 'FAILED', 'PROCESSED',
+)
 
 
 def document_path(doc: dict) -> Path:
@@ -107,11 +111,55 @@ async def _mark_failed(doc: dict, section: dict) -> dict:
     return await _set_state(fresh, section)
 
 
+async def _pause_here(
+    doc: dict,
+    *,
+    stage: str,
+    records=None,
+    pages=None,
+    warnings=None,
+) -> dict | None:
+    """Приостановить обработку, если администратор запросил паузу.
+
+    Проверка идёт по свежему состоянию документа: запрос паузы приходит
+    отдельным HTTP-вызовом и пишется в тот же раздел, поэтому решение
+    принимается по последней записи, а не по копии в памяти. Смена состояния
+    возможна только из ``processing``: если прогон уже завершился или его
+    отклонили, пауза не применяется.
+
+    Возвращает приостановленный документ либо ``None``, если пауза не
+    запрошена.
+    """
+    fresh = await db_docs.get_doc(doc['id'])
+    if not fresh:
+        return None
+    section = states.rsosh_section(fresh)
+    if section.get('state') != 'processing' or not section.get('pause_requested'):
+        return None
+    record_dicts = (
+        [record.to_dict() for record in records] if records is not None else None
+    )
+    paused = states.paused_section(
+        fresh,
+        stage=stage,
+        records=record_dicts,
+        pages=pages,
+        warnings=warnings,
+    )
+    return await _set_state(fresh, paused)
+
+
 async def run_import(doc_id) -> dict:
     """Обработать документ РСОШ и подготовить preview.
 
-    Возвращает документ с разделом ``rsosh`` в состоянии ``review`` (или
-    ``failed`` с причиной). Олимпиады в каталог на этом шаге не пишутся.
+    Возвращает документ с разделом ``rsosh`` в состоянии ``review`` (либо
+    ``failed`` с причиной, либо ``paused``, если администратор приостановил
+    обработку). Олимпиады в каталог на этом шаге не пишутся.
+
+    Если в разделе уже есть контрольная точка (``records``), обработка
+    продолжается с неё — документ повторно не распознаётся. Так возобновляется
+    приостановленный импорт (см. ``resume_import``); ``claim_resume`` уже
+    вернул документ в ``processing``.
 
     Вся подготовка — валидация типа/статуса, поиск файла, запись стартового
     состояния — выполняется внутри ``try``: любая ошибка на этом этапе
@@ -124,16 +172,57 @@ async def run_import(doc_id) -> dict:
     try:
         _validate_document(doc)
 
-        path = document_path(doc)
-        doc = await _set_state(doc, states.start_section(doc))
+        section = states.rsosh_section(doc)
+        resume_records = section.get('records')
+        if resume_records:
+            # Возобновление после приостановки: строки уже распознаны и
+            # провалидированы, повторное чтение документа не нужно.
+            records = [
+                OlympiadRecord.from_dict(item) for item in resume_records
+            ]
+            warnings = list(section.get('warnings') or [])
+            page_reports = list(section.get('pages') or [])
+        else:
+            path = document_path(doc)
+            # Пауза могла быть запрошена сразу после старта: документ уже
+            # занят под обработку и помечен, поэтому останавливаемся до
+            # тяжёлого чтения. Проверка идёт до ``start_section``: тот сбрасывает
+            # флаг паузы и стёр бы только что поданный запрос.
+            paused = await _pause_here(doc, stage='starting')
+            if paused is not None:
+                return paused
+            doc = await _set_state(doc, states.start_section(doc))
+            doc = await _set_state(
+                doc, states.progress_section(doc, stage='extracting')
+            )
+            pages = await asyncio.to_thread(
+                extraction.extract_document, str(path)
+            )
+            records, warnings = parsing.parse_pages(pages)
+            page_confidence = _page_confidence(pages)
+            for record in records:
+                record.confidence = page_confidence.get(record.page, 1.0)
+                validation.validate_record(record)
+            page_reports = [
+                report.to_dict()
+                for report in validation.build_page_reports(
+                    pages,
+                    method=pages[0].method if pages else 'ocr',
+                )
+            ]
+            paused = await _pause_here(
+                doc,
+                stage='parsed',
+                records=records,
+                pages=page_reports,
+                warnings=warnings,
+            )
+            if paused is not None:
+                return paused
 
-        pages = await asyncio.to_thread(extraction.extract_document, str(path))
-        records, warnings = parsing.parse_pages(pages)
-        page_confidence = _page_confidence(pages)
-        for record in records:
-            record.confidence = page_confidence.get(record.page, 1.0)
-            validation.validate_record(record)
-
+        doc = await _set_state(
+            doc, states.progress_section(doc, stage='matching')
+        )
         candidates = await matching.build_candidates(records)
         summary = {
             'total': len(records),
@@ -141,13 +230,6 @@ async def run_import(doc_id) -> dict:
             'merge': sum(1 for item in candidates if item.action == 'merge'),
             'review': sum(1 for item in candidates if item.confidence == 'review'),
         }
-        page_reports = [
-            report.to_dict()
-            for report in validation.build_page_reports(
-                pages,
-                method=pages[0].method if pages else 'ocr',
-            )
-        ]
 
         if not candidates:
             section = states.failed_section(
@@ -325,10 +407,56 @@ async def start_import(doc_id) -> tuple[dict, str]:
     return await run_import(doc_id), 'inline'
 
 
+async def resume_import(doc_id) -> tuple[dict, str]:
+    """Возобновить приостановленный импорт.
+
+    ``persist.claim_resume`` атомарно возвращает документ в ``PROCESSING``,
+    сохраняя контрольную точку. Дальше обработка идёт так же, как обычный
+    запуск: ``run_import`` сам видит сохранённые строки и продолжает с
+    сопоставления, не читая документ заново.
+
+    Сбой постановки задачи в celery-режиме возвращает прогон в ``paused``
+    (а не в ``failed``): контрольная точка — это уже сделанная работа, и
+    терять её из-за недоступного брокера нельзя.
+
+    Возвращает ``(документ, способ запуска)``.
+    """
+    from app.rsosh import persist
+
+    doc = await persist.claim_resume(doc_id)
+
+    mode = RSOSH_EXECUTION or 'auto'
+    if mode == 'celery' or (mode == 'auto' and _celery_available()):
+        try:
+            from app.rsosh.worker import rsosh_import_task
+
+            await asyncio.to_thread(
+                lambda: rsosh_import_task.apply_async(args=[str(doc_id)])
+            )
+            return await db_docs.get_doc(doc_id), 'celery'
+        except Exception as exc:  # noqa: BLE001 - нет брокера, продолжаем здесь
+            if mode == 'celery':
+                safe = (
+                    'Не удалось отправить импорт в очередь: брокер задач '
+                    'недоступен. Повторите возобновление.'
+                )
+                logger.exception('rsosh: failed to enqueue resume %s', doc_id)
+                restored = {
+                    **states.rsosh_section(doc),
+                    'state': 'paused',
+                    'progress': {'stage': 'resuming'},
+                }
+                await _set_state(doc, restored)
+                raise RsoshError(safe) from exc
+            logger.warning('rsosh: celery unavailable, resuming import inline')
+    return await run_import(doc_id), 'inline'
+
+
 __all__ = [
     'RSOSH_DOC_TYPE',
     'confirm_import',
     'document_path',
+    'resume_import',
     'run_import',
     'start_import',
 ]

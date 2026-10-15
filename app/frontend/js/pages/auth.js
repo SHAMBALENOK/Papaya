@@ -30,7 +30,7 @@ function renderAuth() {
 
         <form id="login-form" class="max-w-md">
             ${inputField({ id: 'login-email', name: 'email', label: 'Email', type: 'email', required: true, placeholder: 'you@example.com', autocomplete: 'email' })}
-            ${inputField({ id: 'login-password', name: 'password', label: 'Пароль', type: 'password', required: true, placeholder: 'Ваш пароль', autocomplete: 'current-password' })}
+            ${passwordField({ id: 'login-password', name: 'password', label: 'Пароль', required: true, placeholder: 'Ваш пароль', autocomplete: 'current-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Войти</button>
             <p class="mt-8 text-sm text-ink-soft">Нет аккаунта?
                 <a data-goto="register" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Зарегистрироваться</a>
@@ -43,8 +43,8 @@ function renderAuth() {
                 ${inputField({ id: 'reg-surname', name: 'surname', label: 'Фамилия', required: true, placeholder: 'Иванов', autocomplete: 'family-name' })}
             </div>
             ${inputField({ id: 'reg-email', name: 'email', label: 'Email', type: 'email', required: true, placeholder: 'you@example.com', autocomplete: 'email' })}
-            ${inputField({ id: 'reg-password', name: 'password', label: 'Пароль', type: 'password', required: true, placeholder: 'Минимум 8 символов', autocomplete: 'new-password' })}
-            ${inputField({ id: 'reg-password2', name: 'password2', label: 'Подтвердите пароль', type: 'password', required: true, placeholder: 'Повторите пароль', autocomplete: 'new-password' })}
+            ${passwordField({ id: 'reg-password', name: 'password', label: 'Пароль', required: true, placeholder: 'Минимум 8 символов', autocomplete: 'new-password' })}
+            ${passwordField({ id: 'reg-password2', name: 'password2', label: 'Подтвердите пароль', required: true, placeholder: 'Повторите пароль', autocomplete: 'new-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Зарегистрироваться</button>
             <p class="mt-8 text-sm text-ink-soft">Уже есть аккаунт?
                 <a data-goto="login" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Войти</a>
@@ -71,6 +71,20 @@ function renderAuth() {
     tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
     page.querySelectorAll('[data-goto]').forEach(a =>
         a.addEventListener('click', () => switchTab(a.dataset.goto)));
+
+    // Показ пароля: кнопка переключает тип поля и не отправляет форму
+    // (type="button"). Значение и имя поля при этом не меняются, поэтому
+    // автозаполнение браузера продолжает работать.
+    page.querySelectorAll('[data-toggle-password]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const field = document.getElementById(btn.dataset.togglePassword);
+            if (!field) return;
+            const reveal = field.type === 'password';
+            field.type = reveal ? 'text' : 'password';
+            btn.textContent = reveal ? 'Скрыть' : 'Показать';
+            btn.setAttribute('aria-pressed', String(reveal));
+        });
+    });
 
     function showErr(msg) { alertEl.innerHTML = alertHtml(msg, 'error'); }
 
