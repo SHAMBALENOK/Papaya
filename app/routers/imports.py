@@ -81,6 +81,7 @@ class ImportListItem(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None
+    progress: dict | None = None
 
 
 class ImportView(BaseModel):
@@ -100,6 +101,8 @@ class ImportView(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None
+    # Этап обработки (``{"stage": "extracting"}`` и т.п.), пока идёт импорт.
+    progress: dict = Field(default_factory=dict)
     summary: dict = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     # Итог применения: created/updated/archived/skipped/errors и
@@ -132,6 +135,7 @@ def _import_view(doc: dict) -> dict:
         'started_at': section.get('started_at'),
         'finished_at': section.get('finished_at'),
         'error': section.get('error'),
+        'progress': section.get('progress') or {},
         'summary': section.get('summary') or {},
         'warnings': section.get('warnings') or [],
         'confirm': section.get('confirm'),
@@ -257,6 +261,9 @@ async def import_preview(
             'import': _import_view(doc),
             'pages': section.get('pages') or [],
             'candidates': section.get('candidates') or [],
+            # Сохранённый ранее выбор администратора (если есть): панель
+            # восстанавливает по нему подтверждённые/снятые строки и правки.
+            'selection': section.get('selection'),
         }
     except HTTPException:
         raise
@@ -298,8 +305,16 @@ async def confirm(
         # выполняется до транзакции. Решающие проверки (состояние перечня и
         # его актуальность) делаются внутри транзакции в persist — эта
         # ничего не решает, только отсекает заведомо неверные запросы.
-        await _rsosh_doc(import_id)
-        chosen = selection or ConfirmRequest()
+        doc = await _rsosh_doc(import_id)
+        if selection is not None:
+            chosen = selection
+        else:
+            # Тело не задано — применяем сохранённый выбор администратора.
+            # Пустое тело (``{}``) и сохранённый выбор ведут себя по-разному:
+            # ``{}`` означает «подтвердить всё» и сохранённый выбор не
+            # подменяет, а отсутствие тела — «что решили ранее».
+            stored = states.rsosh_section(doc).get('selection')
+            chosen = ConfirmRequest(**stored) if stored else ConfirmRequest()
         result = await processor.confirm_import(
             import_id,
             skip=chosen.skip,
@@ -359,6 +374,122 @@ async def reject(
         await _rsosh_doc(import_id)
         rejected = await persist.reject_confirmed_import(import_id)
         return _import_view(rejected)
+    except RsoshConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/{import_id}/pause',
+    responses={
+        200: {'description': 'Import pause requested / paused'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is not being processed'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def pause_import(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Приостановить идущую обработку документа.
+
+    Приостановка срабатывает на границе этапа: сразу после запуска импорт
+    останавливается до тяжёлого чтения, а уже читающий документ — по
+    завершении чтения. В ответе ``processing`` с флагом паузы означает, что
+    запрос принят и обработка остановится на ближайшей границе; ``paused`` —
+    что она уже остановлена.
+    """
+    try:
+        await _rsosh_doc(import_id)
+        doc = await persist.request_pause(import_id)
+        return _import_view(doc)
+    except RsoshConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/{import_id}/resume',
+    responses={
+        200: {'description': 'Import resumed (processing in background)'},
+        400: {'description': 'Document is not startable'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is not paused'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def resume_import(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Возобновить приостановленный импорт.
+
+    Если приостановка сохранила распознанные строки, обработка продолжается с
+    сопоставления — документ не читается заново. Иначе обработка начинается с
+    начала.
+    """
+    try:
+        doc, mode = await processor.resume_import(import_id)
+        view = _import_view(doc)
+        view['execution'] = mode
+        return view
+    except RsoshConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.put(
+    '/{import_id}/selection',
+    responses={
+        200: {'description': 'Selection saved'},
+        400: {'description': 'Unknown candidates in selection'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is not ready for review'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def save_selection(
+    import_id: uuid.UUID,
+    payload: ConfirmRequest,
+    current_user: deps.AdminUser = None,
+):
+    """Сохранить выбор администратора вместе с прогоном.
+
+    Сохранённый выбор переживает перезагрузку страницы и применяется при
+    подтверждении, если тело запроса ``confirm`` не задано. Сам по себе выбор
+    каталог не меняет.
+    """
+    try:
+        await _rsosh_doc(import_id)
+        doc = await persist.save_import_selection(
+            import_id, selection=payload.model_dump()
+        )
+        return _import_view(doc)
     except RsoshConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RsoshError as exc:

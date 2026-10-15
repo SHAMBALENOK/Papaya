@@ -748,3 +748,184 @@ async def test_worker_reenumerates_when_subprocess_missing(monkeypatch):
     with pytest.raises(OSError):
         worker.rsosh_import_task.run('doc-broken')
     assert calls == ['doc-broken']
+
+
+# ------------------------------------------- пауза, возобновление, выбор
+
+
+async def test_pause_stops_and_resume_continues_import(client):
+    """Пауза останавливает прогон, возобновление доводит его до проверки.
+
+    Запрос паузы только помечает прогон: обработчик останавливается на
+    ближайшей границе этапа. Так импорт не обрывается на середине записи, и
+    каталог остаётся нетронутым, пока прогон приостановлен.
+    """
+    from app.rsosh import persist, processor
+
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+
+    claimed = await persist.claim_import_start(doc['id'])
+    assert claimed['status'] == 'PROCESSING'
+
+    # Пауза запрошена до тяжёлого чтения: прогон остановится сразу.
+    await persist.request_pause(doc['id'])
+    await processor.run_import(doc['id'])
+
+    status = await client.get(f"/api/v1/imports/{doc['id']}")
+    assert status.json()['state'] == 'paused', status.text
+    assert status.json()['progress']['stage'] == 'starting'
+    assert await _olympiad_names(client) == []
+
+    # Возобновление в inline-режиме доводит прогон до review.
+    resumed = await client.post(f"/api/v1/imports/{doc['id']}/resume")
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()['state'] == 'review', resumed.text
+    assert resumed.json()['progress']['stage'] == 'done'
+
+    names = await _candidate_names(client, doc['id'])
+    assert any('Физтех' in name for name in names)
+
+
+async def test_resume_uses_checkpoint_without_reextraction(client, monkeypatch):
+    """Возобновление после распознавания не перечитывает документ.
+
+    Если пауза случилась после распознавания, строки сохранены как контрольная
+    точка, и ``resume`` продолжает с сопоставления. Подмена извлечения на
+    падающую функцию доказывает, что документ повторно не читается.
+    """
+    from app.database import docs as db_docs
+    from app.rsosh import extraction, parsing, processor, states
+
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+
+    stored = await db_docs.get_doc(doc['id'])
+    pages = extraction.extract_document(str(processor.document_path(stored)))
+    records, warnings = parsing.parse_pages(pages)
+
+    # Руками ставим состояние «приостановлен после распознавания».
+    section = states.paused_section(
+        stored,
+        stage='parsed',
+        records=[record.to_dict() for record in records],
+        warnings=list(warnings),
+    )
+    await db_docs.edit_doc(
+        doc['id'],
+        {
+            'metadata': states.docs_metadata_with_section(stored, section),
+            'status': states.DOCS_STATUS['paused'],
+        },
+    )
+
+    def _boom(path):
+        raise AssertionError('resume не должен перечитывать документ')
+
+    monkeypatch.setattr(extraction, 'extract_document', _boom)
+
+    resumed = await client.post(f"/api/v1/imports/{doc['id']}/resume")
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()['state'] == 'review', resumed.text
+
+
+async def test_paused_import_can_be_rejected(client):
+    """Приостановленный прогон можно отклонить так же, как готовый к проверке."""
+    from app.rsosh import persist, processor
+
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await persist.claim_import_start(doc['id'])
+    await persist.request_pause(doc['id'])
+    await processor.run_import(doc['id'])
+
+    rejected = await client.post(f"/api/v1/imports/{doc['id']}/reject")
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()['state'] == 'rejected'
+    assert await _olympiad_names(client) == []
+
+
+async def test_pause_and_resume_require_running_states(client):
+    """На завершённом прогоне останавливать и возобновлять нечего — 409."""
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await run_import(client, doc['id'])
+
+    pause = await client.post(f"/api/v1/imports/{doc['id']}/pause")
+    assert pause.status_code == 409, pause.text
+
+    resume = await client.post(f"/api/v1/imports/{doc['id']}/resume")
+    assert resume.status_code == 409, resume.text
+
+
+async def test_saved_selection_is_restored_and_applied(client):
+    """Сохранённый выбор переживает перезагрузку и применяется при confirm.
+
+    Подтверждение без тела — это «применить то, что решили ранее», а не
+    «применить всё»: иначе перезагрузка страницы теряла бы решения
+    администратора.
+    """
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await run_import(client, doc['id'])
+
+    preview = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    candidates = preview.json()['candidates']
+    assert len(candidates) > 1
+    assert preview.json()['selection'] is None
+    skipped = candidates[0]['name_norm']
+
+    saved = await client.put(
+        f"/api/v1/imports/{doc['id']}/selection",
+        json={'skip': [skipped]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    again = await client.get(f"/api/v1/imports/{doc['id']}/preview")
+    assert again.json()['selection']['skip'] == [skipped]
+
+    confirmed = await client.post(f"/api/v1/imports/{doc['id']}/confirm")
+    assert confirmed.status_code == 200, confirmed.text
+    body = confirmed.json()
+    assert body['skipped'] == [skipped]
+    assert candidates[0]['name'] not in body['result']['created']
+
+
+async def test_selection_rejects_unknown_candidate(client):
+    """Выбор с несуществующим кандидатом отклоняется, а не сохраняется молча."""
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await run_import(client, doc['id'])
+
+    response = await client.put(
+        f"/api/v1/imports/{doc['id']}/selection",
+        json={'skip': ['Нет-такого-кандидата']},
+    )
+    assert response.status_code == 400, response.text
+    assert 'Unknown candidates' in response.json()['detail']
+
+
+async def test_selection_save_requires_review_state(client):
+    """Пока прогон обрабатывается, сохранять выбор нельзя — 409."""
+    from app.rsosh import persist
+
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await persist.claim_import_start(doc['id'])
+
+    response = await client.put(
+        f"/api/v1/imports/{doc['id']}/selection",
+        json={'skip': []},
+    )
+    assert response.status_code == 409, response.text
+
+
+async def test_import_progress_is_reported(client):
+    """Статус импорта отдаёт этап обработки, а не только «processing»."""
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await run_import(client, doc['id'])
+
+    status = await client.get(f"/api/v1/imports/{doc['id']}")
+    assert status.status_code == 200
+    assert status.json()['progress'] == {'stage': 'done'}

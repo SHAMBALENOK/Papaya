@@ -409,7 +409,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 202 | Импорт запущен | `{"id", "name", "type", "status", "state", "summary", "warnings", "error", "execution": "celery"｜"inline"}` |
+| 202 | Импорт запущен | `{"id", "name", "type", "status", "state", "progress", "summary", "warnings", "error", "execution": "celery"｜"inline"}` |
 | 400 | Документ не подходит или импорт не стартует из текущего состояния | `{"detail": "Only RSOSH_LIST documents can be imported"}` |
 | 401 | Нет токена | `{"detail": "..."}` |
 | 403 | Не администратор | `{"detail": "Permission denied"}` |
@@ -424,12 +424,18 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Состояние импорта | `{"id", "name", "type", "status", "state": "processing｜review｜approved｜rejected｜failed", "started_at", "finished_at", "error": str｜null, "summary": {"total", "new", "merge", "review"}, "warnings": [...], "confirm": object｜null}` |
+| 200 | Состояние импорта | `{"id", "name", "type", "status", "state": "processing｜paused｜review｜approved｜rejected｜failed", "progress": {"stage": "starting｜extracting｜matching｜done｜failed"}, "started_at", "finished_at", "error": str｜null, "summary": {"total", "new", "merge", "review"}, "warnings": [...], "confirm": object｜null}` |
 | 404 | Импорт не найден | `{"detail": "Import not found"}` |
 
 Поле `confirm` — итог применения (тело ответа `confirm` в разделе confirm
 ниже). Оно хранится в метаданных документа, поэтому `archive_skipped_reason`
 виден и при повторном открытии импорта, а не только в момент подтверждения.
+
+Поле `progress` показывает текущий этап обработки, поэтому панель отвечает
+«что сейчас происходит», а не только «обрабатывается». У завершённого прогона
+этап — `done` (или `failed`). Состояние `paused` означает, что обработка
+остановлена по запросу администратора; её можно возобновить (см. раздел pause
+и resume ниже).
 
 ---
 
@@ -439,18 +445,29 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Preview | `{"import": {...}, "pages": [{"page", "method", "orientation", "tables", "rows", "chars", "confidence", "issues"}], "candidates": [{"name", "name_norm", "description", "action": "create｜merge｜skip", "matched_olympiad_id", "match_score", "confidence": "ok｜review", "page", "issues"}]}` |
+| 200 | Preview | `{"import": {...}, "pages": [{"page", "method", "orientation", "tables", "rows", "chars", "confidence", "issues"}], "candidates": [{"name", "name_norm", "description", "action": "create｜merge｜skip", "matched_olympiad_id", "match_score", "confidence": "ok｜review", "page", "issues"}], "selection": object｜null}` |
 | 409 | Импорт ещё обрабатывается | `{"detail": "Import is still processing"}` |
 
 Кандидаты с `confidence: "review"` требуют решения администратора: сомнительное
 сопоставление с существующей олимпиадой нельзя принять автоматически.
 
+Поле `selection` — сохранённый ранее выбор администратора (подтверждённые и
+снятые строки, переименования, описания, принудительные объединения). Оно
+возвращается, чтобы открытая заново страница проверки восстановила решения;
+`null` — выбор ещё не сохранялся. Сохраняется через `PUT …/selection`
+(см. ниже).
+
 ---
 
 ## POST /imports/{import_id}/confirm
 
-**Request body:** `{"skip": [name_norm, ...], "archive_missing": bool}`.
-Пустое тело — подтвердить всё; `archive_missing` по умолчанию `true`.
+**Request body:** `{"skip": [name_norm, ...], "rename": {...}, "descriptions": {...}, "merge": {...}, "archive_missing": bool}`.
+Пустое тело (`{}`) — подтвердить всё; `archive_missing` по умолчанию `true`.
+
+Если тело запроса не передано вовсе, применяется ранее сохранённый выбор
+администратора (тот, что вернул `preview` в поле `selection`). Это делает
+подтверждение идемпотентным: интерфейс может отправить пустой запрос, и
+решения не потеряются.
 
 Способа применить устаревший перечень нет: поля вроде `allow_outdated` не
 существует ни в схеме, ни в интерфейсе.
@@ -500,6 +517,65 @@
 
 ---
 
+## POST /imports/{import_id}/pause
+
+Остановить идущий импорт. **Администратор.**
+
+Остановка выполняется на границе этапа: запрос лишь помечает прогон, а
+обработчик завершает текущий этап и переходит в ``paused``, сохранив
+распознанные строки. Поэтому импорт никогда не обрывается на середине записи
+состояния, а возобновление может продолжить с сохранённого этапа.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Остановка принята или уже произошла | `{"id", "state": "processing｜paused", "progress", ...}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | Прогон не обрабатывается | `{"detail": "..."}` — приостановить можно только ``processing`` |
+
+---
+
+## POST /imports/{import_id}/resume
+
+Возобновить приостановленный импорт. **Администратор.**
+
+Если распознавание уже завершилось до остановки, повторного чтения документа
+не будет: прогон продолжает с сохранённых строк и сразу переходит к
+сопоставлению. Иначе обработка идёт с начала.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Импорт возобновлён | `{"id", "state": "processing｜review", "progress", "execution": "celery"｜"inline", ...}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | Прогон не приостановлен | `{"detail": "..."}` |
+
+---
+
+## PUT /imports/{import_id}/selection
+
+Сохранить выбор администратора в окне проверки, не применяя перечень.
+**Администратор.**
+
+Тело совпадает с телом `confirm`. Выбор хранится вместе с прогоном и
+возвращается в `preview` (поле `selection`), поэтому перезагрузка страницы не
+теряет подтверждённые и снятые строки, переименования, описания и
+принудительные объединения. При подтверждении без тела запроса применяется
+именно этот сохранённый выбор.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Выбор сохранён | `{"state": "review", ...}` |
+| 400 | Неизвестные кандидаты в выборе | `{"detail": "Unknown candidates in selection: ..."}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | Прогон не в состоянии ``review`` | `{"detail": "..."}` |
+
+---
+
 ## POST /imports/{import_id}/reject
 
 | Code | Description | Body |
@@ -509,6 +585,9 @@
 | 403 | Не администратор | `{"detail": "Permission denied"}` |
 | 404 | Импорт не найден | `{"detail": "Import not found"}` |
 | 409 | Прогон уже вне ``review`` | `{"detail": "Импорт ещё обрабатывается: дождитесь окончания обработки"}` — импорт в обработке; `{"detail": "Импорт в состоянии approved уже применён или не может быть отклонён"}` — уже применён или отклонён |
+
+Отклонять можно и приостановленный импорт (``paused``): решение администратора
+не зависит от того, ждёт прогон или остановлен.
 
 ---
 

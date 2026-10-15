@@ -161,7 +161,9 @@ What the importer accounts for:
 - **boilerplate rows** (letterheads, order details, signatures) never reach the catalog;
 - **an empty or unreadable document** is never imported silently: the run ends in `failed` with a readable reason.
 
-Import state lives in `docs.metadata['rsosh']` (`processing` / `review` / `approved` / `rejected` / `failed`) — a separate table for runs is unnecessary because a run always belongs to a concrete document. Imports run in a Celery task by default and fall back to in-process execution when the broker is unavailable (`RSOSH_EXECUTION=auto|celery|inline`).
+Import state lives in `docs.metadata['rsosh']` (`processing` / `paused` / `review` / `approved` / `rejected` / `failed`) — a separate table for runs is unnecessary because a run always belongs to a concrete document. Imports run in a Celery task by default and fall back to in-process execution when the broker is unavailable (`RSOSH_EXECUTION=auto|celery|inline`).
+
+While a run is `processing` the section carries a `progress` stage (`starting` / `extracting` / `matching`), so the panel shows what is happening instead of a bare "processing". An administrator can pause a run and resume it later: pausing takes effect at a stage boundary, and when it lands after recognition the run keeps the recognized rows, so resuming continues straight to matching without re-reading the document. The administrator's review choices (confirmed/dropped candidates, renamed names and descriptions, forced merges) are saved with the run, survive a page reload, and are applied on confirmation when the request body is omitted.
 
 ## Technology stack
 
@@ -255,6 +257,9 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `GET` | `/api/v1/imports/<id>/preview` | Import preview (candidates) | `ADMIN` |
 | `POST` | `/api/v1/imports/<id>/confirm` | Apply the import | `ADMIN` |
 | `POST` | `/api/v1/imports/<id>/reject` | Reject the import results | `ADMIN` |
+| `POST` | `/api/v1/imports/<id>/pause` | Pause a running import | `ADMIN` |
+| `POST` | `/api/v1/imports/<id>/resume` | Resume a paused import | `ADMIN` |
+| `PUT` | `/api/v1/imports/<id>/selection` | Save the administrator's review choices | `ADMIN` |
 | `POST` | `/api/v1/admin/archive_olympiad/<id>` | Archive or restore an olympiad (409 when restoring one absent in the RSOSH list) | `ADMIN` |
 | `GET` | `/api/v1/admin/users` | Manage users and roles | `ADMIN` |
 | `GET` | `/api/v1/admin/bvi` | BVI request moderation queue | `ADMIN` |

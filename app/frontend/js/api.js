@@ -16,6 +16,36 @@ function isJwtAuthError(status, data) {
         || detail.includes('expired token');
 }
 
+/* Истёкший access-токен — не повод выкидывать пользователя: сессия
+   продлевается через POST /auth/refresh (ротация refresh-токена), после
+   чего исходный запрос повторяется один раз. */
+function isAccessTokenExpiredError(status, data) {
+    if (status !== 401) return false;
+    const detail = data && typeof data.detail === 'string' ? data.detail.toLowerCase() : '';
+    return detail.includes('access token expired');
+}
+
+/* Однопоточное обновление: параллельные 401 от нескольких запросов должны
+   дождаться одного POST /auth/refresh, а не слать конкурентные ротации
+   (вторая из них получила бы 401 reuse и разлогинила бы пользователя). */
+let refreshInFlight = null;
+
+async function refreshSession() {
+    if (!refreshInFlight) {
+        refreshInFlight = fetch(`${API_BASE}/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',
+        }).then(res => {
+            // 200 — ротация прошла; всё остальное (401 reuse/истёк, 403
+            // блокировка) — сессии нет, дальше только экран входа.
+            return res.ok;
+        }).catch(() => false).finally(() => {
+            refreshInFlight = null;
+        });
+    }
+    return refreshInFlight;
+}
+
 function redirectToAuthAfterJwtError() {
     store.clear();
     if (typeof renderHeader === 'function') renderHeader();
@@ -31,11 +61,21 @@ const api = {
         } else if (body && isFormData) {
             opts.body = body;
         }
-        const res = await fetch(`${API_BASE}${path}`, opts);
-        if (res.status === 204 || res.headers.get('content-length') === '0') {
-            return { ok: res.ok, status: res.status, data: null };
+        let res = await fetch(`${API_BASE}${path}`, opts);
+        let data = res.status === 204 || res.headers.get('content-length') === '0'
+            ? null
+            : await res.json().catch(() => null);
+
+        if (!res.ok && isAccessTokenExpiredError(res.status, data)) {
+            const refreshed = await refreshSession();
+            if (refreshed) {
+                res = await fetch(`${API_BASE}${path}`, opts);
+                data = res.status === 204 || res.headers.get('content-length') === '0'
+                    ? null
+                    : await res.json().catch(() => null);
+            }
         }
-        const data = await res.json().catch(() => null);
+
         if (!res.ok) {
             console.error(`[API] ${method} ${path} → ${res.status}`, data);
             if (!skipAuthRedirect && isJwtAuthError(res.status, data)) {
@@ -46,6 +86,7 @@ const api = {
     },
 
     get(path, options) { return this.request('GET', path, null, false, options); },
+    put(path, body, options) { return this.request('PUT', path, body, false, options); },
     post(path, body, options) { return this.post_(path, body, false, options); },
     postForm(path, formData, options) { return this.post_(path, formData, true, options); },
     post_(path, body, isFormData, options) {
@@ -107,13 +148,22 @@ const api = {
     importPreview(id)         { return this.get(`/imports/${id}/preview`); },
     confirmImport(id, body)   { return this.post(`/imports/${id}/confirm`, body || {}); },
     rejectImport(id)          { return this.post(`/imports/${id}/reject`); },
+    pauseImport(id)           { return this.post(`/imports/${id}/pause`); },
+    resumeImport(id)          { return this.post(`/imports/${id}/resume`); },
+    /* Сохранить выбор администратора вместе с прогоном (переживает
+       перезагрузку страницы). */
+    saveImportSelection(id, body) { return this.put(`/imports/${id}/selection`, body); },
 
     /* Администрирование */
     adminUsers()         { return this.get('/admin/users'); },
     adminOlympiads()     { return this.get('/admin/olympiads'); },
-    adminBviLinks(status) {
-        const query = status ? `?status=${encodeURIComponent(status)}` : '';
-        return this.get(`/admin/bvi${query}`);
+    adminBviLinks(status, opts) {
+        const params = new URLSearchParams();
+        if (status) params.set('status', status);
+        if (opts && opts.limit != null) params.set('limit', opts.limit);
+        if (opts && opts.offset != null) params.set('offset', opts.offset);
+        const query = params.toString();
+        return this.get(`/admin/bvi${query ? `?${query}` : ''}`);
     },
     banUser(id)      { return this.post(`/admin/ban/${id}`); },
     unbanUser(id)    { return this.post(`/admin/unban/${id}`); },

@@ -23,7 +23,7 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
@@ -78,6 +78,56 @@ async def list_links(
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
         return [bvi_link_to_dict(link) for link in result.scalars().all()]
+
+
+async def list_links_enriched(
+    *,
+    status: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict]:
+    """Очередь модерации одним запросом, с постраничной выборкой.
+
+    Названия университета и олимпиады подтягиваются JOIN-ом, а не отдельными
+    чтениями на каждую строку: раньше на N связей уходило 2N+1 запросов, и
+    очередь модерации замедлялась линейно вместе с ростом каталога.
+
+    ``limit``/``offset`` ограничивают страницу на уровне СУБД: панель не должна
+    тянуть весь каталог связей, чтобы показать первые несколько.
+    """
+    statement = (
+        select(UniversityBvi, Universities.name, Olympiads.name, Olympiads.status)
+        .join(Universities, UniversityBvi.university_id == Universities.id)
+        .join(Olympiads, UniversityBvi.olympiad_id == Olympiads.id)
+        .order_by(UniversityBvi.createdAt, UniversityBvi.id)
+    )
+    if status is not None:
+        statement = statement.where(UniversityBvi.status == status)
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(statement)
+        return [
+            {
+                **bvi_link_to_dict(link),
+                'university_name': university_name,
+                'olympiad_name': olympiad_name,
+                'olympiad_status': olympiad_status,
+            }
+            for link, university_name, olympiad_name, olympiad_status in result.all()
+        ]
+
+
+async def count_links(*, status: str | None = None) -> int:
+    """Число связей (с учётом фильтра) — для ``total`` в постраничном ответе."""
+    statement = select(func.count()).select_from(UniversityBvi)
+    if status is not None:
+        statement = statement.where(UniversityBvi.status == status)
+    async with AsyncSessionLocal() as session:
+        return (await session.execute(statement)).scalar_one()
 
 
 async def list_olympiads_for_university(

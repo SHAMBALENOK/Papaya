@@ -1,5 +1,10 @@
 """Регистрация, вход и выход: жизненный цикл сессии."""
 
+from datetime import datetime, timedelta, timezone
+
+import jwt as pyjwt
+
+from app.core.config import JWT_KEY
 from tests.conftest import admin_client, login_user, register_user
 
 
@@ -209,3 +214,208 @@ async def test_unban_restores_access(client):
     assert profile.status_code == 200
     assert profile.json()['id'] == target['id']
     assert profile.json()['isActive'] is True
+
+
+# ------------------------- Истечение access и ротация refresh -------------------------
+
+
+def _decode(token: str) -> dict:
+    return pyjwt.decode(token, JWT_KEY, algorithms=['HS256'])
+
+
+def _craft_token(sub: str, sid: str, *, typ: str, expired: bool) -> str:
+    """Свой токен той же формы, что выдаёт сервер (для сценариев истечения)."""
+    delta = timedelta(seconds=-10 if expired else 600)
+    return pyjwt.encode(
+        {
+            'sub': sub,
+            'sid': sid,
+            'typ': typ,
+            'iat': datetime.now(timezone.utc),
+            'exp': datetime.now(timezone.utc) + delta,
+        },
+        JWT_KEY,
+        algorithm='HS256',
+    )
+
+
+def _sync_cookies(client, response) -> None:
+    """Пересобрать cookie-джар клиента ровно по Set-Cookie ответа.
+
+    httpx хранит cookie, выставленные вручную (``.set``), и пришедшие из
+    ответа как разные записи одного имени: при отправке в заголовок Cookie
+    могут попасть обе. Нормализация избавляет тесты от этой неопределённости.
+    """
+    client.cookies.clear()
+    for name, value in response.cookies.items():
+        client.cookies.set(name, value)
+
+
+async def test_expired_access_is_401_not_silent_refresh_fallback(client):
+    """Истёкший access — явный 401 «Access token expired», не decode refresh.
+
+    Раньше jwt_check молча декодировал refresh-куку как access: сессия
+    «работала» без ротации и без ревокации. Теперь клиент обязан прийти в
+    POST /auth/refresh.
+    """
+    user = await register_user(client)
+    refresh_claims = _decode(client.cookies['refresh_jwt'])
+    expired = _craft_token(
+        user['id'], refresh_claims['sid'], typ='access', expired=True,
+    )
+    client.cookies.clear()
+    client.cookies.set('access_jwt', expired)
+
+    response = await client.get('/api/v1/')
+    assert response.status_code == 401
+    assert response.json()['detail'] == 'Access token expired'
+
+
+async def test_refresh_rotates_tokens_and_extends_session(client):
+    """POST /auth/refresh ротирует пару токенов; старый refresh становится prev."""
+    user = await register_user(client)
+    old_refresh = client.cookies['refresh_jwt']
+    old_access = client.cookies['access_jwt']
+
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 200, response.text
+    _sync_cookies(client, response)
+
+    new_refresh = client.cookies['refresh_jwt']
+    new_access = client.cookies['access_jwt']
+    assert new_refresh != old_refresh
+    assert new_access != old_access
+    assert _decode(new_refresh)['sid'] == _decode(old_refresh)['sid']
+    assert _decode(new_access)['sub'] == user['id']
+
+    profile = await client.get('/api/v1/')
+    assert profile.status_code == 200
+    assert profile.json()['id'] == user['id']
+
+
+async def test_refresh_with_expired_access_cookie_still_works(client):
+    """Refresh не требует валидного access: именно ради его истечения клиент и приходит."""
+    user = await register_user(client)
+    refresh_token = client.cookies['refresh_jwt']
+    refresh_claims = _decode(refresh_token)
+    expired = _craft_token(
+        user['id'], refresh_claims['sid'], typ='access', expired=True,
+    )
+    client.cookies.clear()
+    client.cookies.set('access_jwt', expired)
+    client.cookies.set('refresh_jwt', refresh_token)
+
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 200, response.text
+    _sync_cookies(client, response)
+
+    profile = await client.get('/api/v1/')
+    assert profile.status_code == 200
+
+
+async def test_refresh_requires_cookie(client):
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 401
+    assert response.json()['detail'] == 'Refresh token missing'
+
+
+async def test_access_token_is_not_accepted_as_refresh(client):
+    """Claim typ не даёт подменить тип токена при том же секрете."""
+    await register_user(client)
+    access_token = client.cookies['access_jwt']
+    client.cookies.clear()
+    client.cookies.set('refresh_jwt', access_token)
+
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 403
+    assert response.json()['detail'] == 'Invalid refresh token'
+
+
+async def test_expired_refresh_token_is_401(client):
+    user = await register_user(client)
+    claims = _decode(client.cookies['refresh_jwt'])
+    expired = _craft_token(
+        user['id'], claims['sid'], typ='refresh', expired=True,
+    )
+    client.cookies.clear()
+    client.cookies.set('refresh_jwt', expired)
+
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 401
+    assert response.json()['detail'] == 'Refresh token expired'
+
+
+async def test_reused_rotated_refresh_token_revokes_session(client):
+    """Повтор украденного ротированного токена отзывает сессию целиком.
+
+    Первый ротированный токен ещё живёт в grace-окне (конкурентные вкладки),
+    поэтому для сценария reuse нужны две ротации: тогда украденный токен не
+    совпадает ни с текущим, ни с предыдущим — и сессия отзывается.
+    """
+    await register_user(client)
+    stolen = client.cookies['refresh_jwt']
+
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 200
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 200
+    current = client.cookies['refresh_jwt']
+
+    client.cookies.clear()
+    client.cookies.set('refresh_jwt', stolen)
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 401
+
+    # Сессия отозвана: и «хороший» ротированный токен теперь бесполезен.
+    client.cookies.clear()
+    client.cookies.set('refresh_jwt', current)
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 401
+
+
+async def test_concurrent_refresh_within_grace_returns_current_token(client):
+    """Вторая вкладка в grace-окне получает текущий токен без новой ротации."""
+    await register_user(client)
+    first = client.cookies['refresh_jwt']
+
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 200
+    _sync_cookies(client, response)
+    current = client.cookies['refresh_jwt']
+    assert current != first
+
+    # Вкладка, успевшая отправить уже ротированный токен, не должна получить
+    # 401 и разлогинить пользователя — она получает актуальный токен.
+    client.cookies.clear()
+    client.cookies.set('refresh_jwt', first)
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 200, response.text
+    _sync_cookies(client, response)
+    assert client.cookies['refresh_jwt'] == current
+
+    # Сессия жива: текущий токен ротируется дальше как обычно.
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 200
+    _sync_cookies(client, response)
+    assert client.cookies['refresh_jwt'] != current
+
+
+async def test_logout_revokes_refresh_session(client):
+    """После logout старый refresh-токен не может воскресить сессию."""
+    await register_user(client)
+    refresh_token = client.cookies['refresh_jwt']
+
+    response = await client.post('/api/v1/auth/logout')
+    assert response.status_code == 200
+    assert 'access_jwt' not in client.cookies
+    assert 'refresh_jwt' not in client.cookies
+
+    client.cookies.set('refresh_jwt', refresh_token)
+    response = await client.post('/api/v1/auth/refresh')
+    assert response.status_code == 401
+
+
+async def test_logout_without_tokens_is_401(client):
+    response = await client.post('/api/v1/auth/logout')
+    assert response.status_code == 401
+    assert response.json()['detail'] == 'Access token missing'

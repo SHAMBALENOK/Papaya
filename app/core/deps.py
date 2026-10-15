@@ -51,12 +51,12 @@ ACCOUNT_BLOCKED_DETAIL = 'Account is blocked'
 async def get_current_user(
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ) -> dict:
     """Текущий пользователь по JWT-cookie.
 
-    Бросает 401 без токена и 404, если пользователь больше не существует
-    (например, удалён администратором).
+    Бросает 401 без токена (в том числе «Access token expired»: продление —
+    явный ``POST /auth/refresh``) и 404, если пользователь больше не
+    существует (например, удалён администратором).
 
     Заблокированный пользователь (``isActive == false``) получает 403 с
     ``ACCOUNT_BLOCKED_DETAIL``: токен у него остаётся валидным до истечения
@@ -64,7 +64,7 @@ async def get_current_user(
     после блокировки. Проверка стоит здесь, один раз для всех маршрутов,
     использующих ``get_current_user``/``require_*``.
     """
-    jwt_data = await tokenz.jwt_check(access_jwt, refresh_jwt)
+    jwt_data = await tokenz.jwt_check(access_jwt)
     user_obj = await get_cached_user(
         r,
         str(jwt_data.get('sub')),
@@ -80,7 +80,6 @@ async def get_current_user(
 async def get_optional_user(
     r: aioredis.Redis = Depends(get_redis),
     access_jwt: Annotated[str | None, Cookie()] = None,
-    refresh_jwt: Annotated[str | None, Cookie()] = None,
 ) -> dict | None:
     """Текущий пользователь или None.
 
@@ -89,7 +88,7 @@ async def get_optional_user(
     Отсутствие токена здесь не ошибка.
     """
     try:
-        return await get_current_user(r, access_jwt, refresh_jwt)
+        return await get_current_user(r, access_jwt)
     except HTTPException:
         return None
 

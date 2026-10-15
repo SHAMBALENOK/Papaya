@@ -114,6 +114,7 @@ function userProfileHtml(u, { editable = false } = {}) {
 }
 
 function openEditProfileModal(u) {
+    let dirty = false;
     const body = `
         <div id="modal-alert"></div>
         <form id="edit-profile-form">
@@ -140,7 +141,8 @@ function openEditProfileModal(u) {
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Сохранить</button>
             </div>
         </form>`;
-    const { overlay, close } = openModal('Изменение данных профиля', body, { wide: true });
+    const { overlay, close } = openModal('Изменение данных профиля', body, { wide: true, isDirty: () => dirty });
+    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
 
     overlay.querySelector('#edit-profile-form').addEventListener('submit', async e => {
@@ -162,6 +164,7 @@ function openEditProfileModal(u) {
                 status: fd.get('status') || null,
             });
             if (res.ok) {
+                dirty = false;
                 close();
                 showToast('Профиль обновлён', 'success');
                 renderProfile();

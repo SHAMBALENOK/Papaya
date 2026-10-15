@@ -16,6 +16,12 @@ const ADMIN_TABS = [
     { key: 'imports', label: 'Импорт РСОШ', href: '#/admin/imports' },
 ];
 
+/** Размер страницы очереди БВИ: очередь подгружается порциями, не целиком. */
+const BVI_PAGE_SIZE = 50;
+
+/** Текущее состояние постраничной очереди БВИ (загруженные строки и всего). */
+let bviState = { links: [], total: 0 };
+
 function renderAdmin(initialTab) {
     const page = document.getElementById('page');
     if (!store.isAdmin()) {
@@ -57,7 +63,13 @@ async function loadAdminTab(tab) {
         users: async () => (await api.adminUsers()).data.users || [],
         olympiads: async () => (await api.adminOlympiads()).data.olympiads || [],
         universities: async () => (await api.listUniversities()).data.universities || [],
-        bvi: async () => (await api.adminBviLinks()).data.links || [],
+        bvi: async () => {
+            // Первая страница очереди: остальные догружаются кнопкой «Показать ещё».
+            const res = await api.adminBviLinks(null, { limit: BVI_PAGE_SIZE, offset: 0 });
+            const links = res.data.links || [];
+            bviState = { links, total: res.data.total != null ? res.data.total : links.length };
+            return links;
+        },
         imports: async () => (await api.listImports()).data.imports || [],
     };
 
@@ -88,7 +100,8 @@ async function loadAdminTab(tab) {
 /* Действия, которые открывают модалку или сами показывают результат. */
 const ADMIN_SIDE_EFFECT_ACTIONS = new Set([
     'newUniversity', 'editUniversity', 'newOlympiad', 'editOlympiad',
-    'newImport', 'runImport', 'previewImport',
+    'newImport', 'runImport', 'previewImport', 'loadMoreBvi',
+    'pauseImport', 'resumeImport',
 ]);
 
 async function handleAdminClick(e) {
@@ -119,6 +132,9 @@ async function handleAdminClick(e) {
         newImport: () => openUploadModal(),
         runImport: () => runImportAction(id, btn),
         previewImport: () => navigate(`#/admin/imports/${id}`),
+        loadMoreBvi: () => loadMoreBviLinks(),
+        pauseImport: () => pauseImportAction(id, btn),
+        resumeImport: () => resumeImportAction(id, btn),
     };
 
     const messages = {
@@ -426,7 +442,12 @@ function adminBviHtml(links) {
     if (!links.length) {
         return emptyHtml('Заявок нет', 'Представители университетов ещё не заявляли связи БВИ.');
     }
-    return `<p class="text-sm text-ink-faint mb-6">Заявок и подтверждённых связей: ${links.length}</p>
+    const total = bviState.total > links.length ? bviState.total : links.length;
+    const more = links.length < total;
+    return `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <p class="text-sm text-ink-faint">Показано ${links.length} из ${total}</p>
+        ${more ? `<button data-act="loadMoreBvi" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Показать ещё</button>` : ''}
+    </div>
     <div class="space-y-6">
         ${links.map(link => `
         <div class="${UI.card} px-8 py-7 flex flex-col lg:flex-row lg:items-center gap-6">
@@ -446,15 +467,42 @@ function adminBviHtml(links) {
     </div>`;
 }
 
+/** Догрузить следующую страницу очереди БВИ и дорисовать её. */
+async function loadMoreBviLinks() {
+    const res = await api.adminBviLinks(null, { limit: BVI_PAGE_SIZE, offset: bviState.links.length });
+    if (!res.ok) { showToast(errorText(res), 'error'); return; }
+    const next = res.data.links || [];
+    bviState.links = bviState.links.concat(next);
+    if (res.data.total != null) bviState.total = res.data.total;
+    const box = document.getElementById('admin-content');
+    if (box) box.innerHTML = adminBviHtml(bviState.links);
+}
+
 /* ------------------------------ Импорт РСОШ ------------------------------- */
 
 const IMPORT_STATE_LABELS = {
     processing: 'Обрабатывается…',
+    paused: 'Приостановлен',
     review: 'Готов к подтверждению',
     approved: 'Применён',
     rejected: 'Отклонён',
     failed: 'Ошибка',
 };
+
+/* Этап обработки — понятный человеку текст вместо машинного ``stage``. */
+const IMPORT_PROGRESS_LABELS = {
+    starting: 'подготовка',
+    extracting: 'чтение документа',
+    matching: 'сопоставление с каталогом',
+    resuming: 'возобновление',
+    done: 'завершено',
+    failed: 'ошибка',
+};
+
+function importProgressText(item) {
+    const stage = (item.progress || {}).stage;
+    return stage ? (IMPORT_PROGRESS_LABELS[stage] || stage) : '';
+}
 
 function adminImportsHtml(imports) {
     return `
@@ -465,6 +513,7 @@ function adminImportsHtml(imports) {
     ${imports.length ? `<div class="space-y-6">${imports.map(item => {
         const state = item.state || '—';
         const summary = item.summary || {};
+        const stage = importProgressText(item);
         return `
         <div class="${UI.card} px-8 py-7">
             <div class="flex flex-col lg:flex-row lg:items-center gap-6">
@@ -473,12 +522,15 @@ function adminImportsHtml(imports) {
                     <p class="mt-2 text-sm text-ink-soft">
                         Статус документа: ${escHtml(item.status)} ·
                         ${escHtml(IMPORT_STATE_LABELS[state] || state)}
+                        ${state === 'processing' && stage ? ` · этап: ${escHtml(stage)}` : ''}
                         ${summary.total ? ` · найдено: ${summary.total} (новых: ${summary.new || 0}, объединений: ${summary.merge || 0}, на проверку: ${summary.review || 0})` : ''}
                     </p>
                     ${item.error ? `<p class="mt-3 text-sm text-crimson">${escHtml(item.error)}</p>` : ''}
                 </div>
                 <div class="flex flex-wrap gap-3 shrink-0">
-                    ${state === 'rejected' ? '' : `<button data-act="runImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Запустить импорт</button>`}
+                    ${state === 'rejected' ? '' : `<button data-act="runImport" data-id="${escAttr(item.id)}" ${state === 'paused' ? 'disabled' : ''} class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Запустить импорт</button>`}
+                    ${state === 'paused' ? `<button data-act="resumeImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Возобновить</button>` : ''}
+                    ${state === 'processing' ? `<button data-act="pauseImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Приостановить</button>` : ''}
                     <button data-act="previewImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Открыть результаты</button>
                 </div>
             </div>
@@ -493,6 +545,7 @@ function adminImportsHtml(imports) {
 }
 
 function openUploadModal() {
+    let dirty = false;
     const body = `
         <div id="modal-alert"></div>
         <form id="upload-form">
@@ -511,7 +564,8 @@ function openUploadModal() {
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Загрузить и импортировать</button>
             </div>
         </form>`;
-    const { overlay, close } = openModal('Документ РСОШ', body);
+    const { overlay, close } = openModal('Документ РСОШ', body, { isDirty: () => dirty });
+    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
 
     overlay.querySelector('#upload-form').addEventListener('submit', async e => {
@@ -527,6 +581,7 @@ function openUploadModal() {
             btn.textContent = 'Загрузить и импортировать';
             return;
         }
+        dirty = false;
         close();
         showToast('Документ загружен, запускаем импорт', 'success');
         const started = await api.startRsoshImport(upload.data.id);
@@ -547,6 +602,36 @@ async function runImportAction(id, btn) {
         showToast(state === 'review'
             ? 'Импорт готов к проверке'
             : 'Импорт запущен', 'success');
+        await loadAdminTab('imports');
+        return;
+    }
+    showToast(errorText(res), 'error');
+    await loadAdminTab('imports');
+}
+
+async function pauseImportAction(id, btn) {
+    if (btn) { btn.textContent = 'Останавливаем…'; }
+    const res = await api.pauseImport(id);
+    if (res.ok) {
+        // ``paused`` — обработка уже остановлена; ``processing`` — запрос
+        // принят, остановка произойдёт на ближайшей границе этапа.
+        showToast(res.data.state === 'paused'
+            ? 'Импорт приостановлен'
+            : 'Запрошена остановка импорта', 'success');
+        await loadAdminTab('imports');
+        return;
+    }
+    showToast(errorText(res), 'error');
+    await loadAdminTab('imports');
+}
+
+async function resumeImportAction(id, btn) {
+    if (btn) { btn.textContent = 'Возобновляем…'; }
+    const res = await api.resumeImport(id);
+    if (res.ok) {
+        showToast(res.data.state === 'review'
+            ? 'Импорт возобновлён и готов к проверке'
+            : 'Импорт возобновлён', 'success');
         await loadAdminTab('imports');
         return;
     }
@@ -646,6 +731,26 @@ async function renderImportReview(importId) {
     const merges = {};               // name_norm -> id олимпиады для объединения
     let sortMode = 'order';          // order | confidence
     let query = '';
+
+    // Сохранённый ранее выбор восстанавливается: подтверждённые/снятые строки
+    // и правки переживают перезагрузку страницы (их хранит сам прогон).
+    const storedSelection = data.selection || null;
+    if (reviewable && storedSelection) {
+        const skip = new Set(storedSelection.skip || []);
+        for (const c of candidates) {
+            if (!skip.has(c.name_norm)) confirmedKeys.add(c.name_norm);
+        }
+        const rename = storedSelection.rename || {};
+        const descriptions = storedSelection.descriptions || {};
+        const editedKeys = new Set([...Object.keys(rename), ...Object.keys(descriptions)]);
+        for (const key of editedKeys) {
+            edits[key] = {
+                name: rename[key] || '',
+                description: descriptions[key] || '',
+            };
+        }
+        Object.assign(merges, storedSelection.merge || {});
+    }
 
     const container = document.createElement('div');
     page.innerHTML = '';
@@ -811,6 +916,7 @@ async function renderImportReview(importId) {
     function openCandidateEdit(key) {
         const c = candidateById(key);
         if (!c) return;
+        let dirty = false;
         const currentEdit = edits[key] || {};
         const name = currentEdit.name || c.name || '';
         const description = typeof currentEdit.description === 'string' ? currentEdit.description : (c.description || '');
@@ -827,20 +933,28 @@ async function renderImportReview(importId) {
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Подтвердить</button>
             </div>
         </form>`;
-        const { overlay, close } = openModal('Редактирование олимпиады', body, { size: 'lg' });
-        overlay.querySelector('[data-ri-close]').addEventListener('click', close);
+        const { overlay, close } = openModal('Редактирование олимпиады', body, { size: 'lg', isDirty: () => dirty });
+        ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
+        // Явная «Отмена» — это осознанный отказ от правок, поэтому она закрывает
+        // без дополнительного вопроса. Спрашивать нужно только про неявные пути:
+        // Escape, крестик, клик по подложке.
+        overlay.querySelector('[data-ri-close]').addEventListener('click', () => { dirty = false; close(); });
         overlay.querySelector('[data-ri-save]').addEventListener('click', () => {
             applyCandidateEdit(overlay, key);
+            dirty = false;
             close();
             refresh();
+            persistSelection();
         });
         overlay.querySelector('#ri-edit-form').addEventListener('submit', e => {
             e.preventDefault();
             applyCandidateEdit(overlay, key);
+            dirty = false;
             close();
             confirmedKeys.add(key);
             excluded.delete(key);
             refresh();
+            persistSelection();
         });
     }
 
@@ -867,6 +981,13 @@ async function renderImportReview(importId) {
             return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
                 <p class="font-semibold text-ink mb-1">Импорт завершился ошибкой</p>
                 <p class="text-ink-soft">Каталог не изменён. Запустите импорт заново — обработка начинается с начала.</p>
+            </div>`;
+        }
+        if (state === 'paused') {
+            const stage = IMPORT_PROGRESS_LABELS[(imp.progress || {}).stage] || '';
+            return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
+                <p class="font-semibold text-ink mb-1">Импорт приостановлен</p>
+                <p class="text-ink-soft">Обработка остановлена${stage ? ` на этапе «${escHtml(stage)}»` : ''}. Возобновить её можно кнопкой «Возобновить» в списке импортов: если документ уже распознан, повторного чтения не будет.</p>
             </div>`;
         }
         return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
@@ -1071,6 +1192,17 @@ async function renderImportReview(importId) {
         };
     }
 
+    // Сохранение выбора на сервере (без спешки): хранится вместе с прогоном,
+    // поэтому перезагрузка страницы не теряет решения администратора.
+    let saveTimer = null;
+    function persistSelection() {
+        if (!reviewable) return;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            void api.saveImportSelection(importId, buildPayload());
+        }, 400);
+    }
+
     async function doApply() {
         const btn = container.querySelector('[data-ri="apply"]');
         if (btn) { btn.disabled = true; btn.textContent = 'Применяем…'; }
@@ -1118,11 +1250,11 @@ async function renderImportReview(importId) {
         const act = btn.dataset.ri;
         const key = btn.dataset.key;
 
-        if (act === 'confirm') { confirmedKeys.add(key); excluded.delete(key); refresh(); }
-        else if (act === 'unconfirm') { confirmedKeys.delete(key); refresh(); }
-        else if (act === 'delete') { confirmedKeys.delete(key); excluded.add(key); refresh(); }
+        if (act === 'confirm') { confirmedKeys.add(key); excluded.delete(key); refresh(); persistSelection(); }
+        else if (act === 'unconfirm') { confirmedKeys.delete(key); refresh(); persistSelection(); }
+        else if (act === 'delete') { confirmedKeys.delete(key); excluded.add(key); refresh(); persistSelection(); }
         else if (act === 'edit') { openCandidateEdit(key); }
-        else if (act === 'confirmAll') { confirmAll(); refresh(); }
+        else if (act === 'confirmAll') { confirmAll(); refresh(); persistSelection(); }
         else if (act === 'sort-order') { sortMode = 'order'; refresh(); }
         else if (act === 'sort-confidence') { sortMode = 'confidence'; refresh(); }
         else if (act === 'apply') { void doApply(); }

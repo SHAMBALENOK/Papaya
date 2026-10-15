@@ -545,6 +545,180 @@ async def claim_import_start(doc_id) -> dict:
             return doc_to_dict(doc_row)
 
 
+async def request_pause(doc_id) -> dict:
+    """Запросить приостановку идущего импорта.
+
+    ``processing`` — единственное состояние, из которого приостановка имеет
+    смысл: у завершённого прогона останавливать нечего. Запрос сам по себе не
+    меняет состояние (обработка может идти в другом процессе) — он только
+    ставит флаг, который pipeline проверяет на границах этапов и тогда
+    переводит прогон в ``paused``. Только что запущенный импорт успевает
+    остановиться до тяжёлого чтения документа; уже читающий документ —
+    на следующей границе.
+
+    Возвращает обновлённый документ.
+    """
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            section = states.rsosh_section(document)
+            if (
+                document.get('status') != states.DOCS_STATUS['processing']
+                or section.get('state') != 'processing'
+            ):
+                raise RsoshConflictError(
+                    'Импорт не обрабатывается: приостановить можно только '
+                    'идущую обработку'
+                )
+
+            section = {**section, 'pause_requested': True}
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.meta = states.docs_metadata_with_section(document, section)
+            return doc_to_dict(doc_row)
+
+
+async def claim_resume(doc_id) -> dict:
+    """Атомарно возобновить приостановленный импорт.
+
+    Возобновить можно только прогон в состоянии ``paused``. Переход в
+    ``processing`` и сохранение контрольной точки выполняются под теми же
+    блокировками, что и запуск, поэтому два одновременных возобновления не
+    запускают две обработки одного документа.
+
+    Возвращает документ в состоянии ``processing``.
+    """
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            if document.get('type') != RSOSH_DOC_TYPE:
+                raise RsoshError('Only RSOSH_LIST documents can be imported')
+
+            section = states.rsosh_section(document)
+            if section.get('state') != 'paused':
+                raise RsoshConflictError(
+                    'Импорт не приостановлен: возобновить можно только '
+                    'приостановленный импорт'
+                )
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.status = states.DOCS_STATUS['processing']
+            doc_row.meta = states.docs_metadata_with_section(
+                document, states.resumed_section(document)
+            )
+            return doc_to_dict(doc_row)
+
+
+async def save_import_selection(doc_id, *, selection: dict) -> dict:
+    """Сохранить выбор администратора для прогона, готового к подтверждению.
+
+    Выбор (подтверждённые/снятые кандидаты, правки названий и описаний,
+    объединения) хранится вместе с прогоном, поэтому переживает перезагрузку
+    страницы. Применяется он только при подтверждении; сам по себе раздел
+    каталог не трогает (``confirm`` читает его, когда тело запроса не задано).
+
+    Возвращает обновлённый документ.
+    """
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            section = states.rsosh_section(document)
+            if section.get('state') != 'review':
+                raise RsoshConflictError(
+                    'Выбор можно сохранить только для прогона, готового к '
+                    'подтверждению'
+                )
+
+            clean = _clean_selection(selection)
+            known = {
+                item.get('name_norm')
+                for item in (section.get('candidates') or [])
+            }
+            unknown = (
+                set(clean['skip'])
+                | set(clean['rename'])
+                | set(clean['descriptions'])
+                | set(clean['merge'])
+            ) - known
+            if unknown:
+                raise RsoshError(
+                    'Unknown candidates in selection: '
+                    + ', '.join(sorted(unknown))
+                )
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.meta = states.docs_metadata_with_section(
+                document, states.selection_section(document, clean)
+            )
+            return doc_to_dict(doc_row)
+
+
+def _clean_selection(selection: dict | None) -> dict:
+    """Привести сохранённый выбор к каноническому виду.
+
+    Значения приходят из интерфейса, поэтому приводятся к строкам и
+    проверяются по типу: мусорный выбор не должен попадать в метаданные
+    документа и ломать подтверждение позже.
+    """
+    selection = selection or {}
+
+    def _str_list(value) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value]
+
+    def _str_map(value) -> dict[str, str]:
+        if not isinstance(value, dict):
+            return {}
+        return {str(key): str(item) for key, item in value.items()}
+
+    return {
+        'skip': _str_list(selection.get('skip')),
+        'rename': _str_map(selection.get('rename')),
+        'descriptions': _str_map(selection.get('descriptions')),
+        'merge': _str_map(selection.get('merge')),
+        'archive_missing': bool(selection.get('archive_missing', True)),
+    }
+
+
 async def mark_import_failed_if_stuck(doc_id, *, error: str) -> bool:
     """Перевести импорт в ``FAILED``, если после падения процесса он завис.
 
