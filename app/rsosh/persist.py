@@ -256,6 +256,13 @@ async def apply_confirmed_import(
                 Candidate.from_dict(item)
                 for item in (section.get('candidates') or [])
             ]
+            # Олимпиады, добавленные администратором вручную в меню документа,
+            # применяются наравне с распознанными: они относятся к этому же
+            # перечню и получают ``source_doc_id`` этого документа.
+            candidates += [
+                Candidate.from_dict(item)
+                for item in (section.get('manual_candidates') or [])
+            ]
             # Ключи admin-правок и ``skip`` — исходные name_norm кандидата:
             # они не меняются от переименования соседа, поэтому проверяются
             # по ним же.
@@ -669,7 +676,10 @@ async def save_import_selection(doc_id, *, selection: dict) -> dict:
             clean = _clean_selection(selection)
             known = {
                 item.get('name_norm')
-                for item in (section.get('candidates') or [])
+                for item in (
+                    list(section.get('candidates') or [])
+                    + list(section.get('manual_candidates') or [])
+                )
             }
             unknown = (
                 set(clean['skip'])
@@ -687,6 +697,201 @@ async def save_import_selection(doc_id, *, selection: dict) -> dict:
             doc_row.updatedAt = now
             doc_row.meta = states.docs_metadata_with_section(
                 document, states.selection_section(document, clean)
+            )
+            return doc_to_dict(doc_row)
+
+
+async def write_import_state(doc_id, section: dict) -> dict | None:
+    """Записать состояние прогона импорта, не затирая правки администратора.
+
+    Воркер держит документ в памяти через долгие этапы (чтение и OCR документа
+    идут минуты), поэтому его снимок устаревает: администратор тем временем
+    может добавить олимпиаду вручную либо подать запрос паузы — оба изменения
+    пишут в ту же строку под блокировкой. Прямая запись устаревшего снимка
+    (``db_docs.edit_doc`` без блокировки) стирала бы эти правки, поэтому строка
+    берётся под блокировками, как и в остальных функциях файла, и в новый
+    раздел переносятся актуальные значения из базы:
+
+    - ``manual_candidates`` — всегда: воркер этот список не порождает;
+    - ``pause_requested`` — только когда раздел остаётся в ``processing``:
+      в ``paused`` флаг уже погашен записью паузы, и возрождать его нельзя —
+      иначе возобновление снова упало бы в приостановку.
+
+    Статус документа выводится из состояния раздела; если состояния нет в
+    ``DOCS_STATUS``, статус остаётся прежним.
+
+    Возвращает обновлённый документ либо ``None``, если документа нет.
+    """
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                return None
+
+            document = doc_to_dict(doc_row)
+            fresh = states.rsosh_section(document)
+            merged = dict(section)
+            if 'manual_candidates' in fresh:
+                merged['manual_candidates'] = fresh['manual_candidates']
+            if merged.get('state') == 'processing' and 'pause_requested' in fresh:
+                merged['pause_requested'] = fresh['pause_requested']
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.status = states.DOCS_STATUS.get(
+                merged.get('state'), doc_row.status
+            )
+            doc_row.meta = states.docs_metadata_with_section(document, merged)
+            return doc_to_dict(doc_row)
+
+
+#: Состояния, в которых можно добавить олимпиаду в документ вручную.
+#:
+#: Пока прогон не подтверждён и не отклонён — перечень ещё не применён, и
+#: администратор вправе дополнить его «на глаз». В ``approved``/``rejected``
+#: добавление смысла не имеет: каталог уже определён этим документом.
+MANUAL_CANDIDATE_STATES = ('processing', 'paused', 'review')
+
+
+def _manual_candidate_dict(name: str, description: str | None) -> dict:
+    """Кандидат, добавленный администратором вручную (не из распознавания)."""
+    return {
+        'name': name,
+        'name_norm': normalize_name(name),
+        'description': description,
+        'action': 'create',
+        'matched_olympiad_id': None,
+        'match_score': 0.0,
+        'confidence': 'ok',
+        'page': None,
+        'issues': [],
+    }
+
+
+async def add_manual_candidate(
+    doc_id,
+    *,
+    name: str,
+    description: str | None = None,
+) -> dict:
+    """Добавить олимпиаду в документ РСОШ вручную.
+
+    Запись хранится отдельно (``manual_candidates``), а не в ``candidates``:
+    кандидатов пишет воркер импорта, и добавление в тот же список во время
+    обработки было бы перетёрто завершением прогона. Отдельный список
+    переживает запись результата, а при предпросмотре и подтверждении
+    объединяется с распознанными кандидатами. При подтверждении такая
+    олимпиада создаётся с ``source_doc_id`` этого документа, поэтому её
+    источником считается сам документ.
+
+    Дубликаты (по ``name_norm``) не добавляются: строка уже есть в перечне или
+    уже была добавлена раньше. Возвращает обновлённый документ.
+    """
+    clean_name = (name or '').strip()
+    if not clean_name:
+        raise RsoshError('Название олимпиады не может быть пустым')
+    new_norm = normalize_name(clean_name)
+    if not new_norm:
+        raise RsoshError('Название олимпиады не может быть пустым')
+
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            if document.get('type') != RSOSH_DOC_TYPE:
+                raise RsoshError('Only RSOSH_LIST documents can be imported')
+
+            section = states.rsosh_section(document)
+            if section.get('state') not in MANUAL_CANDIDATE_STATES:
+                raise RsoshConflictError(
+                    'Добавить олимпиаду можно, пока импорт не подтверждён и не '
+                    'отклонён'
+                )
+
+            existing = {
+                str(item.get('name_norm'))
+                for item in (
+                    list(section.get('candidates') or [])
+                    + list(section.get('manual_candidates') or [])
+                )
+            }
+            if new_norm in existing:
+                raise RsoshConflictError(
+                    'Такая олимпиада уже есть в этом документе'
+                )
+
+            manual = list(section.get('manual_candidates') or [])
+            manual.append(_manual_candidate_dict(clean_name, description))
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.meta = states.docs_metadata_with_section(
+                document, {**section, 'manual_candidates': manual}
+            )
+            return doc_to_dict(doc_row)
+
+
+async def remove_manual_candidate(doc_id, *, name_norm: str) -> dict:
+    """Убрать вручную добавленную олимпиаду из документа.
+
+    Удаляются только записи из ``manual_candidates``: распознанные кандидаты
+    администратор снимает через ``skip`` в предпросмотре, а не удаляет.
+    Возвращает обновлённый документ.
+    """
+    target = str(name_norm or '').strip()
+    doc_uuid = _as_uuid(doc_id)
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await _lock_snapshot_scope(session)
+
+            doc_row = (
+                await session.execute(
+                    select(Docs).where(Docs.id == doc_uuid).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if doc_row is None:
+                raise RsoshError(f'Document {doc_id} not found')
+
+            document = doc_to_dict(doc_row)
+            section = states.rsosh_section(document)
+            if section.get('state') not in MANUAL_CANDIDATE_STATES:
+                raise RsoshConflictError(
+                    'Убрать олимпиаду можно, пока импорт не подтверждён и не '
+                    'отклонён'
+                )
+
+            manual = [
+                item
+                for item in (section.get('manual_candidates') or [])
+                if str(item.get('name_norm')) != target
+            ]
+            if len(manual) == len(section.get('manual_candidates') or []):
+                raise RsoshError('Такой олимпиады нет среди добавленных вручную')
+
+            now = datetime.now(timezone.utc)
+            doc_row.updatedAt = now
+            doc_row.meta = states.docs_metadata_with_section(
+                document, {**section, 'manual_candidates': manual}
             )
             return doc_to_dict(doc_row)
 

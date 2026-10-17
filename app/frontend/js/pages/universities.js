@@ -149,9 +149,10 @@ async function renderUniversity(universityId) {
             <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">
                 <div>
                     <dt class="text-sm font-medium text-ink-faint">Официальный сайт</dt>
-                    <dd class="mt-2">
+                    <dd class="mt-3">
                         ${university.website
-                            ? `<a href="${escAttr(university.website)}" target="_blank" rel="noopener noreferrer" class="text-ink font-semibold underline underline-offset-4">${escHtml(university.website)}</a>`
+                            ? `<a href="${escAttr(university.website)}" target="_blank" rel="noopener noreferrer"
+                                  class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Официальный сайт университета</a>`
                             : '<span class="text-ink-soft">не указан</span>'}
                     </dd>
                 </div>

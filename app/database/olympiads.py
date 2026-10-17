@@ -18,7 +18,7 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
@@ -55,6 +55,7 @@ async def list_olympiads(
     status: str | None = None,
     search: str | None = None,
     limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict]:
     """Список олимпиад каталога.
 
@@ -62,8 +63,25 @@ async def list_olympiads(
     ``None`` означает «все», включая архивные: так админ видит полный каталог).
     ``search`` ищет по названию и описанию без учёта регистра; при поиске
     каталог сортируется по алфавиту, иначе остаётся порядок добавления.
+    ``limit``/``offset`` ограничивают страницу на уровне СУБД.
     """
-    statement = select(Olympiads)
+    statement = _apply_olympiad_filters(select(Olympiads), status, search)
+    if (search or '').strip():
+        statement = statement.order_by(Olympiads.name_norm, Olympiads.id)
+    else:
+        statement = statement.order_by(Olympiads.createdAt.desc(), Olympiads.id)
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(statement)
+        return [olympiad_to_dict(item) for item in result.scalars().all()]
+
+
+def _apply_olympiad_filters(statement, status: str | None, search: str | None):
+    """Общие фильтры списка и подсчёта: статус и поиск по тексту."""
     if status is not None:
         statement = statement.where(Olympiads.status == status)
     query = (search or '').strip()
@@ -73,16 +91,20 @@ async def list_olympiads(
             _searchable(Olympiads.name).ilike(pattern, escape='\\')
             | _searchable(Olympiads.description).ilike(pattern, escape='\\')
         )
-    if query:
-        statement = statement.order_by(Olympiads.name_norm, Olympiads.id)
-    else:
-        statement = statement.order_by(Olympiads.createdAt.desc(), Olympiads.id)
-    if limit is not None:
-        statement = statement.limit(limit)
+    return statement
 
+
+async def count_olympiads(
+    *,
+    status: str | None = None,
+    search: str | None = None,
+) -> int:
+    """Число олимпиад под фильтром — для ``total`` в ответе панели."""
+    statement = _apply_olympiad_filters(
+        select(func.count()).select_from(Olympiads), status, search
+    )
     async with AsyncSessionLocal() as session:
-        result = await session.execute(statement)
-        return [olympiad_to_dict(item) for item in result.scalars().all()]
+        return (await session.execute(statement)).scalar_one()
 
 
 async def add_olympiad(ins: dict) -> dict | None:
@@ -100,7 +122,6 @@ async def add_olympiad(ins: dict) -> dict | None:
         official_url=ins.get('official_url'),
         preview_image=ins.get('preview_image'),
         image=ins.get('image'),
-        source_url=ins.get('source_url'),
         source_doc_id=_as_uuid(ins['source_doc_id']) if ins.get('source_doc_id') else None,
         status=status,
     )
@@ -116,7 +137,7 @@ async def add_olympiad(ins: dict) -> dict | None:
 
 
 _OLYMPIAD_EDITABLE_FIELDS = frozenset({
-    'name', 'description', 'official_url', 'preview_image', 'image', 'source_url',
+    'name', 'description', 'official_url', 'preview_image', 'image',
     'source_doc_id', 'status', 'archive_reason',
 })
 

@@ -19,8 +19,15 @@ const ADMIN_TABS = [
 /** Размер страницы очереди БВИ: очередь подгружается порциями, не целиком. */
 const BVI_PAGE_SIZE = 50;
 
+/** Размер страницы списков пользователей и олимпиад. */
+const ADMIN_LIST_PAGE_SIZE = 50;
+
 /** Текущее состояние постраничной очереди БВИ (загруженные строки и всего). */
 let bviState = { links: [], total: 0 };
+
+/** Состояние постраничных списков панели: строки, всего и активный поиск. */
+let adminUsersState = { users: [], total: 0, search: '', universities: [] };
+let adminOlympiadsState = { olympiads: [], total: 0, search: '' };
 
 function renderAdmin(initialTab) {
     const page = document.getElementById('page');
@@ -60,8 +67,28 @@ async function loadAdminTab(tab) {
     box.innerHTML = loadingHtml();
 
     const loaders = {
-        users: async () => (await api.adminUsers()).data.users || [],
-        olympiads: async () => (await api.adminOlympiads()).data.olympiads || [],
+        users: async () => {
+            // Первая страница списка: остальные догружаются кнопкой «Показать ещё».
+            const res = await api.adminUsers({ limit: ADMIN_LIST_PAGE_SIZE, offset: 0 });
+            const users = res.data.users || [];
+            adminUsersState = {
+                users,
+                total: res.data.total != null ? res.data.total : users.length,
+                search: '',
+                universities: [],
+            };
+            return users;
+        },
+        olympiads: async () => {
+            const res = await api.adminOlympiads({ limit: ADMIN_LIST_PAGE_SIZE, offset: 0 });
+            const olympiads = res.data.olympiads || [];
+            adminOlympiadsState = {
+                olympiads,
+                total: res.data.total != null ? res.data.total : olympiads.length,
+                search: '',
+            };
+            return olympiads;
+        },
         universities: async () => (await api.listUniversities()).data.universities || [],
         bvi: async () => {
             // Первая страница очереди: остальные догружаются кнопкой «Показать ещё».
@@ -84,17 +111,18 @@ async function loadAdminTab(tab) {
     if (tab === 'users') {
         // Список университетов нужен для выпадающих списков привязки.
         const universities = await api.listUniversities().catch(() => ({ data: { universities: [] } }));
-        box.innerHTML = adminUsersHtml(data, universities.data.universities || []);
+        adminUsersState.universities = universities.data.universities || [];
+        box.innerHTML = adminUsersHtml();
         return;
     }
 
     const renderers = {
-        olympiads: adminOlympiadsHtml,
-        universities: adminUniversitiesHtml,
-        bvi: adminBviHtml,
-        imports: adminImportsHtml,
+        olympiads: () => adminOlympiadsHtml(),
+        universities: () => adminUniversitiesHtml(data),
+        bvi: () => adminBviHtml(data),
+        imports: () => adminImportsHtml(data),
     };
-    box.innerHTML = renderers[tab](data);
+    box.innerHTML = renderers[tab]();
 }
 
 /* Действия, которые открывают модалку или сами показывают результат. */
@@ -102,6 +130,7 @@ const ADMIN_SIDE_EFFECT_ACTIONS = new Set([
     'newUniversity', 'editUniversity', 'newOlympiad', 'editOlympiad',
     'newImport', 'runImport', 'previewImport', 'loadMoreBvi',
     'pauseImport', 'resumeImport',
+    'loadMoreUsers', 'searchUsers', 'loadMoreOlympiads', 'searchOlympiads',
 ]);
 
 async function handleAdminClick(e) {
@@ -119,7 +148,6 @@ async function handleAdminClick(e) {
     const calls = {
         ban: () => api.banUser(id),
         unban: () => api.unbanUser(id),
-        toggleAdmin: () => toggleAdminRole(id),
         archive: () => api.archiveOlympiad(id, true),
         restore: () => api.archiveOlympiad(id, false),
         confirmBvi: () => api.moderateBvi(btn.dataset.university, id, 'confirm'),
@@ -135,12 +163,15 @@ async function handleAdminClick(e) {
         loadMoreBvi: () => loadMoreBviLinks(),
         pauseImport: () => pauseImportAction(id, btn),
         resumeImport: () => resumeImportAction(id, btn),
+        loadMoreUsers: () => loadMoreUsers(),
+        searchUsers: () => searchUsers(),
+        loadMoreOlympiads: () => loadMoreOlympiads(),
+        searchOlympiads: () => searchOlympiads(),
     };
 
     const messages = {
         ban: 'Пользователь заблокирован',
         unban: 'Пользователь разблокирован',
-        toggleAdmin: 'Роль администратора изменена',
         archive: 'Олимпиада исключена из актуального каталога',
         restore: 'Олимпиада возвращена в актуальный каталог',
         confirmBvi: 'Связь БВИ подтверждена',
@@ -176,6 +207,24 @@ async function handleAdminClick(e) {
 }
 
 /**
+ * Подтверждение выдачи прав администратора.
+ *
+ * Выдача ADMIN — необратимо широкое действие (полный доступ к каталогу и
+ * управлению ролями), поэтому запрашивается явное согласие. Это именно
+ * подстраховка интерфейса, а не граница безопасности: настоящие правила
+ * (роль меняет только администратор, последнего админа понизить нельзя, свою
+ * роль менять нельзя) проверяет сервер.
+ */
+function confirmGrantAdmin(target) {
+    const who = target ? ` пользователю ${target}` : '';
+    return window.confirm(
+        `Выдать права администратора Papaya${who}?\n\n`
+        + 'Администратор видит и меняет весь каталог и управляет ролями других '
+        + 'пользователей.'
+    );
+}
+
+/**
  * Сохранить роль пользователя вместе с привязкой к университету.
  *
  * Роль и университет уходят одним запросом: представителем нельзя стать без
@@ -202,6 +251,13 @@ async function saveUserRole(userId, btn) {
         return;
     }
 
+    // Повышение до администратора подтверждается только при реальной смене
+    // роли, а не при повторном сохранении уже выбранной.
+    const wasAdmin = roleSelect.dataset.currentRole === 'ADMIN';
+    if (role === 'ADMIN' && !wasAdmin && !confirmGrantAdmin('')) {
+        return;
+    }
+
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Сохраняем…';
@@ -209,38 +265,6 @@ async function saveUserRole(userId, btn) {
     btn.disabled = false;
     btn.textContent = originalText;
 
-    if (res.ok) {
-        showToast(`Роль обновлена: ${ROLE_LABELS[res.data.role] || res.data.role}`, 'success');
-        await reloadAdmin();
-        return;
-    }
-    showToast(errorText(res), 'error');
-}
-
-/**
- * Быстрые кнопки «Сделать админом» / «Снять админа».
- *
- * Отдельных маршрутов для этого в API нет и не должно быть: роль меняется
- * только через `/admin/role/{user_id}`, вместе с привязкой к университету.
- * Кнопка лишь подставляет целевую роль в тот же запрос.
- *
- * Куда попадает человек после снятия ADMIN, выводится из уже выбранного в
- * строке университета, а не из отдельной таблицы на клиенте: университет
- * выбирается только для EDITOR (см. handleAdminChange), поэтому «привязан =
- * EDITOR» уже следует из состояния формы. Инвариант проверяет сервер — если
- * подстановка окажется неверной, придёт 400, а не повреждённые права.
- */
-async function toggleAdminRole(userId) {
-    const roleSelect = document.querySelector(`[data-role-for="${CSS.escape(userId)}"]`);
-    const universitySelect = document.querySelector(`[data-university-for="${CSS.escape(userId)}"]`);
-    if (!roleSelect || !universitySelect) return;
-
-    const isAdmin = roleSelect.value === 'ADMIN';
-    const universityId = universitySelect.value || null;
-    const role = isAdmin ? (universityId ? 'EDITOR' : 'USER') : 'ADMIN';
-    const targetUniversity = role === 'USER' ? null : universityId;
-
-    const res = await api.setUserRole(userId, role, targetUniversity);
     if (res.ok) {
         showToast(`Роль обновлена: ${ROLE_LABELS[res.data.role] || res.data.role}`, 'success');
         await reloadAdmin();
@@ -284,19 +308,54 @@ function roleBadge(role) {
     return `<span class="${UI.badge} ${UI.badgeNeutral}">Школьник</span>`;
 }
 
-function adminUsersHtml(users, universities) {
-    if (!users.length) return emptyHtml('Пользователей нет', 'Зарегистрируйте первого пользователя.');
+/** Панель поиска и постраничной выдачи, общая для списков пользователей и олимпиад. */
+function adminListToolbarHtml({ searchId, searchAct, moreAct, shown, total, placeholder }) {
+    const more = shown < total;
+    return `<div class="flex flex-wrap items-end justify-between gap-4 mb-8">
+        <form class="flex flex-wrap items-end gap-3" onsubmit="return false;">
+            <label class="sr-only" for="${searchId}">Поиск</label>
+            <input id="${searchId}" type="search" placeholder="${escAttr(placeholder)}"
+                   class="${UI.input} sm:!w-72 !py-2 text-sm">
+            <button type="button" data-act="${searchAct}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Найти</button>
+        </form>
+        <div class="flex items-center gap-3">
+            <p class="text-sm text-ink-faint">Показано ${shown} из ${total}</p>
+            ${more ? `<button type="button" data-act="${moreAct}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Показать ещё</button>` : ''}
+        </div>
+    </div>`;
+}
+
+function adminUsersHtml() {
+    const users = adminUsersState.users;
+    const universities = adminUsersState.universities;
+    const total = adminUsersState.total > users.length ? adminUsersState.total : users.length;
+    const toolbar = adminListToolbarHtml({
+        searchId: 'admin-users-search',
+        searchAct: 'searchUsers',
+        moreAct: 'loadMoreUsers',
+        shown: users.length,
+        total,
+        placeholder: 'Имя, фамилия или email',
+    });
+    if (!users.length) {
+        return toolbar + (adminUsersState.search
+            ? emptyHtml('Никого не найдено', 'По этому запросу пользователей нет.')
+            : emptyHtml('Пользователей нет', 'Зарегистрируйте первого пользователя.'));
+    }
     const selfId = store.user ? store.user.id : null;
     // Активных администраторов может быть один: последнего нельзя понизить или
     // заблокировать — иначе зайти в панель будет некому. Сервер проверяет это
-    // правило (ошибка 409), здесь кнопки просто не предлагают действие.
+    // правило (ошибка 409), здесь кнопки просто не предлагают действие. Но
+    // выводим блокировку только когда список загружен целиком: по одной
+    // странице нельзя утверждать, что администратор последний.
+    const listComplete = adminUsersState.total <= users.length;
     const activeAdmins = users.filter(item => item.role === 'ADMIN' && item.isActive).length;
 
-    return `<p class="text-sm text-ink-faint mb-6">Всего: ${users.length}</p>
+    return `${toolbar}
     <div class="space-y-6">
         ${users.map(u => {
             const isSelf = String(u.id) === String(selfId);
-            const isLastAdmin = u.role === 'ADMIN' && u.isActive && activeAdmins === 1;
+            const isLastAdmin = listComplete && u.role === 'ADMIN' && u.isActive && activeAdmins === 1;
             // Кнопки без действующего обоснования не показываем: показывать
             // «сделать нельзя» и получать ошибку — хуже, чем объяснить сразу.
             const lockedReason = isSelf
@@ -323,7 +382,7 @@ function adminUsersHtml(users, universities) {
                 </div>
                 <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap xl:justify-end">
                     <label class="sr-only" for="role-${escAttr(u.id)}">Роль: ${escHtml(u.email)}</label>
-                    <select id="role-${escAttr(u.id)}" data-role-for="${escAttr(u.id)}" class="${UI.input} sm:!w-auto sm:max-w-[11rem] !py-2 text-sm">
+                    <select id="role-${escAttr(u.id)}" data-role-for="${escAttr(u.id)}" data-current-role="${escAttr(u.role)}" class="${UI.input} sm:!w-auto sm:max-w-[11rem] !py-2 text-sm">
                         ${Object.keys(ROLE_LABELS).map(role =>
                             `<option value="${role}" ${u.role === role ? 'selected' : ''}>${ROLE_LABELS[role]}</option>`).join('')}
                     </select>
@@ -337,11 +396,6 @@ function adminUsersHtml(users, universities) {
                     <button type="button" data-act="saveRole" data-id="${escAttr(u.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}"
                             ${isLastAdmin ? lockedAttrs : ''}>
                         Сохранить роль
-                    </button>
-                    <button type="button" data-act="toggleAdmin" data-id="${escAttr(u.id)}"
-                            class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}"
-                            ${u.role === 'ADMIN' ? lockedAttrs : ''}>
-                        ${u.role === 'ADMIN' ? 'Снять админа' : 'Сделать админом'}
                     </button>
                     <button type="button" data-act="${u.isActive ? 'ban' : 'unban'}" data-id="${escAttr(u.id)}"
                             class="${UI.btn} ${u.isActive ? UI.btnDanger : UI.btnSecondary} ${UI.btnSmall}"
@@ -359,17 +413,66 @@ function universityLabel(universities, universityId) {
     return match ? (match.short_name || match.name) : 'университет';
 }
 
+/** Перерисовать только контейнер пользователей (после догрузки или поиска). */
+function renderUsersBox() {
+    const box = document.getElementById('admin-content');
+    if (box) box.innerHTML = adminUsersHtml();
+}
+
+async function loadMoreUsers() {
+    try {
+        const res = await api.adminUsers({
+            limit: ADMIN_LIST_PAGE_SIZE,
+            offset: adminUsersState.users.length,
+            search: adminUsersState.search || undefined,
+        });
+        adminUsersState.users = adminUsersState.users.concat(res.data.users || []);
+        if (res.data.total != null) adminUsersState.total = res.data.total;
+        renderUsersBox();
+    } catch (err) {
+        showToast('Не удалось загрузить пользователей', 'error');
+    }
+}
+
+async function searchUsers() {
+    const input = document.getElementById('admin-users-search');
+    const search = (input ? input.value : '').trim();
+    try {
+        const res = await api.adminUsers({ limit: ADMIN_LIST_PAGE_SIZE, offset: 0, search: search || undefined });
+        const users = res.data.users || [];
+        adminUsersState.users = users;
+        adminUsersState.total = res.data.total != null ? res.data.total : users.length;
+        adminUsersState.search = search;
+        renderUsersBox();
+    } catch (err) {
+        showToast('Не удалось выполнить поиск', 'error');
+    }
+}
+
 /* -------------------------------- Олимпиады -------------------------------- */
 
-function adminOlympiadsHtml(olympiads) {
+function adminOlympiadsHtml() {
+    const olympiads = adminOlympiadsState.olympiads;
+    const total = adminOlympiadsState.total > olympiads.length ? adminOlympiadsState.total : olympiads.length;
+    const toolbar = adminListToolbarHtml({
+        searchId: 'admin-olympiads-search',
+        searchAct: 'searchOlympiads',
+        moreAct: 'loadMoreOlympiads',
+        shown: olympiads.length,
+        total,
+        placeholder: 'Название олимпиады',
+    });
     if (!olympiads.length) {
+        if (adminOlympiadsState.search) {
+            return toolbar + emptyHtml('Ничего не найдено', 'По этому запросу олимпиад нет.');
+        }
         return emptyHtml('Каталог олимпиад пуст',
             'Добавьте олимпиаду вручную или импортируйте документ РСОШ.',
             `<button data-act="newOlympiad" class="${UI.btn} ${UI.btnPrimary}">Создать олимпиаду</button>`);
     }
-    return `
+    return `${toolbar}
     <div class="flex flex-wrap items-center justify-between gap-6 mb-10">
-        <p class="text-sm text-ink-faint">Всего: ${olympiads.length}</p>
+        <p class="text-sm text-ink-faint">Всего: ${total}</p>
         <button data-act="newOlympiad" class="${UI.btn} ${UI.btnPrimary}">Создать олимпиаду</button>
     </div>
     <div class="space-y-6">
@@ -394,6 +497,42 @@ function adminOlympiadsHtml(olympiads) {
             </div>
         </div>`).join('')}
     </div>`;
+}
+
+/** Перерисовать только контейнер олимпиад (после догрузки или поиска). */
+function renderOlympiadsBox() {
+    const box = document.getElementById('admin-content');
+    if (box) box.innerHTML = adminOlympiadsHtml();
+}
+
+async function loadMoreOlympiads() {
+    try {
+        const res = await api.adminOlympiads({
+            limit: ADMIN_LIST_PAGE_SIZE,
+            offset: adminOlympiadsState.olympiads.length,
+            search: adminOlympiadsState.search || undefined,
+        });
+        adminOlympiadsState.olympiads = adminOlympiadsState.olympiads.concat(res.data.olympiads || []);
+        if (res.data.total != null) adminOlympiadsState.total = res.data.total;
+        renderOlympiadsBox();
+    } catch (err) {
+        showToast('Не удалось загрузить олимпиады', 'error');
+    }
+}
+
+async function searchOlympiads() {
+    const input = document.getElementById('admin-olympiads-search');
+    const search = (input ? input.value : '').trim();
+    try {
+        const res = await api.adminOlympiads({ limit: ADMIN_LIST_PAGE_SIZE, offset: 0, search: search || undefined });
+        const olympiads = res.data.olympiads || [];
+        adminOlympiadsState.olympiads = olympiads;
+        adminOlympiadsState.total = res.data.total != null ? res.data.total : olympiads.length;
+        adminOlympiadsState.search = search;
+        renderOlympiadsBox();
+    } catch (err) {
+        showToast('Не удалось выполнить поиск', 'error');
+    }
 }
 
 /* ------------------------------ Университеты ------------------------------- */
@@ -672,6 +811,66 @@ function importNoticesHtml(warnings) {
     </div>`;
 }
 
+/* Плавающая кнопка «Добавить олимпиаду» в меню документа РСОШ. Показывается,
+   пока прогон не подтверждён и не отклонён: пока перечень не применён,
+   администратор может дополнить его вручную. */
+function importFabHtml(state) {
+    if (!['processing', 'paused', 'review'].includes(state)) return '';
+    return `<button type="button" data-ri="addManualCandidate"
+        class="fixed bottom-8 right-8 z-40 inline-flex items-center gap-2 rounded bg-ink text-white px-6 py-4 text-sm font-semibold shadow-elev-2 hover:bg-ink-deep transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        <span aria-hidden="true" class="text-lg leading-none">+</span> Добавить олимпиаду
+    </button>`;
+}
+
+function openAddImportCandidateModal(importId, onDone) {
+    let dirty = false;
+    const body = `
+        <div id="modal-alert"></div>
+        <form id="import-candidate-form">
+            ${inputField({ id: 'ic-name', name: 'name', label: 'Название олимпиады', required: true, placeholder: 'Например: Олимпиада школьников «Ломоносов»' })}
+            ${textareaField({ id: 'ic-desc', name: 'description', label: 'Описание', value: '' })}
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">
+                Олимпиада добавится в этот документ и создастся при подтверждении
+                импорта. Её источником станет сам документ РСОШ.
+            </p>
+            <div class="flex flex-wrap justify-end gap-3 mt-10">
+                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
+                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Добавить олимпиаду</button>
+            </div>
+        </form>`;
+    const { overlay, close } = openModal('Новая олимпиада в документе', body, { isDirty: () => dirty });
+    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
+    overlay.querySelector('[data-cancel]').addEventListener('click', close);
+    overlay.querySelector('#import-candidate-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = {
+            name: (fd.get('name') || '').trim(),
+            description: (fd.get('description') || '').trim() || null,
+        };
+        if (!payload.name) {
+            showModalError(overlay, { data: { detail: 'Укажите название олимпиады' } });
+            return;
+        }
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        try {
+            const res = await api.addImportCandidate(importId, payload);
+            if (res.ok) {
+                dirty = false;
+                close();
+                showToast('Олимпиада добавлена в документ', 'success');
+                if (onDone) onDone();
+                return;
+            }
+            showModalError(overlay, res);
+        } catch {
+            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
+        }
+        btn.disabled = false;
+    });
+}
+
 async function renderImportReview(importId) {
     const page = document.getElementById('page');
     page.innerHTML = `<section class="pt-4 pb-32">${loadingHtml('Загружаем результаты импорта…')}</section>`;
@@ -699,7 +898,13 @@ async function renderImportReview(importId) {
                     <p class="text-ink-soft">Результаты появятся, когда обработка завершится. Обновите страницу позже.</p>
                 </div>
                 <a href="#/admin/imports" class="${UI.btn} ${UI.btnGhost}">К списку импортов</a>
-            </div>`;
+            </div>
+            ${importFabHtml('processing')}`;
+            const fab = page.querySelector('[data-ri="addManualCandidate"]');
+            if (fab) {
+                fab.addEventListener('click', () =>
+                    openAddImportCandidateModal(importId, () => renderImportReview(importId)));
+            }
             return;
         }
         page.innerHTML = `
@@ -1143,7 +1348,8 @@ async function renderImportReview(importId) {
         <p class="${UI.eyebrow} mb-2 mt-10">Результаты импорта</p>
         ${candidates.length
             ? `<div class="space-y-3 mt-4">${candidates.map(c => readonlyCandidateCardHtml(c)).join('')}</div>`
-            : `<div class="mt-4">${emptyHtml('Результатов нет', 'Для этого прогона кандидаты не сохранены.')}</div>`}`}`;
+            : `<div class="mt-4">${emptyHtml('Результатов нет', 'Для этого прогона кандидаты не сохранены.')}</div>`}`}
+        ${importFabHtml(state)}`;
     }
 
     function refresh() {
@@ -1259,6 +1465,9 @@ async function renderImportReview(importId) {
         else if (act === 'sort-confidence') { sortMode = 'confidence'; refresh(); }
         else if (act === 'apply') { void doApply(); }
         else if (act === 'reject') { void doReject(); }
+        else if (act === 'addManualCandidate') {
+            openAddImportCandidateModal(importId, () => renderImportReview(importId));
+        }
     });
 
     container.addEventListener('input', e => {

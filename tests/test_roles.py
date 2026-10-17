@@ -335,3 +335,65 @@ async def test_rep_cannot_import_documents(client):
         data={'type': 'RSOSH_LIST'},
     )).status_code == 403
     assert (await client.get('/api/v1/admin/bvi')).status_code == 403
+
+
+async def test_admin_users_supports_pagination(client):
+    """``/admin/users`` отдаёт ``total`` и умеет постраничную выдачу.
+
+    Панель не должна тянуть весь список, чтобы показать первые строки, но
+    обязана знать, сколько записей всего — иначе «Показано N из M» и кнопка
+    «Показать ещё» не работают.
+    """
+    admin = await admin_client(client)
+    for _ in range(3):
+        await register_user(client)
+    await login_user(client, admin['email'])
+
+    first = await client.get('/api/v1/admin/users?limit=2&offset=0')
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert len(first_body['users']) == 2
+    assert first_body['total'] >= 4  # admin + три зарегистрированных
+
+    second = await client.get('/api/v1/admin/users?limit=2&offset=2')
+    assert second.status_code == 200, second.text
+    first_ids = {item['id'] for item in first_body['users']}
+    second_ids = {item['id'] for item in second.json()['users']}
+    assert first_ids.isdisjoint(second_ids), 'страницы не должны пересекаться'
+
+
+async def test_admin_users_search_filters_and_reports_total(client):
+    """Поиск по email сужает список и пересчитывает ``total`` под фильтром."""
+    admin = await admin_client(client)
+    target_email = 'search_target@example.com'
+    target = await register_user(client, target_email)
+    await login_user(client, admin['email'])
+
+    found = await client.get(f'/api/v1/admin/users?search={target_email}')
+    assert found.status_code == 200, found.text
+    body = found.json()
+    assert body['total'] == 1
+    assert [item['id'] for item in body['users']] == [target['id']]
+
+    missing = await client.get('/api/v1/admin/users?search=nobody-here@example.com')
+    assert missing.status_code == 200
+    assert missing.json()['users'] == []
+    assert missing.json()['total'] == 0
+
+
+async def test_admin_olympiads_supports_search_and_total(client):
+    """``/admin/olympiads`` ищет по названию и сообщает ``total``."""
+    await admin_client(client)
+    await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    wanted = await create_olympiad(client, 'Олимпиада школьников «Ломоносов»')
+    await admin_client(client)
+
+    found = await client.get('/api/v1/admin/olympiads?search=Ломоносов')
+    assert found.status_code == 200, found.text
+    body = found.json()
+    assert body['total'] == 1
+    assert [item['id'] for item in body['olympiads']] == [wanted['id']]
+
+    all_items = await client.get('/api/v1/admin/olympiads')
+    assert all_items.status_code == 200
+    assert all_items.json()['total'] == 2

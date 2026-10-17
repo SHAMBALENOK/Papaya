@@ -10,10 +10,17 @@ import logging
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse
 
+from app.middlewares.request_id import RequestIdFilter
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    format='%(asctime)s %(levelname)s %(name)s [%(request_id)s]: %(message)s',
 )
+
+# Фильтр добавляет request_id в каждую запись. Он ставится на обработчики
+# корневого логгера, через которые проходят записи всех модулей приложения.
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(RequestIdFilter())
 
 logger = logging.getLogger('papaya')
 

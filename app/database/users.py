@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
+from app.database.search import like_pattern
 from app.middlewares.serializers import user_to_dict
 from app.models.users import Users
 
@@ -275,19 +276,82 @@ async def apply_role_guarded(
 async def list_users(
     *,
     include_inactive: bool = False,
+    search: str | None = None,
     limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict]:
-    """Вернуть пользователей для публичного или административного списка."""
+    """Вернуть пользователей для публичного или административного списка.
+
+    ``search`` фильтрует по имени, фамилии и email без учёта регистра: панель
+    администратора ищет человека, а не точный адрес. ``limit``/``offset``
+    ограничивают страницу на уровне СУБД — список пользователей не должен
+    тянуться целиком, чтобы показать первые строки.
+    """
     statement = select(Users)
     if not include_inactive:
         statement = statement.where(Users.isActive.is_(True))
+    statement = _apply_user_search(statement, search)
     statement = statement.order_by(Users.createdAt.desc(), Users.id)
+    if offset:
+        statement = statement.offset(offset)
     if limit is not None:
         statement = statement.limit(limit)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
         return [user_to_dict(user) for user in result.scalars().all()]
+
+
+def _apply_user_search(statement, search: str | None):
+    """Добавить фильтр поиска по имени/фамилии/email (регистронезависимо)."""
+    query = (search or '').strip()
+    if not query:
+        return statement
+    pattern = like_pattern(query)
+    return statement.where(
+        Users.name.ilike(pattern, escape='\\')
+        | Users.surname.ilike(pattern, escape='\\')
+        | Users.email.ilike(pattern, escape='\\')
+    )
+
+
+async def count_users(
+    *,
+    include_inactive: bool = False,
+    search: str | None = None,
+) -> int:
+    """Число пользователей под фильтром — для ``total`` в ответе панели."""
+    statement = select(func.count()).select_from(Users)
+    if not include_inactive:
+        statement = statement.where(Users.isActive.is_(True))
+    statement = _apply_user_search(statement, search)
+    async with AsyncSessionLocal() as session:
+        return (await session.execute(statement)).scalar_one()
+
+
+async def is_last_active_admin(user_id: str) -> bool:
+    """True, если пользователь — активный ``ADMIN`` и других активных нет.
+
+    Нужно только чтобы выбрать код ошибки при смене собственной роли (409,
+    если понижается последний администратор, иначе 403). Сам запрет понижения
+    последнего администратора проверяется атомарно в ``apply_role_guarded``;
+    здесь предварительный подсчёт допустим, потому что от него не зависит,
+    будет ли запись в БД.
+    """
+    user_uuid = _as_uuid(user_id)
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(Users.role, Users.isActive).where(Users.id == user_uuid)
+            )
+        ).one_or_none()
+        if not row:
+            return False
+        role, is_active = row
+        if role != ROLE_ADMIN or not is_active:
+            return False
+        return await _active_admins_excluding(session, user_uuid) == 0
+
 
 
 # Счёт активных администраторов намеренно не вынесен в отдельную функцию:

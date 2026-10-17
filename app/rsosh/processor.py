@@ -75,15 +75,16 @@ def _validate_document(doc: dict) -> None:
 
 
 async def _set_state(doc: dict, section: dict) -> dict:
-    """Сохранить раздел состояния и статус документа одной операцией."""
-    metadata = states.docs_metadata_with_section(doc, section)
-    updated = await db_docs.edit_doc(
-        doc['id'],
-        {
-            'metadata': metadata,
-            'status': states.DOCS_STATUS.get(section.get('state'), doc['status']),
-        },
-    )
+    """Сохранить раздел состояния и статус документа одной операцией.
+
+    Запись идёт через ``persist.write_import_state``: под блокировками и со
+    свежими ``manual_candidates`` и запросом паузы из базы. Снимок документа в
+    памяти воркера устаревает за время долгих этапов обработки, и прямая
+    запись снимка стёрла бы правки администратора, сделанные в это время.
+    """
+    from app.rsosh import persist
+
+    updated = await persist.write_import_state(doc['id'], section)
     return updated or doc
 
 
@@ -239,6 +240,21 @@ async def run_import(doc_id) -> dict:
             )
             doc = await _set_state(doc, section)
             return doc
+
+        # Граница этапа «сопоставление»: запрос паузы, поданный во время
+        # сопоставления, иначе погиб бы вместе с переходом в review — флаг
+        # стирается записью результата, а проверки после сопоставления раньше
+        # не было. Контрольная точка сохраняется так же, как на границе
+        # «распознано»: возобновление продолжит с того же места.
+        paused = await _pause_here(
+            doc,
+            stage='matching',
+            records=records,
+            pages=page_reports,
+            warnings=warnings,
+        )
+        if paused is not None:
+            return paused
 
         section = states.review_section(
             doc,

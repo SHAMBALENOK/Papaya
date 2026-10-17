@@ -108,23 +108,30 @@ async def test_olympiad_source_of_manual_olympiad(client):
     assert response.status_code == 200
     assert response.json() == {
         'title': 'Создано администратором Papaya',
-        'source_url': None,
+        'has_file': False,
     }
 
 
-async def test_olympiad_source_keeps_manual_link(client):
-    """Ручная запись с заполненной ссылкой сохраняет её в источнике."""
+async def test_olympiad_source_ignores_removed_source_url(client):
+    """Поле ``source_url`` убрано из каталога олимпиад.
+
+    Ссылка-источник заменена парой «заголовок источника + локальный файл»
+    (``has_file``, скачивание через ``/source/file``). Легаси-поле в payload
+    игнорируется и наружу не выходит ни в карточке, ни в источнике.
+    """
     olympiad = await create_olympiad(
         client,
         'Олимпиада со ссылкой',
         source_url='https://rsr-olymp.ru/manual',
     )
+    assert 'source_url' not in olympiad
 
     response = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
     assert response.status_code == 200
-    body = response.json()
-    assert body['title'] == 'Создано администратором Papaya'
-    assert body['source_url'] == 'https://rsr-olymp.ru/manual'
+    assert response.json() == {
+        'title': 'Создано администратором Papaya',
+        'has_file': False,
+    }
 
 
 async def test_olympiad_source_does_not_leak_internals(client):
@@ -136,7 +143,7 @@ async def test_olympiad_source_does_not_leak_internals(client):
     olympiad = await create_olympiad(client, 'Олимпиада без документа')
     response = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
     assert response.status_code == 200
-    assert set(response.json()) == {'title', 'source_url'}
+    assert set(response.json()) == {'title', 'has_file'}
 
 
 async def test_public_olympiad_hides_source_doc_id(client):

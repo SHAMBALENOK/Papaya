@@ -211,7 +211,16 @@ function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } 
         overlay.remove();
     };
     overlay.querySelector('[data-modal-close]').addEventListener('click', close);
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    // Закрытие по клику на подложку требует, чтобы И нажатие, И отпускание
+    // пришлись на саму подложку. Иначе выделение текста внутри окна с
+    // выводом курсора за его пределы (mouseup на подложке) ошибочно
+    // закрывало модалку — click всплывает к общему предку mousedown/mouseup.
+    let pressedOnOverlay = false;
+    overlay.addEventListener('mousedown', e => { pressedOnOverlay = e.target === overlay; });
+    overlay.addEventListener('mouseup', e => {
+        if (e.target === overlay && pressedOnOverlay) close();
+        pressedOnOverlay = false;
+    });
     document.addEventListener('keydown', onEsc);
 
     const first = overlay.querySelector('input, textarea, select');
@@ -312,7 +321,6 @@ function openOlympiadFormModal(olympiad, onDone) {
             ${inputField({ id: 'ol-site', name: 'official_url', label: 'Официальный сайт', type: 'url', value: (olympiad || {}).official_url || '', placeholder: 'https://…' })}
             ${inputField({ id: 'ol-preview', name: 'preview_image', label: 'Превью для карточек (URL)', type: 'url', value: (olympiad || {}).preview_image || '', placeholder: 'https://…' })}
             ${inputField({ id: 'ol-image', name: 'image', label: 'Большая картинка для страницы (URL)', type: 'url', value: (olympiad || {}).image || '', placeholder: 'https://…' })}
-            ${inputField({ id: 'ol-source', name: 'source_url', label: 'Источник информации (ссылка)', type: 'url', value: (olympiad || {}).source_url || '', placeholder: 'https://…' })}
             ${textareaField({ id: 'ol-desc', name: 'description', label: 'Описание', value: (olympiad || {}).description || '' })}
             <div class="flex flex-wrap justify-end gap-3 mt-10">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
@@ -339,7 +347,6 @@ function openOlympiadFormModal(olympiad, onDone) {
             official_url: (fd.get('official_url') || '').trim() || null,
             preview_image: (fd.get('preview_image') || '').trim() || null,
             image: (fd.get('image') || '').trim() || null,
-            source_url: (fd.get('source_url') || '').trim() || null,
             description: (fd.get('description') || '').trim() || null,
         };
         const btn = e.target.querySelector('button[type="submit"]');

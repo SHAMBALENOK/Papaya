@@ -73,11 +73,14 @@ def _prepare_database() -> None:
     subprocess (отдельный интерпретатор и loop), как это делает и сам проект
     (setup.sh -> ensure_db_schema.py).
     """
+    # WITH (FORCE) отключает посторонние сессии тестовой БД (например, открытый
+    # в pgAdmin papaya_test): без него DROP падает с ObjectInUseError и вся
+    # сессия тестов не стартует.
     create_script = (
         'import asyncio, asyncpg\n'
         'async def main():\n'
         f'    conn = await asyncpg.connect({ADMIN_DB_URL!r})\n'
-        f'    await conn.execute("DROP DATABASE IF EXISTS {TEST_DB_NAME}")\n'
+        f'    await conn.execute("DROP DATABASE IF EXISTS {TEST_DB_NAME} WITH (FORCE)")\n'
         f'    await conn.execute("CREATE DATABASE {TEST_DB_NAME}")\n'
         '    await conn.close()\n'
         'asyncio.run(main())\n'

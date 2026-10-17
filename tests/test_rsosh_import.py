@@ -787,6 +787,67 @@ async def test_pause_stops_and_resume_continues_import(client):
     assert any('Физтех' in name for name in names)
 
 
+async def test_manual_candidate_added_during_import_survives(client, monkeypatch):
+    """Олимпиада, добавленная вручную во время обработки, не пропадает.
+
+    Воркер держит документ в памяти через долгие этапы, и раньше его запись
+    результата затирала ``manual_candidates``, добавленные администратором в
+    состоянии ``processing``: олимпиада исчезала из предпросмотра без следа.
+    """
+    from app.rsosh import matching, persist
+
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+
+    original = matching.build_candidates
+
+    async def add_then_build(records):
+        await persist.add_manual_candidate(
+            doc['id'], name='Олимпиада, добавленная вручную'
+        )
+        return await original(records)
+
+    monkeypatch.setattr(matching, 'build_candidates', add_then_build)
+
+    started = await run_import(client, doc['id'])
+    assert started['state'] == 'review', started
+
+    names = await _candidate_names(client, doc['id'])
+    assert 'Олимпиада, добавленная вручную' in names, names
+
+
+async def test_pause_requested_during_matching_is_honored(client, monkeypatch):
+    """Пауза, поданная во время сопоставления, останавливает прогон.
+
+    Раньше после сопоставления не было границы проверки паузы: флаг стирался
+    записью результата, и импорт переходил в review, игнорируя запрос.
+    """
+    from app.rsosh import matching, persist
+
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+
+    original = matching.build_candidates
+    paused_once = False
+
+    async def pause_once_then_build(records):
+        nonlocal paused_once
+        if not paused_once:
+            paused_once = True
+            await persist.request_pause(doc['id'])
+        return await original(records)
+
+    monkeypatch.setattr(matching, 'build_candidates', pause_once_then_build)
+
+    started = await run_import(client, doc['id'])
+    assert started['state'] == 'paused', started
+    assert started['progress']['stage'] == 'matching'
+
+    resumed = await client.post(f"/api/v1/imports/{doc['id']}/resume")
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()['state'] == 'review', resumed.text
+
+
 async def test_resume_uses_checkpoint_without_reextraction(client, monkeypatch):
     """Возобновление после распознавания не перечитывает документ.
 

@@ -66,7 +66,6 @@ def olympiad_to_dict(olympiad) -> dict:
         'official_url': olympiad.official_url,
         'preview_image': olympiad.preview_image,
         'image': olympiad.image,
-        'source_url': olympiad.source_url,
         'source_doc_id': str(olympiad.source_doc_id) if olympiad.source_doc_id else None,
         'status': olympiad.status,
         'archive_reason': olympiad.archive_reason,

@@ -50,6 +50,24 @@ CACHE_TTL = _env_int('CACHE_TTL', 600)
 # Secure-флаг ставится только по HTTPS; для локальной разработки — false.
 COOKIE_SECURE = _env_bool('COOKIE_SECURE', ENVIRONMENT == 'production')
 
+# --- Ограничение частоты запросов (rate limiting) -------------------------
+# Защита от подбора пароля и массовой регистрации. Счётчики живут в Redis,
+# поэтому лимит общий на все процессы приложения, а не «на воркер». Окно —
+# фиксированное: счётчик заводится с TTL и не продлевается при каждом запросе.
+RATE_LIMIT_ENABLED = _env_bool('RATE_LIMIT_ENABLED', True)
+# Вход: отдельно по IP (распределённый перебор) и по email (подбор одного
+# аккаунта). Лимит по email ниже — он должен бить по цели, а не по сети.
+LOGIN_RATE_IP_LIMIT = _env_int('LOGIN_RATE_IP_LIMIT', 30)
+LOGIN_RATE_IDENTIFIER_LIMIT = _env_int('LOGIN_RATE_IDENTIFIER_LIMIT', 15)
+LOGIN_RATE_WINDOW_SECONDS = _env_int('LOGIN_RATE_WINDOW_SECONDS', 60)
+# Регистрация: медленнее и по IP — аккаунты не должны штамповаться пачками.
+REGISTER_RATE_IP_LIMIT = _env_int('REGISTER_RATE_IP_LIMIT', 30)
+REGISTER_RATE_WINDOW_SECONDS = _env_int('REGISTER_RATE_WINDOW_SECONDS', 600)
+# Обновление сессии клиенты шлют часто (несколько вкладок): лимит намеренно
+# выше, чтобы не разлогинивать обычного пользователя.
+REFRESH_RATE_IP_LIMIT = _env_int('REFRESH_RATE_IP_LIMIT', 120)
+REFRESH_RATE_WINDOW_SECONDS = _env_int('REFRESH_RATE_WINDOW_SECONDS', 60)
+
 # --- Импорт таблиц ---------------------------------------------------------
 MAX_UPLOAD_MB = _env_int('MAX_UPLOAD_MB', 30)
 TABLES_DIR = os.getenv(

@@ -112,11 +112,11 @@ def test_source_block_always_rendered():
     """
     source = _read('pages', 'olympiads.js')
     assert 'function sourceBlockHtml' in source
-    body = re.search(r'function sourceBlockHtml\(source\) \{(.*?)\n\}', source, re.S)
+    body = re.search(r'function sourceBlockHtml\(source, olympiadId\) \{(.*?)\n\}', source, re.S)
     assert body, 'sourceBlockHtml(source) не найден'
     assert 'return `' in body.group(1)
     # Ранний выход «нет ни названия, ни ссылки» — как раз то, что убираем.
-    assert 'if (!title && !url)' not in body.group(1)
+    assert 'if (!title && !hasFile)' not in body.group(1)
 
 
 def test_frontend_calls_source_endpoint():
@@ -467,11 +467,12 @@ def test_frontend_has_no_legacy_role_endpoints():
         for banned in ('grantAdmin', 'demoteAdmin', 'grant_admin', 'demote_admin'):
             assert banned not in source, '{}: {}'.format(name, banned)
 
-    # Кнопка «Сделать админом»/«Снять админа» сохранена и ходит в тот же
-    # эндпоинт: возможность повысить и снять роль не должна была исчезнуть.
+    # Отдельной кнопки-ярлыка «Сделать админом»/«Снять админа» в списке нет:
+    # роль меняется только через выбор роли и общий «Сохранить роль», чтобы был
+    # единственный путь и единственный источник истины о правах.
     admin = _read('pages', 'admin.js')
-    assert 'Сделать админом' in admin
-    assert 'Снять админа' in admin
+    assert 'Сделать админом' not in admin
+    assert 'Снять админа' not in admin
     assert 'setUserRole' in admin
 
 

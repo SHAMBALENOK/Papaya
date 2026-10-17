@@ -7,6 +7,18 @@
  * ========================================================================== */
 const API_BASE = '/api/v1';
 
+/* Query-строка для постраничных административных списков (limit/offset/search).
+   Пустой объект даёт пустую строку — вызов без параметров возвращает всё. */
+function adminQuery(opts) {
+    if (!opts) return '';
+    const params = new URLSearchParams();
+    if (opts.search) params.set('search', opts.search);
+    if (opts.limit != null) params.set('limit', opts.limit);
+    if (opts.offset != null) params.set('offset', opts.offset);
+    const query = params.toString();
+    return query ? `?${query}` : '';
+}
+
 function isJwtAuthError(status, data) {
     if (status !== 401 && status !== 403) return false;
     const detail = data && typeof data.detail === 'string' ? data.detail.toLowerCase() : '';
@@ -16,13 +28,21 @@ function isJwtAuthError(status, data) {
         || detail.includes('expired token');
 }
 
-/* Истёкший access-токен — не повод выкидывать пользователя: сессия
+/* Протухший access-токен — не повод выкидывать пользователя: сессия
    продлевается через POST /auth/refresh (ротация refresh-токена), после
-   чего исходный запрос повторяется один раз. */
+   чего исходный запрос повторяется один раз.
+
+   Поводом считается не только «access token expired», но и «access token
+   missing»: access-cookie короткоживущая, и браузер удаляет её раньше
+   refresh-cookie. Тогда следующий запрос приходит вообще без токена, и сервер
+   отвечает «Access token missing». Это то же самое событие «access-токена
+   нет», и его тоже нужно закрывать refresh'ем, а не разлогинивать. Блокировку
+   аккаунта («Account is blocked») трогать нельзя: там refresh не поможет. */
 function isAccessTokenExpiredError(status, data) {
     if (status !== 401) return false;
     const detail = data && typeof data.detail === 'string' ? data.detail.toLowerCase() : '';
-    return detail.includes('access token expired');
+    if (detail.includes('blocked')) return false;
+    return detail.includes('access token');
 }
 
 /* Однопоточное обновление: параллельные 401 от нескольких запросов должны
@@ -133,6 +153,8 @@ const api = {
     getOlympiad(id)      { return this.get(`/olympiads/${id}`, { skipAuthRedirect: true }); },
     getOlympiadUniversities(id) { return this.get(`/olympiads/${id}/universities`, { skipAuthRedirect: true }); },
     getOlympiadSource(id) { return this.get(`/olympiads/${id}/source`, { skipAuthRedirect: true }); },
+    /* Публичная ссылка на файл документа-источника олимпиады (если есть). */
+    olympiadSourceFileUrl(id) { return `${API_BASE}/olympiads/${id}/source/file`; },
     addOlympiad(d)       { return this.post('/olympiads/add_olympiad', d); },
     editOlympiad(id, d)  { return this.post(`/olympiads/edit_olympiad/${id}`, d); },
 
@@ -153,10 +175,19 @@ const api = {
     /* Сохранить выбор администратора вместе с прогоном (переживает
        перезагрузку страницы). */
     saveImportSelection(id, body) { return this.put(`/imports/${id}/selection`, body); },
+    /* Добавить/убрать олимпиаду вручную прямо в меню документа РСОШ. */
+    addImportCandidate(id, body) { return this.post(`/imports/${id}/candidates`, body); },
+    removeImportCandidate(id, nameNorm) {
+        return this.post(`/imports/${id}/candidates/remove`, { name_norm: nameNorm });
+    },
 
     /* Администрирование */
-    adminUsers()         { return this.get('/admin/users'); },
-    adminOlympiads()     { return this.get('/admin/olympiads'); },
+    adminUsers(opts) {
+        return this.get(`/admin/users${adminQuery(opts)}`);
+    },
+    adminOlympiads(opts) {
+        return this.get(`/admin/olympiads${adminQuery(opts)}`);
+    },
     adminBviLinks(status, opts) {
         const params = new URLSearchParams();
         if (status) params.set('status', status);

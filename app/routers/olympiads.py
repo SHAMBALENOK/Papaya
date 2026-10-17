@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from app import database, schemas
 from app.core import deps
+from app.routers.docs import document_file_response
 
 olympiads_page = APIRouter(
     prefix='/olympiads',
@@ -45,15 +46,16 @@ RSOSH_SOURCE_TITLE = 'Перечень олимпиад РСОШ'
 class SourceInfo(BaseModel):
     """Откуда взялась информация об олимпиаде.
 
-    Ровно два поля, оба пользовательские: ``title`` — что стало источником
-    данных, ``source_url`` — публичная ссылка, если она есть. Внутренние
-    детали документа (UUID, имя файла, хеш, статус обработки, metadata) здесь
-    не отдаются: ответ на вопрос «откуда это» не должен быть доступом к
-    загруженному файлу.
+    ``title`` — что стало источником данных: название документа-источника
+    (загруженного перечня РСОШ) либо прямое указание на ручное создание
+    администратором. ``has_file`` — есть ли у документа локальная копия файла,
+    которую можно скачать через ``/olympiads/{id}/source/file``. Внутренние
+    детали документа (UUID, хеш, статус обработки, metadata) здесь не отдаются:
+    ответ на вопрос «откуда это» не должен быть доступом к устройству импорта.
     """
 
     title: str | None = None
-    source_url: str | None = None
+    has_file: bool = False
 
 
 def _serialize(olympiad: dict) -> dict:
@@ -72,7 +74,6 @@ def _serialize(olympiad: dict) -> dict:
         'official_url': olympiad.get('official_url'),
         'preview_image': olympiad.get('preview_image'),
         'image': olympiad.get('image'),
-        'source_url': olympiad.get('source_url'),
         'status': olympiad.get('status'),
         'is_archived': olympiad.get('status') != 'PUBLISHED',
     }
@@ -143,18 +144,15 @@ async def olympiad_source(olympiad_id: uuid.UUID):
     """Откуда взялась информация об олимпиаде.
 
     Отвечает всегда (кроме несуществующей олимпиады): у Papaya два нормальных
-    источника — документ РСОШ и ручной ввод администратора, и оба надо называть
-    прямо. Раньше «нет документа» грозил ошибкой, из-за чего ручная олимпиада
-    выглядела сломанной.
+    источника — документ РСОШ (называем его именем) и ручной ввод
+    администратора, и оба надо называть прямо.
 
-    - импорт РСОШ → ``title`` из названия документа, ``source_url`` из metadata
-      или из поля олимпиады;
-    - ручное создание → ``title`` = «Создано администратором Papaya»,
-      ``source_url`` = заполненная ссылка или ``null``.
+    - импорт РСОШ → ``title`` = название документа-источника;
+    - ручное создание → ``title`` = «Создано администратором Papaya».
 
-    Название файла, хеш, статус обработки и прочие служебные поля документа
-    наружу не отдаются: нужен ответ на вопрос «откуда это», а не доступ к
-    загруженному файлу.
+    ``has_file`` говорит, есть ли у документа локальная копия, доступная по
+    ``/olympiads/{id}/source/file``. Служебные поля документа (UUID, хеш,
+    статус обработки) наружу не отдаются.
     """
     try:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)
@@ -162,18 +160,52 @@ async def olympiad_source(olympiad_id: uuid.UUID):
             raise HTTPException(status_code=404, detail='Olympiad not found')
 
         title = MANUAL_SOURCE_TITLE
-        source_url = olympiad.get('source_url') or None
+        has_file = False
 
         doc_id = olympiad.get('source_doc_id')
         if doc_id:
             doc = await database.docs.get_doc(uuid.UUID(str(doc_id)))
             if doc:
-                metadata = doc.get('metadata') or {}
-                rsosh = metadata.get('rsosh') or {}
-                title = metadata.get('title') or rsosh.get('title') or RSOSH_SOURCE_TITLE
-                source_url = metadata.get('source_url') or source_url
+                title = doc.get('name') or RSOSH_SOURCE_TITLE
+                has_file = bool(doc.get('storage_key'))
 
-        return SourceInfo(title=title, source_url=source_url)
+        return SourceInfo(title=title, has_file=has_file)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@olympiads_page.get(
+    '/{olympiad_id}/source/file',
+    responses={
+        200: {'description': 'Файл документа-источника олимпиады'},
+        404: {'description': 'Olympiad, source document or file not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def olympiad_source_file(olympiad_id: uuid.UUID):
+    """Скачать файл документа-источника опубликованной олимпиады.
+
+    Публичный доступ выдаётся не к произвольным документам, а только к файлу,
+    привязанному к опубликованной олимпиаде: это данные, на которых основана
+    карточка, и пользователь должен иметь возможность их проверить.
+    """
+    try:
+        olympiad = await database.olympiads.get_olympiad(olympiad_id)
+        if not olympiad or olympiad.get('status') != 'PUBLISHED':
+            raise HTTPException(status_code=404, detail='Document not found')
+
+        doc_id = olympiad.get('source_doc_id')
+        if not doc_id:
+            raise HTTPException(status_code=404, detail='Document not found')
+
+        doc = await database.docs.get_doc(uuid.UUID(str(doc_id)))
+        if not doc:
+            raise HTTPException(status_code=404, detail='Document not found')
+
+        return document_file_response(doc)
     except HTTPException:
         raise
     except Exception:
