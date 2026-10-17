@@ -128,7 +128,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Олимпиады с БВИ | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status", "bvi_status": "CONFIRMED"｜"PENDING", "is_historical": bool}]}` |
+| 200 | Олимпиады с БВИ | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "status", "bvi_status": "CONFIRMED"｜"PENDING", "is_historical": bool}]}` |
 | 401 | `include_pending` без входа | `{"detail": "Access token required to view pending requests"}` |
 | 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
 | 404 | Вуз не найден | `{"detail": "University not found"}` |
@@ -209,7 +209,7 @@
 | 404 | Университет или олимпиада не найдены | `{"detail": "..."}` |
 
 `BviOlympiadItem`: `id`, `name`, `description`, `official_url`,
-`preview_image`, `image`, `source_url`, `status`, `bvi_status`,
+`preview_image`, `image`, `status`, `bvi_status`,
 `is_historical`.
 
 `BviUniversityItem`: `id`, `name`, `short_name`, `description`, `website`,
@@ -272,7 +272,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status", "is_archived"}]}` |
+| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "status", "is_archived"}]}` |
 
 `status`: `PUBLISHED` — в актуальном перечне РСОШ, `ARCHIVED` — больше нет
 в перечне (запись сохранена исторически).
@@ -290,7 +290,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "source_url", "status", "is_archived": bool}` |
+| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "status", "is_archived": bool}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
 Публичная модель минимальна: `name_norm`, `source_doc_id`, `createdAt`,
@@ -320,21 +320,19 @@
 
 ## GET /olympiads/{olympiad_id}/source
 
-Откуда взялась информация об олимпиаде. Публично, без доступа к файлу
-документа: ровно два пользовательских поля.
+Откуда взялась информация об олимпиаде. Публично.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Источник данных | `{"title": str, "source_url": str｜null}` |
+| 200 | Источник данных | `{"title": str, "has_file": bool}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
-`404` означает только «олимпиады нет». Отсутствие документа РСОШ — нормальное
-состояние, а не ошибка:
+- импорт РСОШ → `title` = название документа-источника, `has_file` = есть ли у документа локальная копия;
+- ручное создание → `{"title": "Создано администратором Papaya", "has_file": false}`.
 
-- импорт из РСОШ → `title` из названия документа (иначе «Перечень олимпиад
-  РСОШ»), `source_url` из metadata или поля олимпиады;
-- ручное создание → `{"title": "Создано администратором Papaya", "source_url": null}`
-  либо с заполненной ссылкой.
+Файл документа-источника можно скачать по публичному маршруту
+`GET /api/v1/olympiads/{olympiad_id}/source/file` (только если олимпиада
+опубликована и у неё есть документ-источник с локальной копией).
 
 Внутренние поля документа (UUID, имя файла, хеш, статус обработки, metadata) в
 ответе не участвуют. Сам `source_doc_id` олимпиады в публичных ответах каталога
@@ -347,7 +345,7 @@
 
 Ручное создание олимпиады (резервный путь; основной — импорт РСОШ).
 
-**Request body:** `{"name": str, "description"?, "official_url"?, "preview_image"?, "image"?, "source_url"?}`
+**Request body:** `{"name": str, "description"?, "official_url"?, "preview_image"?, "image"?}`
 
 | Code | Description | Body |
 |------|-------------|------|
@@ -359,7 +357,7 @@
 
 ## POST /olympiads/edit_olympiad/{olympiad_id}
 
-**Request body:** любое подмножество `{"name", "description", "official_url", "image", "source_url", "status"}`.
+**Request body:** любое подмножество `{"name", "description", "official_url", "preview_image", "image", "status"}`.
 
 | Code | Description | Body |
 |------|-------------|------|
@@ -382,7 +380,20 @@
 | 200 | Найденные сущности | `{"query": str, "universities": [...], "olympiads": [...]}` |
 | 200 (пустой `q`) | Ничего не искали | `{"query": "", "universities": [], "olympiads": []}` |
 
+Олимпиады в поиске не содержат `source_url`.
+
 ---
+
+## GET /olympiads/{olympiad_id}/source/file
+
+Скачать файл документа-источника опубликованной олимпиады. Публично.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Файл документа | `application/pdf` и др. |
+| 404 | Олимпиада, документ или файл не найдены | `{"detail": "Document not found"}` |
+
+Доступ только к опубликованной олимпиаде (`status === PUBLISHED`), у которой есть `source_doc_id` с локальным файлом. Имя скачиваемого файла — название документа (с корректным расширением).
 
 ## POST /docs/upload
 
@@ -456,6 +467,10 @@
 возвращается, чтобы открытая заново страница проверки восстановила решения;
 `null` — выбор ещё не сохранялся. Сохраняется через `PUT …/selection`
 (см. ниже).
+
+Кандидаты, добавленные вручную (`manual_candidates`), в этом ответе не
+разделяются по отдельному полю, а присоединяются к `candidates` и показываются
+в едином перечне для предпросмотра.
 
 ---
 
@@ -572,7 +587,37 @@
 | 401 | Нет токена | `{"detail": "..."}` |
 | 403 | Не администратор | `{"detail": "Permission denied"}` |
 | 404 | Импорт не найден | `{"detail": "Import not found"}` |
-| 409 | Прогон не в состоянии ``review`` | `{"detail": "..."}` |
+| 409 | Прогон не в состоянии `review`/`paused`/`processing` | `{"detail": "..."}` |
+
+## POST /imports/{import_id}/candidates
+
+Добавить олимпиаду в документ РСОШ вручную. **Администратор.**
+
+**Request body:** `{"name": str, "description"?: str}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Кандидат добавлен | `{"state": "review"|..., "manual_candidates": [...]}` |
+| 400 | Пустое название | `{"detail": "Название олимпиады не может быть пустым"}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | Прогон подтверждён/отклонён или кандидат уже есть | `{"detail": "..."}` |
+
+## POST /imports/{import_id}/candidates/remove
+
+Убрать вручную добавленную олимпиаду. **Администратор.**
+
+**Request body:** `{"name_norm": str}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Кандидат удалён | `{"state": "review"|..., "manual_candidates": [...]}` |
+| 400 | Кандидат не найден | `{"detail": "Такой олимпиады нет среди добавленных вручную"}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | Прогон подтверждён/отклонён | `{"detail": "..."}` |
 
 ---
 
@@ -595,6 +640,12 @@
 
 **Администратор.** Списки для панели: пользователи (с ролью и привязкой к
 вузу), полный каталог олимпиад включая архивные, очередь заявок БВИ.
+
+`/admin/users` и `/admin/olympiads` поддерживают query-параметры `search`
+(подстрока по имени/фамилии/email для пользователей и по названию/описанию для
+олимпиад), `limit` и `offset`. В ответе есть `total` — сколько записей под
+фильтром всего, чтобы панель показывала «Показано N из M» и догружала
+следующую страницу. Без `limit` возвращается весь список.
 
 ---
 
@@ -685,7 +736,7 @@
 
 ## Проверка ссылок
 
-Поля `website`, `official_url`, `preview_image`, `image`, `source_url` проверяются
+Поля `website`, `official_url`, `preview_image`, `image` проверяются
 одинаково при создании и при правке: допустимы только `http://` и `https://` с
 хостом. `javascript:`, `data:`, `file:`, `vbscript:`, строки без схемы и с
 пробелами отклоняются с 422 — интерфейс вставляет эти значения в `href`/`src`,

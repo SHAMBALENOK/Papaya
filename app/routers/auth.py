@@ -3,13 +3,13 @@ import uuid
 from typing import Annotated
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_cached_user, get_redis
-from app.core import auth_session, deps
+from app.core import auth_session, deps, rate_limit
 from app.core.cache_guard import safe_cache_write
 from app.core.config import COOKIE_SECURE
 from app.core.deps import ACCOUNT_BLOCKED_DETAIL
@@ -157,16 +157,19 @@ async def auth(
         400: {'description': 'Incorrect password format'},
         409: {'description': 'Account already exists'},
         422: {'description': 'Validation error'},
+        429: {'description': 'Too many registration attempts'},
         500: {'description': 'Internal server error'},
     },
 )
 async def register(
+    request: Request,
     response: Response,
     user: schemas.users.UserCreate,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
 ):
     try:
+        await rate_limit.enforce_register(r, request)
         check_password = re_check.is_valid_password(user.password)
         if not check_password[0]:
             raise HTTPException(status_code=400, detail=check_password[1])
@@ -205,18 +208,24 @@ async def register(
         401: {'description': 'Invalid email or password'},
         403: {'description': 'Account is blocked'},
         422: {'description': 'Validation error'},
+        429: {'description': 'Too many login attempts'},
         500: {'description': 'Internal server error'},
     },
 )
 async def login(
+    request: Request,
     response: Response,
     user: schemas.users.LoginRequest,
     db: AsyncSession = Depends(get_db),
     r: aioredis.Redis = Depends(get_redis),
 ):
     try:
+        await rate_limit.enforce_login(r, request, user.email)
         db_user = await database.users.find_user_by_email(user.email)
         if not db_user:
+            # Проверка пароля против заглушки: время ответа не должно выдавать,
+            # что аккаунта с таким email нет (иначе — перебор существующих).
+            tools.dummy_password_check(user.password)
             raise HTTPException(
                 status_code=401,
                 detail='Invalid email or password',
@@ -260,10 +269,12 @@ async def login(
         200: {'description': 'Tokens rotated; new cookies set'},
         401: {'description': 'Refresh token missing, expired or revoked'},
         403: {'description': 'Invalid refresh token or account is blocked'},
+        429: {'description': 'Too many refresh attempts'},
         500: {'description': 'Internal server error'},
     },
 )
 async def refresh(
+    request: Request,
     r: aioredis.Redis = Depends(get_redis),
     refresh_jwt: Annotated[str | None, Cookie()] = None,
 ):
@@ -280,6 +291,7 @@ async def refresh(
     приходит сюда с refresh-кукой.
     """
     try:
+        await rate_limit.enforce_refresh(r, request)
         if not refresh_jwt:
             raise HTTPException(
                 status_code=401,

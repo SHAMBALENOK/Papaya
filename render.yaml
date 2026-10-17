@@ -20,6 +20,11 @@ services:
         fromDatabase:
           name: papaya-db
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: papaya-redis
+          property: connectionString
       - key: MAX_UPLOAD_MB
         value: "30"
       - key: COOKIE_SECURE
@@ -32,6 +37,15 @@ services:
         value: "1"
       - key: MKL_NUM_THREADS
         value: "1"
+
+  # Redis (Key Value): сессии обновления, кэш ролей и счётчики ограничения
+  # частоты запросов живут здесь. Без него приложение не работает: без Redis
+  # не создаётся сессия, а вход/регистрация лишаются лимитов.
+  - type: redis
+    name: papaya-redis
+    region: frankfurt
+    plan: free
+    ipAllowList: []
 
 databases:
   - name: papaya-db

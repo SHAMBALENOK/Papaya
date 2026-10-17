@@ -35,6 +35,16 @@ RUN chmod +x /setup.sh && \
     sed -i 's/\r$//' /setup.sh && \
     head -1 /setup.sh | grep -q '^#!/bin/sh'
 
+# Непривилегированный пользователь: приложение обрабатывает загруженные
+# документы и не должно выполняться с правами root. uid 1000 совпадает с
+# типовым uid разработчика на Linux-хосте, поэтому bind-mount рабочего дерева
+# остаётся записываемым. В docker-compose тестовый профиль переопределяет
+# пользователя на root (ему нужно ставить dev-зависимости) — см. комментарий
+# в сервисе test.
+RUN useradd --create-home --uid 1000 appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
 ENTRYPOINT ["/setup.sh"]
 EXPOSE 5000
 CMD ["gunicorn", "app.main:app", "--preload", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:5000"]

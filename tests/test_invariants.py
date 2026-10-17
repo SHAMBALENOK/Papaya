@@ -271,11 +271,11 @@ async def test_public_olympiad_has_no_technical_fields(client):
     assert detail.status_code == 200
     body = detail.json()
     for field in ('name_norm', 'source_doc_id', 'createdAt', 'updatedAt',
-                  'archive_reason'):
+                  'archive_reason', 'source_url'):
         assert field not in body, f'{field} не должен попадать в публичный ответ'
     assert set(body) == {
         'id', 'name', 'description', 'official_url', 'preview_image', 'image',
-        'source_url', 'status', 'is_archived',
+        'status', 'is_archived',
     }
     # Архив виден по статусу, а не по техническому enum-значению.
     assert body['status'] == 'ARCHIVED'
@@ -457,11 +457,9 @@ async def test_olympiad_accepts_http_and_https(client):
             official_url=url,
             preview_image=url,
             image=url,
-            source_url=url,
         )
         assert created['official_url'] == url
         assert created['image'] == url
-        assert created['source_url'] == url
 
 
 async def test_university_rejects_unsafe_urls(client):

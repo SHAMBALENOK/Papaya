@@ -91,7 +91,6 @@ async def search(
                     official_url=item.get('official_url'),
                     preview_image=item.get('preview_image'),
                     image=item.get('image'),
-                    source_url=item.get('source_url'),
                     status=item.get('status') or 'PUBLISHED',
                     is_archived=item.get('status') != 'PUBLISHED',
                 )

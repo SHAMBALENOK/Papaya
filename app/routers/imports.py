@@ -36,6 +36,19 @@ class RsoshStartRequest(BaseModel):
     doc_id: uuid.UUID
 
 
+class ManualCandidateRequest(BaseModel):
+    """Олимпиада, добавленная администратором вручную в меню документа РСОШ."""
+
+    name: str
+    description: str | None = None
+
+
+class ManualCandidateRemoveRequest(BaseModel):
+    """Удаление вручную добавленной олимпиады (по нормализованному имени)."""
+
+    name_norm: str
+
+
 class ConfirmRequest(BaseModel):
     """Подтверждение импорта с выборочным применением кандидатов.
 
@@ -257,10 +270,15 @@ async def import_preview(
         section = states.rsosh_section(doc)
         if section.get('state') == 'processing':
             raise HTTPException(status_code=409, detail='Import is still processing')
+        # Вручную добавленные олимпиады показываются вместе с распознанными:
+        # для администратора это единый список строк перечня.
+        candidates = list(section.get('candidates') or []) + list(
+            section.get('manual_candidates') or []
+        )
         return {
             'import': _import_view(doc),
             'pages': section.get('pages') or [],
-            'candidates': section.get('candidates') or [],
+            'candidates': candidates,
             # Сохранённый ранее выбор администратора (если есть): панель
             # восстанавливает по нему подтверждённые/снятые строки и правки.
             'selection': section.get('selection'),
@@ -488,6 +506,83 @@ async def save_selection(
         await _rsosh_doc(import_id)
         doc = await persist.save_import_selection(
             import_id, selection=payload.model_dump()
+        )
+        return _import_view(doc)
+    except RsoshConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/{import_id}/candidates',
+    responses={
+        200: {'description': 'Olympiad added to the import document'},
+        400: {'description': 'Invalid candidate (empty name) or not a RSOSH list'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is confirmed/rejected or duplicate candidate'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def add_manual_candidate(
+    import_id: uuid.UUID,
+    payload: ManualCandidateRequest,
+    current_user: deps.AdminUser = None,
+):
+    """Добавить олимпиаду в документ РСОШ вручную.
+
+    Пока документ не подтверждён и не отклонён, администратор может дополнить
+    перечень олимпиадой, которой не нашлось в распознанном списке. При
+    подтверждении такая олимпиада создаётся с источником — этим документом.
+    """
+    try:
+        await _rsosh_doc(import_id)
+        doc = await persist.add_manual_candidate(
+            import_id,
+            name=payload.name,
+            description=payload.description,
+        )
+        return _import_view(doc)
+    except RsoshConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/{import_id}/candidates/remove',
+    responses={
+        200: {'description': 'Manual olympiad removed from the import document'},
+        400: {'description': 'Candidate not found or not a RSOSH list'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is confirmed/rejected'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def remove_manual_candidate(
+    import_id: uuid.UUID,
+    payload: ManualCandidateRemoveRequest,
+    current_user: deps.AdminUser = None,
+):
+    """Убрать вручную добавленную олимпиаду из документа РСОШ."""
+    try:
+        await _rsosh_doc(import_id)
+        doc = await persist.remove_manual_candidate(
+            import_id, name_norm=payload.name_norm
         )
         return _import_view(doc)
     except RsoshConflictError as exc:

@@ -188,10 +188,10 @@ def test_promised_fields_are_present():
     """Обещанные документацией поля есть в схеме."""
     problems = []
     promised = {
-        '/api/v1/olympiads/{olympiad_id}': {'is_archived', 'source_url'},
-        '/api/v1/olympiads/{olympiad_id}/universities': {'is_historical'},
-        '/api/v1/universities/{university_id}/olympiads': {'is_historical'},
-    }
+            '/api/v1/olympiads/{olympiad_id}': {'is_archived'},
+            '/api/v1/olympiads/{olympiad_id}/universities': {'is_historical'},
+            '/api/v1/universities/{university_id}/olympiads': {'is_historical'},
+        }
     for route, fields in promised.items():
         operation = PATHS.get(route, {}).get('get')
         available = _fields(_json_body(operation)) if operation else set()

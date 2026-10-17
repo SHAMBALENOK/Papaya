@@ -73,7 +73,7 @@ class UniversityBvi(Base):
         ForeignKey('users.id', ondelete='SET NULL'),
         nullable=True,
     )
-    createdAt = Column(DateTime(timezone=True), default=_utcnow)
+    createdAt = Column(DateTime(timezone=True), default=_utcnow, index=True)
     updatedAt = Column(
         DateTime(timezone=True),
         default=_utcnow,

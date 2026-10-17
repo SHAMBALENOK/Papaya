@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import validate_config
 from app.core.errors import install_exception_handlers
+from app.middlewares.request_id import RequestIdMiddleware
 
 validate_config()
 from app import schemas
@@ -38,6 +39,10 @@ async def main_lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=main_lifespan)
+
+# Идентификатор запроса ставится самым внешним middleware: он должен покрывать
+# все маршруты, включая ошибки, и попадать в логи ещё до обработчиков.
+app.add_middleware(RequestIdMiddleware)
 
 install_exception_handlers(app)
 

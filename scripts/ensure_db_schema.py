@@ -25,6 +25,9 @@ import sys
 SCHEME = 'postgresql+asyncpg://'
 # Название ревизии, соответствующее уже существующей схеме create_all
 BASELINE_REVISION = '0001'
+# Ключ advisory-блокировки PostgreSQL, сериализующий миграции между
+# процессами (web и celery стартуют параллельно и оба зовут этот скрипт).
+MIGRATION_LOCK_KEY = 0x50415041  # 'PAPA'
 
 
 async def _table_exists(conn, table: str) -> bool:
@@ -92,6 +95,43 @@ async def _ensure_database(dsn: str) -> None:
         await conn.close()
 
 
+def _dsn() -> str:
+    """DATABASE_URL в форме, понятной asyncpg (без ``+asyncpg``)."""
+    return os.environ['DATABASE_URL'].replace(SCHEME, 'postgresql://', 1)
+
+
+async def _run_migrations_locked(has_version: bool, has_schema: bool) -> None:
+    """Применить миграции под advisory-блокировкой.
+
+    Web и celery стартуют одновременно и оба выполняют этот скрипт. Без
+    блокировки два ``alembic upgrade head`` могли бы пойти параллельно и,
+    например, оба попытаться создать один индекс. ``pg_advisory_lock``
+    сериализует их: второй процесс ждёт первый на той же паре (база, ключ).
+    Блокировка снимается автоматически при разрыве соединения, но мы снимаем
+    её явно.
+    """
+    import asyncpg
+
+    conn = await asyncpg.connect(_dsn())
+    try:
+        await conn.execute('SELECT pg_advisory_lock($1)', MIGRATION_LOCK_KEY)
+        if has_version:
+            print('INFO: database is under Alembic control -> upgrade head')
+            _alembic('upgrade', 'head')
+        elif has_schema:
+            # Старые базы: не пересоздаём таблицы, а закрепляем baseline-ревизию
+            # и применяем только последующие миграции (индексы и т.д.).
+            print('INFO: legacy schema detected -> stamp %s then upgrade head' % BASELINE_REVISION)
+            _alembic('stamp', BASELINE_REVISION)
+            _alembic('upgrade', 'head')
+        else:
+            print('INFO: empty database -> upgrade head')
+            _alembic('upgrade', 'head')
+    finally:
+        await conn.execute('SELECT pg_advisory_unlock($1)', MIGRATION_LOCK_KEY)
+        await conn.close()
+
+
 def main() -> int:
     """Определить состояние БД и применить нужную стратегию миграции."""
     if not os.environ.get('DATABASE_URL'):
@@ -99,18 +139,7 @@ def main() -> int:
         return 0
 
     has_version, has_schema = asyncio.run(_db_state())
-    if has_version:
-        print('INFO: database is under Alembic control -> upgrade head')
-        _alembic('upgrade', 'head')
-    elif has_schema:
-        # Старые базы: не пересоздаём таблицы, а закрепляем baseline-ревизию и
-        # применяем только последующие миграции (индексы и т.д.).
-        print('INFO: legacy schema detected -> stamp %s then upgrade head' % BASELINE_REVISION)
-        _alembic('stamp', BASELINE_REVISION)
-        _alembic('upgrade', 'head')
-    else:
-        print('INFO: empty database -> upgrade head')
-        _alembic('upgrade', 'head')
+    asyncio.run(_run_migrations_locked(has_version, has_schema))
     return 0
 
 

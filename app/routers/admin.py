@@ -20,13 +20,13 @@ import uuid
 from typing import List
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 
 from app import database, schemas
 from app.caching.main import cache_user_after_write, get_redis
-from app.core import deps
+from app.core import audit, deps, rate_limit
 from app.core.cache_guard import safe_cache_write
 from app.database import users as users_db
 from app.rsosh.persist import ARCHIVE_BY_RSOSH, ARCHIVE_MANUAL
@@ -52,6 +52,9 @@ class AdminUserListItem(BaseModel):
 
 class AdminUsersResponse(BaseModel):
     users: List[AdminUserListItem]
+    # Всего пользователей под фильтром: панели нужно отличать «список кончился»
+    # от «показана только первая страница».
+    total: int = 0
 
 
 class AdminOlympiadListItem(BaseModel):
@@ -69,6 +72,8 @@ class AdminOlympiadListItem(BaseModel):
 
 class AdminOlympiadsResponse(BaseModel):
     olympiads: List[AdminOlympiadListItem]
+    # Всего олимпиад под фильтром — для постраничной выдачи панели.
+    total: int = 0
 
 
 class AdminBviListItem(BaseModel):
@@ -142,14 +147,35 @@ def _serialize_user(user: dict) -> dict:
         500: {'description': 'Internal server error'},
     },
 )
-async def list_users(current_user: deps.AdminUser = None):
-    """Все пользователи, включая заблокированных."""
+async def list_users(
+    search: str | None = None,
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    """Все пользователи, включая заблокированных.
+
+    Поддерживает поиск по имени/фамилии/email и постраничную выдачу
+    (``limit``/``offset``): панель не должна тянуть весь список, чтобы показать
+    первые строки. ``total`` отвечает, сколько пользователей под фильтром всего.
+    Без ``limit`` возвращаются все — так остаются совместимыми вызовы, которым
+    нужен полный список.
+    """
     try:
-        users = await database.users.list_users(include_inactive=True)
+        users = await database.users.list_users(
+            include_inactive=True,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        total = await database.users.count_users(include_inactive=True, search=search)
         # Словарь, а не JSONResponse: response_model=AdminUsersResponse
         # проверит контракт и отсечёт лишние поля. _serialize_user уже
         # перечисляет разрешённые поля явно, хэша пароля среди них нет.
-        return {'users': [_serialize_user(user) for user in users]}
+        return {
+            'users': [_serialize_user(user) for user in users],
+            'total': total,
+        }
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -165,15 +191,26 @@ async def list_users(current_user: deps.AdminUser = None):
         500: {'description': 'Internal server error'},
     },
 )
-async def list_olympiads(current_user: deps.AdminUser = None):
+async def list_olympiads(
+    search: str | None = None,
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
     """Каталог олимпиад включая архивные (вне актуального перечня РСОШ).
 
     В отличие от публичного каталога содержит служебные поля: причина архива
     (чтобы понимать, можно ли вернуть запись) и документ-источник (чтобы видеть,
-    откуда взялись данные).
+    откуда взялись данные). Поддерживает поиск и постраничную выдачу.
     """
     try:
-        olympiads = await database.olympiads.list_olympiads(status=None)
+        olympiads = await database.olympiads.list_olympiads(
+            status=None,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        total = await database.olympiads.count_olympiads(status=None, search=search)
         return {
             'olympiads': [
                 {
@@ -187,6 +224,7 @@ async def list_olympiads(current_user: deps.AdminUser = None):
                 }
                 for item in olympiads
             ],
+            'total': total,
         }
     except Exception:
         logger.exception('Unhandled error')
@@ -266,6 +304,7 @@ def _raise_admin_guard_error(outcome, action: str) -> None:
 )
 async def ban(
     user_id: uuid.UUID,
+    request: Request,
     r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
@@ -282,6 +321,12 @@ async def ban(
             _raise_admin_guard_error(updated, 'заблокировать')
             raise HTTPException(status_code=404, detail='User not found')
         await safe_cache_write(cache_user_after_write(r, updated))
+        audit.log_admin_action(
+            'ban',
+            actor_id=current_user.get('id'),
+            target_id=user_id,
+            ip=rate_limit.client_ip(request),
+        )
         return updated
     except HTTPException:
         raise
@@ -303,6 +348,7 @@ async def ban(
 )
 async def unban(
     user_id: uuid.UUID,
+    request: Request,
     r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
@@ -313,6 +359,12 @@ async def unban(
             _raise_admin_guard_error(updated, 'разблокировать')
             raise HTTPException(status_code=404, detail='User not found')
         await safe_cache_write(cache_user_after_write(r, updated))
+        audit.log_admin_action(
+            'unban',
+            actor_id=current_user.get('id'),
+            target_id=user_id,
+            ip=rate_limit.client_ip(request),
+        )
         return updated
     except HTTPException:
         raise
@@ -326,6 +378,9 @@ async def _apply_role(
     role: str,
     university_id: str | None,
     r: aioredis.Redis,
+    *,
+    actor_id,
+    ip: str | None = None,
 ) -> dict:
     """Назначить роль с проверкой инвариантов и сбросом кэша.
 
@@ -337,11 +392,39 @@ async def _apply_role(
     атомарно в слое данных, а не отдельным предварительным подсчётом: счёт
     разъезжается с фактическим состоянием при параллельных запросах.
 
+    Своя роль не меняется: иначе администратор мог бы снять права сам с себя
+    (и, при единственном админе, заблокировать управление), либо повысить себя
+    в обход осознанного решения. Ограничение на сервере, а не только в UI.
+    Исключение — понижение последнего администратора: там срабатывает более
+    конкретный запрет (409), поэтому его проверяем раньше собственной роли.
+
     Единственная точка изменения роли — ``/role``. Отдельные ``/grant_admin`` и
     ``/demote_admin`` удалены: они меняли бы роль и привязку разными
     операциями, то есть давали второй путь, на котором инварианты могли бы
     разойтись с тем, что проверяет ``/role``.
     """
+    before = await database.users.find_user_by_id(str(user_id))
+    if not before:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    if str(user_id) == str(actor_id):
+        demotes_last_admin = (
+            before.get('role') == users_db.ROLE_ADMIN
+            and before.get('isActive', False)
+            and role != users_db.ROLE_ADMIN
+            and await database.users.is_last_active_admin(str(user_id))
+        )
+        if demotes_last_admin:
+            # Тот же запрет, что и на чужой роли, но важнее: не оставить
+            # систему без администратора. Ошибка та же — 409, не 403.
+            _raise_admin_guard_error(
+                users_db.ADMIN_GUARD_LAST_ADMIN, 'снять роль администратора'
+            )
+        raise HTTPException(
+            status_code=403,
+            detail='Нельзя менять роль у себя',
+        )
+
     if university_id and role == users_db.ROLE_UNIVERSITY_REP:
         university = await database.universities.get_university(university_id)
         if not university:
@@ -361,6 +444,14 @@ async def _apply_role(
     if not updated:
         raise HTTPException(status_code=404, detail='User not found')
     await safe_cache_write(cache_user_after_write(r, updated))
+    audit.log_role_change(
+        actor_id=actor_id,
+        target_id=user_id,
+        old_role=before.get('role'),
+        new_role=role,
+        university_id=university_id,
+        ip=ip,
+    )
     return updated
 
 
@@ -371,7 +462,7 @@ async def _apply_role(
         200: {'description': 'Role assigned'},
         400: {'description': 'Role invariant violated (EDITOR without university)'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
+        403: {'description': 'Admin role required or attempt to change own role'},
         404: {'description': 'User or university not found'},
         409: {'description': 'Target is the last active admin'},
         422: {'description': 'Validation error'},
@@ -381,6 +472,7 @@ async def _apply_role(
 async def assign_role(
     user_id: uuid.UUID,
     payload: RoleAssignment,
+    request: Request,
     r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
@@ -399,6 +491,8 @@ async def assign_role(
             payload.role,
             payload.university_id,
             r,
+            actor_id=current_user.get('id'),
+            ip=rate_limit.client_ip(request),
         )
     except HTTPException:
         raise

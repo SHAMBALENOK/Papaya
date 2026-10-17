@@ -45,6 +45,46 @@ def _storage_path(doc_id: str, extension: str) -> Path:
     return Path(DOCS_DIR) / f'{doc_id}{extension}'
 
 
+#: MIME-тип по расширению: скачанный файл должен открываться как настоящий
+#: документ, а не как неоткрываемый ``application/octet-stream``.
+_MEDIA_TYPES = {
+    '.pdf': 'application/pdf',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+}
+
+
+def document_file_response(doc: dict) -> FileResponse:
+    """Отдать файл документа с корректным именем и типом.
+
+    Общая точка для скачивания: администраторский маршрут ``/docs`` и
+    публичный маршрут источника олимпиады. Имя файла — отображаемое название
+    документа: если расширения в нём нет, оно берётся из ``storage_key``, иначе
+    браузер сохраняет файл без типа и он «не открывается».
+    """
+    doc_id = doc.get('id')
+    storage_key = doc.get('storage_key')
+    if not storage_key:
+        raise HTTPException(
+            status_code=404,
+            detail='Document has no local copy (source_url only)',
+        )
+    extension = os.path.splitext(str(storage_key))[1]
+    path = _storage_path(str(doc_id), extension)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail='File not found')
+
+    display_name = (doc.get('name') or '').strip() or path.name
+    # Имя из БД может быть без расширения или с другим регистром — приводим к
+    # расширению реального файла, чтобы ОС выбрала правильное приложение.
+    if extension and not display_name.lower().endswith(extension.lower()):
+        display_name = f'{display_name}{extension}'
+    media_type = _MEDIA_TYPES.get(extension.lower(), 'application/octet-stream')
+    return FileResponse(str(path), media_type=media_type, filename=display_name)
+
+
 def _checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -234,20 +274,7 @@ async def download_doc_file(
         doc = await database.docs.get_doc(doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail='Document not found')
-        storage_key = doc.get('storage_key')
-        if not storage_key:
-            raise HTTPException(
-                status_code=404,
-                detail='Document has no local copy (source_url only)',
-            )
-        path = _storage_path(str(doc_id), os.path.splitext(storage_key)[1])
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail='File not found')
-        return FileResponse(
-            str(path),
-            media_type='application/octet-stream',
-            filename=doc.get('name') or path.name,
-        )
+        return document_file_response(doc)
     except HTTPException:
         raise
     except Exception:

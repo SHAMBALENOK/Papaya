@@ -6,6 +6,34 @@
 const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-ink text-white shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
 const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
 
+/* Требования к паролю — зеркало серверной проверки
+   (app/middlewares/re_check.py). Список показывается заранее, а не всплывает
+   по одной ошибке за раз: пользователь видит все условия до ввода и следит
+   за ними по мере набора. Порядок совпадает с порядком проверок на сервере. */
+const PASSWORD_RULES = [
+    { id: 'length', label: 'Минимум 8 символов', test: p => p.length >= 8 },
+    { id: 'bytes', label: 'Не длиннее 72 байт', test: p => new TextEncoder().encode(p).length <= 72 },
+    { id: 'upper', label: 'Хотя бы одна заглавная буква', test: p => /[A-ZА-ЯЁ]/.test(p) },
+    { id: 'lower', label: 'Хотя бы одна строчная буква', test: p => /[a-zа-яё]/.test(p) },
+    { id: 'digit', label: 'Хотя бы одна цифра', test: p => /\d/.test(p) },
+    { id: 'special', label: 'Хотя бы один спецсимвол (!@#$%^&* и др.)', test: p => /[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>/?]/.test(p) },
+    { id: 'nospace', label: 'Без пробелов', test: p => !/\s/.test(p) },
+    { id: 'repeat', label: 'Без 4 одинаковых символов подряд', test: p => !/(.)\1{3,}/.test(p) },
+    { id: 'sequence', label: 'Без слабых последовательностей (1234, qwerty…)', test: p => !['1234', 'abcd', 'qwerty', 'asdf', 'zxcv'].some(s => p.toLowerCase().includes(s)) },
+];
+
+function passwordRulesHtml() {
+    return `<div id="reg-password-rules" class="mt-3" aria-live="polite">
+        <p class="text-sm font-medium text-ink-soft mb-2">Пароль должен содержать:</p>
+        <ul class="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            ${PASSWORD_RULES.map(r => `<li data-rule="${r.id}" class="flex items-start gap-2 text-ink-faint">
+                <span data-rule-mark class="shrink-0 leading-6" aria-hidden="true">○</span>
+                <span>${r.label}</span>
+            </li>`).join('')}
+        </ul>
+    </div>`;
+}
+
 function renderAuth() {
     if (store.user) { navigate('#/'); return; }
 
@@ -44,6 +72,7 @@ function renderAuth() {
             </div>
             ${inputField({ id: 'reg-email', name: 'email', label: 'Email', type: 'email', required: true, placeholder: 'you@example.com', autocomplete: 'email' })}
             ${passwordField({ id: 'reg-password', name: 'password', label: 'Пароль', required: true, placeholder: 'Минимум 8 символов', autocomplete: 'new-password' })}
+            ${passwordRulesHtml()}
             ${passwordField({ id: 'reg-password2', name: 'password2', label: 'Подтвердите пароль', required: true, placeholder: 'Повторите пароль', autocomplete: 'new-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Зарегистрироваться</button>
             <p class="mt-8 text-sm text-ink-soft">Уже есть аккаунт?
@@ -87,6 +116,27 @@ function renderAuth() {
     });
 
     function showErr(msg) { alertEl.innerHTML = alertHtml(msg, 'error'); }
+
+    // Живые индикаторы требований к паролю: каждая строка списка меняет
+    // отметку «○ / ✓» и цвет по мере ввода. Пустое поле — всё нейтрально,
+    // чтобы список читался как условия, а не как уже нарушенные правила.
+    const regPassword = document.getElementById('reg-password');
+    const rulesList = page.querySelector('#reg-password-rules');
+    function updatePasswordRules() {
+        if (!rulesList) return;
+        const pw = regPassword ? regPassword.value : '';
+        PASSWORD_RULES.forEach(rule => {
+            const li = rulesList.querySelector(`[data-rule="${rule.id}"]`);
+            if (!li) return;
+            const ok = !!pw && rule.test(pw);
+            li.classList.toggle('text-sage', ok);
+            li.classList.toggle('text-ink-faint', !ok);
+            const mark = li.querySelector('[data-rule-mark]');
+            if (mark) mark.textContent = ok ? '✓' : '○';
+        });
+    }
+    if (regPassword) regPassword.addEventListener('input', updatePasswordRules);
+    updatePasswordRules();
 
     function enterApp(userData) {
         store.setUser({

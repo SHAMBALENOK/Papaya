@@ -153,6 +153,13 @@ async function renderOlympiad(olympiadId) {
             <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(olympiad.name)}</h1>
         </header>
 
+        <section class="mt-8">
+            ${olympiad.official_url
+                ? `<a href="${escAttr(olympiad.official_url)}" target="_blank" rel="noopener noreferrer"
+                      class="${UI.btn} ${UI.btnPrimary}">Официальный сайт олимпиады</a>`
+                : `<p class="text-ink-soft leading-relaxed">Официальный сайт олимпиады пока не указан в каталоге.</p>`}
+        </section>
+
         ${isArchived ? `
         <div class="mt-8">${alertHtml(archivedOlympiadNotice(), 'error')}</div>` : ''}
 
@@ -162,17 +169,7 @@ async function renderOlympiad(olympiadId) {
             <p class="mt-6 text-lg text-ink leading-[1.8] whitespace-pre-wrap">${escHtml(olympiad.description)}</p>
         </section>` : ''}
 
-        <section class="mt-14">
-            <h2 class="${UI.eyebrow}">Куда идти</h2>
-            <div class="mt-8">
-                ${olympiad.official_url
-                    ? `<a href="${escAttr(olympiad.official_url)}" target="_blank" rel="noopener noreferrer"
-                          class="${UI.btn} ${UI.btnPrimary}">Официальный сайт олимпиады</a>`
-                    : `<p class="text-ink-soft leading-relaxed">Официальный сайт олимпиады пока не указан в каталоге.</p>`}
-            </div>
-        </section>
-
-        ${sourceBlockHtml(source)}
+        ${sourceBlockHtml(source, olympiadId)}
 
         ${isAdmin ? `
         <section class="mt-12">
@@ -217,25 +214,23 @@ function archivedOlympiadNotice() {
 /** Блок «Откуда взялась информация».
  *
  * Источник важен для доверия к каталогу: пользователь должен видеть, что данные
- * пришли из перечня РСОШ или что запись завели вручную. Ответ приходит всегда
- * для существующей олимпиады, поэтому блок показывается всегда — скрывать его
- * значило бы прятать факт ручного ввода.
+ * пришли из перечня РСОШ (тогда указано название документа) или что запись
+ * завели вручную. Если у документа-источника есть файл, его можно скачать —
+ * это ответ на вопрос «откуда это», а не доступ к внутренностям импорта.
  */
-function sourceBlockHtml(source) {
+function sourceBlockHtml(source, olympiadId) {
     const title = (source && source.title) || '';
-    const url = (source && source.source_url) || '';
+    const hasFile = !!(source && source.has_file);
 
-    const linkHtml = url
-        ? `<p class="mt-3 text-sm">
-               <a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer"
-                  class="text-ink font-semibold underline underline-offset-4">Открыть источник</a>
-           </p>`
+    const downloadHtml = hasFile
+        ? `<a href="${escAttr(api.olympiadSourceFileUrl(olympiadId))}" target="_blank" rel="noopener noreferrer"
+              class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall} mt-5">Скачать документ-источник</a>`
         : '';
 
     return `
         <section class="mt-14">
             <h2 class="${UI.eyebrow}">Откуда взялась информация</h2>
             <p class="mt-4 text-base font-semibold">${escHtml(title || 'Источник не указан')}</p>
-            ${linkHtml}
+            ${downloadHtml}
         </section>`;
 }

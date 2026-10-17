@@ -29,7 +29,11 @@ logger = logging.getLogger('papaya.user')
     responses={
         200: {'description': 'User profile'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Invalid token or account is blocked'},
+        403: {
+            'description': (
+                'Invalid token, account is blocked or profile is not yours'
+            )
+        },
         404: {'description': 'User not found'},
         500: {'description': 'Internal server error'},
     },
@@ -42,12 +46,22 @@ async def user_details(
     """Профиль пользователя по id.
 
     Авторизация — общий механизм ``get_current_user``: валидный токен и
-    незаблокированный автор. Раньше здесь стоял собственный ``jwt_check``,
-    который не смотрел на ``isActive``: заблокированный продолжал бы читать
-    профили действующей сессией. Читать профиль по id может любой
-    вошедший пользователь — как и раньше.
+    незаблокированный автор. Читать профиль может только сам пользователь
+    или администратор: ``UserResponse`` содержит email, телефон и дату
+    рождения, и отдавать эти данные любому вошедшему по одному id — утечка
+    персональных данных при публичном доступе. Интерфейсу чужие профили не
+    нужны: страница профиля читает собственный id, админка — маршрут списка
+    пользователей.
     """
     try:
+        if (
+            str(user_id) != str(current_user.get('id'))
+            and current_user.get('role') != deps.ROLE_ADMIN
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail='You can only view your own profile',
+            )
         user_obj = await get_cached_user(
             r,
             user_id,

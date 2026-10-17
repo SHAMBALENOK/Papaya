@@ -98,6 +98,10 @@ def start_section(doc: dict | None) -> dict:
         'pause_requested': False,
         'records': None,
         'selection': None,
+        # Олимпиады, добавленные администратором вручную прямо в меню документа
+        # (см. persist.add_manual_candidate). Новый прогон начинается без них:
+        # они относятся к прежнему результату.
+        'manual_candidates': [],
     }
 
 

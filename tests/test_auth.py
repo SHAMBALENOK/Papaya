@@ -77,6 +77,23 @@ async def test_login_with_oversized_password_is_401(client):
     assert 'access_jwt' not in client.cookies
 
 
+async def test_login_unknown_email_is_401_not_500(client):
+    """Несуществующий email — 401 с постоянным временем, а не 500.
+
+    Заглушка сравнивает пароль с dummy-хэшем, чтобы время ответа не выдавало
+    отсутствие аккаунта. Раньше заглушка падала (``AttributeError`` на
+    байтовом хэше), наружу уходил 500 — и разница «есть email / нет email»
+    снова становилась видимой для перебора.
+    """
+    response = await client.post(
+        '/api/v1/auth/login',
+        json={'email': 'ghost@example.com', 'password': 'StrongPass123!'},
+    )
+    assert response.status_code == 401, response.text
+    assert response.json()['detail'] == 'Invalid email or password'
+    assert 'access_jwt' not in client.cookies
+
+
 async def test_login_wrong_password(client):
     email = 'login@example.com'
     await register_user(client, email=email)
@@ -214,6 +231,34 @@ async def test_unban_restores_access(client):
     assert profile.status_code == 200
     assert profile.json()['id'] == target['id']
     assert profile.json()['isActive'] is True
+
+
+async def test_profile_read_restricted_to_self_and_admin(client):
+    """Чужой профиль не читается: UserResponse раскрывает email и телефон.
+
+    Раньше ``GET /user/{id}`` отдавал полный профиль любому вошедшему — при
+    публичном доступе это утечка персональных данных по одному id. Интерфейсу
+    чужие профили не нужны: страница профиля работает со своим id, админка —
+    с маршрутом списка пользователей.
+    """
+    target = await register_user(client)
+
+    # Сессия другого пользователя: чужой профиль не читается.
+    other = await register_user(client)
+    response = await client.get(f"/api/v1/user/{target['id']}")
+    assert response.status_code == 403, response.text
+    assert response.json()['detail'] == 'You can only view your own profile'
+
+    # Свой профиль по id читается, как и раньше.
+    response = await client.get(f"/api/v1/user/{other['id']}")
+    assert response.status_code == 200, response.text
+    assert response.json()['id'] == other['id']
+
+    # Администратор читает любой профиль (админка, модерация).
+    await admin_client(client)
+    response = await client.get(f"/api/v1/user/{target['id']}")
+    assert response.status_code == 200, response.text
+    assert response.json()['id'] == target['id']
 
 
 # ------------------------- Истечение access и ротация refresh -------------------------

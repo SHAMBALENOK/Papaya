@@ -58,6 +58,29 @@ services:
     networks:
       - project
 
+  # Одноразовая подготовка каталогов данных.
+  #
+  # На Windows и macOS bind-монтированное рабочее дерево приходит в контейнер
+  # как root:root, а приложение работает от appuser (uid 1000, см. Dockerfile):
+  # загрузка документов и импорт падали с Permission denied. Сервис выравнивает
+  # владельца каталогов данных до старта web/celery. Меняются только метаданные,
+  # содержимое не трогается; на Linux-хосте с uid 1000 операция безвредна.
+  app-data-init:
+    build: .
+    user: root
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        mkdir -p /app/app/tables/docs &&
+        chown -R appuser:appuser /app/app/tables /app/.cache
+    volumes:
+      - ./app:/app/app
+      - ml-models-cache:/app/.cache
+    restart: "no"
+    networks:
+      - project
+
   web:
     build: .
     container_name: web
@@ -91,6 +114,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      app-data-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/api/v1/health"]
       interval: 30s
@@ -127,7 +152,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      app-data-init:
+        condition: service_completed_successfully
     restart: unless-stopped
+    healthcheck:
+      # Воркер считается живым, если отвечает на ping Celery.
+      test: ["CMD-SHELL", "celery -A app.middlewares.task_queue.task_queue inspect ping -d celery@$$HOSTNAME -t 10"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
     networks:
       - project
 
@@ -135,6 +169,10 @@ services:
     image: papaya-web:latest
     profiles: ["testing"]
     container_name: papaya-test
+    # Тестовый профиль ставит dev-зависимости в системный Python, поэтому
+    # запускается от root. Сам образ приложения — непривилегированный (USER
+    # appuser в Dockerfile); здесь это осознанное исключение только для тестов.
+    user: root
     command: >
       sh -c "pip install --no-cache-dir -q -r /app/requirements-dev.txt &&
              pytest -q"

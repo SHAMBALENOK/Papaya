@@ -31,7 +31,6 @@ class OlympiadBase(BaseModel):
     official_url: Optional[ExternalUrl] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
-    source_url: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'
     archive_reason: Optional[str] = None
 
@@ -67,7 +66,6 @@ class OlympiadCreate(BaseModel):
     official_url: Optional[ExternalUrl] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
-    source_url: Optional[ExternalUrl] = None
 
     @field_validator('name')
     @classmethod
@@ -92,7 +90,6 @@ class OlympiadUpdate(BaseModel):
     official_url: Optional[ExternalUrl] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
-    source_url: Optional[ExternalUrl] = None
 
     @field_validator('name')
     @classmethod
@@ -118,7 +115,6 @@ class OlympiadListItem(BaseModel):
     official_url: Optional[ExternalUrl] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
-    source_url: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'
     is_archived: bool = False
 
@@ -169,7 +165,6 @@ class OlympiadPublicResponse(BaseModel):
     official_url: Optional[ExternalUrl] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
-    source_url: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'
     # Производное поле для интерфейса: карточке нужно понимать, показывать ли
     # предупреждение об архиве, не разбирая ``status`` в шаблоне.
