@@ -12,7 +12,10 @@
   исключённую вручную — администратор.
 """
 
+import os
 import uuid
+
+from app import database
 
 from tests.conftest import (
     admin_client,
@@ -21,6 +24,7 @@ from tests.conftest import (
     promote_role,
     register_user,
     set_user_role,
+    upload_document,
 )
 
 
@@ -182,6 +186,53 @@ async def test_admin_still_sees_source_doc_id(client):
 async def test_olympiad_source_of_unknown_olympiad_is_404(client):
     response = await client.get(f'/api/v1/olympiads/{uuid.uuid4()}/source')
     assert response.status_code == 404
+
+
+async def test_olympiad_source_has_file_matches_disk(client):
+    """``has_file`` отражает реальный файл, а не только запись в БД.
+
+    Запись о документе может пережить ручное удаление файла: тогда
+    ``has_file=true`` обещал бы скачивание, ведущее в 404.
+    """
+    olympiad = await create_olympiad(client, 'Олимпиада с документом')
+    doc = await upload_document(client, 'source.pdf', b'%PDF-1.4 fake')
+    await database.olympiads.edit_olympiad(
+        olympiad['id'], {'source_doc_id': doc['id']}
+    )
+
+    present = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
+    assert present.status_code == 200
+    assert present.json()['has_file'] is True
+
+    # Файл пропал с диска, но запись документа осталась.
+    os.remove(os.path.join(os.environ['DOCS_DIR'], doc['storage_key']))
+
+    missing = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
+    assert missing.json()['has_file'] is False
+
+
+async def test_archived_olympiad_source_has_no_downloadable_file(client):
+    """У архивной олимпиады файл-источник недоступен — ``has_file=false``.
+
+    Публичная выдача файла разрешена только опубликованной олимпиаде, поэтому
+    ``has_file`` не должен обещать кнопку скачивания для архивной записи.
+    """
+    olympiad = await create_olympiad(client, 'Олимпиада с документом')
+    doc = await upload_document(client, 'source.pdf', b'%PDF-1.4 fake')
+    await database.olympiads.edit_olympiad(
+        olympiad['id'], {'source_doc_id': doc['id']}
+    )
+    archived = await client.post(
+        f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
+    )
+    assert archived.status_code == 200
+
+    source = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source")
+    assert source.status_code == 200
+    assert source.json()['has_file'] is False
+
+    download = await client.get(f"/api/v1/olympiads/{olympiad['id']}/source/file")
+    assert download.status_code == 404
 
 
 # ------------------------------ Архив ------------------------------

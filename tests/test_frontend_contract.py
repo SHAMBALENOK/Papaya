@@ -640,3 +640,40 @@ def test_modal_close_always_removes_keydown_listener():
     assert 'isConnected' in tail, (
         'close() должна быть идемпотентной (guard isConnected для повтора)'
     )
+
+
+def test_confirmed_bvi_link_offers_only_revoke():
+    """Для подтверждённой связи в панели есть только «Отозвать».
+
+    Вторая кнопка («Удалить связь») слала ``reject`` по CONFIRMED-связи, а
+    бэкенд отклоняет только PENDING-заявки (409). Подтверждённую связь удаляет
+    исключительно ``revoke``, поэтому всегда падающей кнопки быть не должно.
+    """
+    admin = _read('pages', 'admin.js')
+    branch = re.search(
+        r"link\.status === 'CONFIRMED'\s*\?\s*`(.*?)`\s*:",
+        admin,
+        re.S,
+    )
+    assert branch, 'ветка CONFIRMED для списка БВИ не найдена'
+    confirmed = branch.group(1)
+    assert 'revokeBvi' in confirmed
+    assert 'rejectBvi' not in confirmed, (
+        'CONFIRMED-связь нельзя отклонять: reject всегда даёт 409'
+    )
+
+
+def test_run_import_button_disabled_while_processing():
+    """«Запустить импорт» неактивна, пока импорт уже идёт.
+
+    Повторный старт во время ``processing`` — гарантированный 409, поэтому
+    кнопка не должна выглядеть доступной.
+    """
+    admin = _read('pages', 'admin.js')
+    button = next(
+        line for line in admin.splitlines()
+        if 'data-act="runImport"' in line
+    )
+    assert "state === 'processing'" in button
+    assert 'disabled' in button
+

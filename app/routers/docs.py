@@ -56,6 +56,22 @@ _MEDIA_TYPES = {
 }
 
 
+def document_has_local_file(doc: dict) -> bool:
+    """Есть ли у документа реальная локальная копия файла.
+
+    Проверяется именно файл на диске, а не только наличие ``storage_key``:
+    запись в БД может пережить ручное удаление файла, и тогда ответ
+    ``has_file=true`` обещал бы скачивание, которое на деле отдаёт 404.
+    Единая точка правды нужна, чтобы ``has_file`` и фактическая выдача файла
+    (``document_file_response``) не расходились.
+    """
+    storage_key = doc.get('storage_key')
+    if not storage_key:
+        return False
+    extension = os.path.splitext(str(storage_key))[1]
+    return _storage_path(str(doc.get('id')), extension).is_file()
+
+
 def document_file_response(doc: dict) -> FileResponse:
     """Отдать файл документа с корректным именем и типом.
 

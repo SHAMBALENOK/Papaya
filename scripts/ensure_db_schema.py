@@ -51,21 +51,17 @@ def _alembic(*args) -> None:
     )
 
 
-async def _db_state() -> tuple[bool, bool]:
-    """Вернуть (управляется_ли_база_alembic, есть_ли_таблицы_моделей)."""
-    import asyncpg
+async def _read_state(conn) -> tuple[bool, bool]:
+    """Вернуть (управляется_ли_база_alembic, есть_ли_таблицы_моделей).
 
-    url = os.environ['DATABASE_URL']
-    dsn = url.replace(SCHEME, 'postgresql://', 1)
-    await _ensure_database(dsn)
-    conn = await asyncpg.connect(dsn)
-    try:
-        has_version = await _table_exists(conn, 'alembic_version')
-        has_users = await _table_exists(conn, 'users')
-        has_olympiads = await _table_exists(conn, 'olympiads')
-        return has_version, has_users or has_olympiads
-    finally:
-        await conn.close()
+    Читается по уже открытому соединению: вызывающий обязан держать
+    advisory-блокировку, чтобы снимок не устарел между чтением и решением о
+    ``stamp``/``upgrade``.
+    """
+    has_version = await _table_exists(conn, 'alembic_version')
+    has_users = await _table_exists(conn, 'users')
+    has_olympiads = await _table_exists(conn, 'olympiads')
+    return has_version, has_users or has_olympiads
 
 
 async def _ensure_database(dsn: str) -> None:
@@ -74,6 +70,11 @@ async def _ensure_database(dsn: str) -> None:
     Alembic умеет создавать схему в пустой базе, но не саму базу: без этого
     шага запуск на чистой машине (и на удалённой тестовой БД) падал бы с
     «database does not exist» ещё до первой миграции.
+
+    Проверка «есть ли база» и ``CREATE DATABASE`` неатомарны: web и celery
+    стартуют параллельно, и второй процесс может создать ту же базу между
+    проверкой первого и его ``CREATE``. Это нормальная гонка — целевая база
+    уже существует, и повторное создание не нужно.
     """
     import asyncpg
 
@@ -90,7 +91,13 @@ async def _ensure_database(dsn: str) -> None:
         )
         if not exists:
             print(f'INFO: creating database {database}')
-            await conn.execute(f'CREATE DATABASE "{database}"')
+            try:
+                await conn.execute(f'CREATE DATABASE "{database}"')
+            except asyncpg.exceptions.DuplicateDatabaseError:
+                print(
+                    f'INFO: database {database} was created by another process',
+                    file=sys.stderr,
+                )
     finally:
         await conn.close()
 
@@ -100,8 +107,8 @@ def _dsn() -> str:
     return os.environ['DATABASE_URL'].replace(SCHEME, 'postgresql://', 1)
 
 
-async def _run_migrations_locked(has_version: bool, has_schema: bool) -> None:
-    """Применить миграции под advisory-блокировкой.
+async def _run_migrations_locked() -> None:
+    """Создать базу при необходимости и применить миграции под блокировкой.
 
     Web и celery стартуют одновременно и оба выполняют этот скрипт. Без
     блокировки два ``alembic upgrade head`` могли бы пойти параллельно и,
@@ -109,12 +116,20 @@ async def _run_migrations_locked(has_version: bool, has_schema: bool) -> None:
     сериализует их: второй процесс ждёт первый на той же паре (база, ключ).
     Блокировка снимается автоматически при разрыве соединения, но мы снимаем
     её явно.
+
+    Состояние схемы читается **после** захвата блокировки. Снимок до неё
+    успевает устареть: пока второй процесс ждал, первый уже закрепил baseline
+    и довёл базу до head. По устаревшему снимку второй процесс снова увидел бы
+    «старую схему без ``alembic_version``» и повторно закрепил baseline
+    (``stamp 0001``), а затем заново прогнал ``upgrade head``.
     """
     import asyncpg
 
+    await _ensure_database(_dsn())
     conn = await asyncpg.connect(_dsn())
     try:
         await conn.execute('SELECT pg_advisory_lock($1)', MIGRATION_LOCK_KEY)
+        has_version, has_schema = await _read_state(conn)
         if has_version:
             print('INFO: database is under Alembic control -> upgrade head')
             _alembic('upgrade', 'head')
@@ -138,8 +153,7 @@ def main() -> int:
         print('WARN: DATABASE_URL is not set, skipping migrations', file=sys.stderr)
         return 0
 
-    has_version, has_schema = asyncio.run(_db_state())
-    asyncio.run(_run_migrations_locked(has_version, has_schema))
+    asyncio.run(_run_migrations_locked())
     return 0
 
 

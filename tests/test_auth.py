@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import jwt as pyjwt
 
 from app.core.config import JWT_KEY
+from app.middlewares.re_check import is_valid_password
 from tests.conftest import admin_client, login_user, register_user
 
 
@@ -44,6 +45,20 @@ async def test_register_weak_password(client):
         },
     )
     assert response.status_code == 400
+
+
+def test_password_rejects_all_whitespace():
+    """Правило «без пробелов» сервера совпадает с правилом клиента.
+
+    До правки сервер отвергал только обычный пробел: таб или перенос строки
+    проходили прямой запрос к API, тогда как форма регистрации их не
+    пропускала. Политика должна быть не мягче клиентской.
+    """
+    base = 'StrongPass1!'
+    assert is_valid_password(base) == (True, '')
+    for whitespace in (' ', '\t', '\n', '\r', '\x0b', '\x0c'):
+        ok, _ = is_valid_password(base + whitespace)
+        assert ok is False, repr(whitespace)
 
 
 async def test_register_oversized_password_is_400(client):
