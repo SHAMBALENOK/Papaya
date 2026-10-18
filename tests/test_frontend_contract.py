@@ -677,3 +677,74 @@ def test_run_import_button_disabled_while_processing():
     assert "state === 'processing'" in button
     assert 'disabled' in button
 
+
+# ----------------------------------------------
+
+
+def test_admin_nav_hides_my_university():
+    """Администратору кабинет представителя не показывается в меню.
+
+    Раздел «Мой университет» — это кабинет представителя; у администратора
+    модерация БВИ уже есть в панели, и вкладка лишь дублировала бы её. Ссылка
+    гейтится ``isUniversityRep`` (роль EDITOR + вуз), а не ``canManageUniversity``,
+    который включает администратора.
+    """
+    app = _read('app.js')
+    body = re.search(r'function navLinks\(\) \{(.*?)\n\}', app, re.S)
+    assert body, 'navLinks не найден'
+    segment = body.group(1)
+    assert "'#/my-university'" in segment, 'ссылка на кабинет должна остаться для представителя'
+    before = segment[:segment.index("'#/my-university'")]
+    assert 'isUniversityRep' in before
+    assert 'canManageUniversity' not in before, (
+        'администратор не должен видеть вкладку «Мой университет»'
+    )
+
+
+def test_admin_bvi_groups_by_university_and_splits_statuses():
+    """Очередь БВИ в панели группируется по вузам и делит заявки/подтверждённые.
+
+    Плоский список смешивал разные вузы, и администратор не видел, сколько
+    заявок ждёт подтверждения у конкретного университета.
+    """
+    admin = _read('pages', 'admin.js')
+    assert 'groupBviLinksByUniversity' in admin, 'нет группировки по университету'
+    assert 'bviUniversityGroupHtml' in admin, 'нет отрисовки группы вуза'
+    assert '<details' in admin, 'разделы вузов не раскрываются'
+    # Заявки и подтверждённые связи показаны разными блоками.
+    assert 'Ожидают подтверждения' in admin
+    assert 'Подтверждённые · ' in admin
+
+
+def test_admin_bvi_confirm_all_is_bulk_side_effect():
+    """У группы вуза есть «Подтвердить все», и это побочное действие.
+
+    Обработчик обязан быть в ``ADMIN_SIDE_EFFECT_ACTIONS``: он сам показывает
+    результат и перерисовывает вкладку, поэтому общий путь не должен читать
+    ``res.ok`` у ``undefined``.
+    """
+    admin = _read('pages', 'admin.js')
+    assert 'Подтвердить все' in admin
+    assert 'confirmAllBvi' in admin
+    assert 'confirmAllBviLinks' in admin
+    body = re.search(
+        r'const ADMIN_SIDE_EFFECT_ACTIONS = new Set\(\[(.*?)\]\);',
+        admin,
+        re.S,
+    )
+    assert body, 'ADMIN_SIDE_EFFECT_ACTIONS не найден'
+    assert 'confirmAllBvi' in body.group(1)
+    # Кнопка несёт университет: без него нельзя понять, какие заявки подтверждать.
+    assert 'data-act="confirmAllBvi" data-university=' in admin
+
+
+def test_admin_bvi_queue_is_not_paginated():
+    """Очередь БВИ выгружается целиком: группировка по вузам несовместима со страницами.
+
+    Порционная выдача разрезала бы один университет между страницами, и раздел
+    вуза показывал бы только часть заявок.
+    """
+    admin = _read('pages', 'admin.js')
+    assert 'loadMoreBvi' not in admin
+    assert 'fetchAllBviLinks' in admin
+

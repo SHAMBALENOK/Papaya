@@ -16,7 +16,7 @@ const ADMIN_TABS = [
     { key: 'imports', label: 'Импорт РСОШ', href: '#/admin/imports' },
 ];
 
-/** Размер страницы очереди БВИ: очередь подгружается порциями, не целиком. */
+/** Размер страницы при выгрузке очереди БВИ: список качается постранично. */
 const BVI_PAGE_SIZE = 50;
 
 /** Размер страницы списков пользователей и олимпиад. */
@@ -91,10 +91,10 @@ async function loadAdminTab(tab) {
         },
         universities: async () => (await api.listUniversities()).data.universities || [],
         bvi: async () => {
-            // Первая страница очереди: остальные догружаются кнопкой «Показать ещё».
-            const res = await api.adminBviLinks(null, { limit: BVI_PAGE_SIZE, offset: 0 });
-            const links = res.data.links || [];
-            bviState = { links, total: res.data.total != null ? res.data.total : links.length };
+            // Группировка по университетам возможна только по всему списку:
+            // порционная выдача разрезала бы один вуз между страницами.
+            const links = await fetchAllBviLinks();
+            bviState = { links, total: links.length };
             return links;
         },
         imports: async () => (await api.listImports()).data.imports || [],
@@ -128,7 +128,7 @@ async function loadAdminTab(tab) {
 /* Действия, которые открывают модалку или сами показывают результат. */
 const ADMIN_SIDE_EFFECT_ACTIONS = new Set([
     'newUniversity', 'editUniversity', 'newOlympiad', 'editOlympiad',
-    'newImport', 'runImport', 'previewImport', 'loadMoreBvi',
+    'newImport', 'runImport', 'previewImport', 'confirmAllBvi',
     'pauseImport', 'resumeImport',
     'loadMoreUsers', 'searchUsers', 'loadMoreOlympiads', 'searchOlympiads',
 ]);
@@ -160,7 +160,7 @@ async function handleAdminClick(e) {
         newImport: () => openUploadModal(),
         runImport: () => runImportAction(id, btn),
         previewImport: () => navigate(`#/admin/imports/${id}`),
-        loadMoreBvi: () => loadMoreBviLinks(),
+        confirmAllBvi: () => confirmAllBviLinks(btn.dataset.university),
         pauseImport: () => pauseImportAction(id, btn),
         resumeImport: () => resumeImportAction(id, btn),
         loadMoreUsers: () => loadMoreUsers(),
@@ -577,43 +577,122 @@ async function editOlympiadAction(id) {
 
 /* --------------------------------- БВИ ------------------------------------ */
 
+/** Скачать всю очередь БВИ постранично: группировка по вузам требует полного списка. */
+async function fetchAllBviLinks() {
+    const all = [];
+    let total = Infinity;
+    while (all.length < total) {
+        const res = await api.adminBviLinks(null, { limit: BVI_PAGE_SIZE, offset: all.length });
+        if (!res.ok) throw new Error(errorText(res));
+        const batch = res.data.links || [];
+        all.push(...batch);
+        total = res.data.total != null ? res.data.total : all.length;
+        if (!batch.length) break;
+    }
+    return all;
+}
+
+/** Сгруппировать связи по университету и разложить на заявки и подтверждённые. */
+function groupBviLinksByUniversity(links) {
+    const groups = new Map();
+    for (const link of links) {
+        const key = String(link.university_id || 'unknown');
+        if (!groups.has(key)) {
+            groups.set(key, {
+                university_id: link.university_id,
+                university_name: link.university_name || 'Университет',
+                pending: [],
+                confirmed: [],
+            });
+        }
+        const group = groups.get(key);
+        if (link.status === 'CONFIRMED') group.confirmed.push(link);
+        else group.pending.push(link);
+    }
+    return [...groups.values()];
+}
+
+/** Одна связь внутри группы: олимпиада и действия по её статусу. */
+function bviLinkRowHtml(link) {
+    return `<div class="rounded bg-mist px-5 py-4 flex flex-col lg:flex-row lg:items-center gap-4">
+        <div class="flex-1 min-w-0">
+            <p class="text-ink leading-snug">${escHtml(link.olympiad_name || 'Олимпиада')}</p>
+            ${link.olympiad_status === 'ARCHIVED' ? '<p class="mt-1 text-xs text-ink-faint">Олимпиада в архиве</p>' : ''}
+        </div>
+        <div class="flex items-center gap-3 flex-wrap shrink-0">
+            ${bviStatusBadge(link.status)}
+            ${link.status === 'CONFIRMED'
+                ? `<button data-act="revokeBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать подтверждение</button>`
+                : `<button data-act="rejectBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Отклонить</button>
+                   <button data-act="confirmBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить</button>`}
+        </div>
+    </div>`;
+}
+
+/** Раскрывающийся раздел одного университета: заявки и подтверждённые отдельно. */
+function bviUniversityGroupHtml(group) {
+    const pendingCount = group.pending.length;
+    const confirmedCount = group.confirmed.length;
+    const open = pendingCount > 0 ? ' open' : '';
+    const badge = (cls, text) => `<span class="${UI.badge} ${cls}">${text}</span>`;
+    return `<details class="${UI.card} px-8 py-6"${open}>
+        <summary class="flex flex-wrap items-center justify-between gap-4 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+            <span class="font-bold text-ink leading-snug">${escHtml(group.university_name)}</span>
+            <span class="flex flex-wrap items-center gap-3 text-sm">
+                ${pendingCount ? badge(UI.badgePending, `Ждут подтверждения: ${pendingCount}`) : ''}
+                ${confirmedCount ? badge(UI.badgeSuccess, `Подтверждено: ${confirmedCount}`) : ''}
+            </span>
+        </summary>
+        <div class="mt-6 space-y-8">
+            ${pendingCount ? `<div>
+                <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+                    <p class="text-sm font-semibold text-ink-soft">Ожидают подтверждения · ${pendingCount}</p>
+                    <button type="button" data-act="confirmAllBvi" data-university="${escAttr(group.university_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить все</button>
+                </div>
+                <div class="space-y-3">${group.pending.map(bviLinkRowHtml).join('')}</div>
+            </div>` : ''}
+            ${confirmedCount ? `<div>
+                <p class="text-sm font-semibold text-ink-soft mb-4">Подтверждённые · ${confirmedCount}</p>
+                <div class="space-y-3">${group.confirmed.map(bviLinkRowHtml).join('')}</div>
+            </div>` : ''}
+        </div>
+    </details>`;
+}
+
 function adminBviHtml(links) {
     if (!links.length) {
         return emptyHtml('Заявок нет', 'Представители университетов ещё не заявляли связи БВИ.');
     }
-    const total = bviState.total > links.length ? bviState.total : links.length;
-    const more = links.length < total;
+    const groups = groupBviLinksByUniversity(links);
     return `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <p class="text-sm text-ink-faint">Показано ${links.length} из ${total}</p>
-        ${more ? `<button data-act="loadMoreBvi" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Показать ещё</button>` : ''}
+        <p class="text-sm text-ink-faint">Университетов: ${groups.length} · связей: ${links.length}</p>
     </div>
-    <div class="space-y-6">
-        ${links.map(link => `
-        <div class="${UI.card} px-8 py-7 flex flex-col lg:flex-row lg:items-center gap-6">
-            <div class="flex-1 min-w-0">
-                <p class="font-bold text-ink leading-snug">${escHtml(link.university_name || 'Университет')}</p>
-                <p class="mt-2 text-ink-soft">${escHtml(link.olympiad_name || 'Олимпиада')}</p>
-            </div>
-            <div class="flex items-center gap-3 flex-wrap shrink-0">
-                ${bviStatusBadge(link.status)}
-                ${link.status === 'CONFIRMED'
-                    ? `<button data-act="revokeBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать подтверждение</button>`
-                    : `<button data-act="rejectBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Отклонить</button>
-                       <button data-act="confirmBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить</button>`}
-            </div>
-        </div>`).join('')}
+    <div class="space-y-4">
+        ${groups.map(bviUniversityGroupHtml).join('')}
     </div>`;
 }
 
-/** Догрузить следующую страницу очереди БВИ и дорисовать её. */
-async function loadMoreBviLinks() {
-    const res = await api.adminBviLinks(null, { limit: BVI_PAGE_SIZE, offset: bviState.links.length });
-    if (!res.ok) { showToast(errorText(res), 'error'); return; }
-    const next = res.data.links || [];
-    bviState.links = bviState.links.concat(next);
-    if (res.data.total != null) bviState.total = res.data.total;
-    const box = document.getElementById('admin-content');
-    if (box) box.innerHTML = adminBviHtml(bviState.links);
+/** Подтвердить разом все ожидающие заявки одного университета. */
+async function confirmAllBviLinks(universityId) {
+    const pending = bviState.links.filter(
+        link => String(link.university_id) === String(universityId) && link.status !== 'CONFIRMED'
+    );
+    if (!pending.length) return;
+    let confirmed = 0;
+    let failed = 0;
+    for (const link of pending) {
+        try {
+            const res = await api.moderateBvi(link.university_id, link.olympiad_id, 'confirm');
+            if (res.ok) confirmed += 1; else failed += 1;
+        } catch {
+            failed += 1;
+        }
+    }
+    if (confirmed) {
+        showToast(confirmed === 1 ? 'Связь БВИ подтверждена' : `Подтверждено связей: ${confirmed}`, 'success');
+    }
+    if (failed) showToast(`Не удалось подтвердить: ${failed}`, 'error');
+    await reloadAdmin();
 }
 
 /* ------------------------------ Импорт РСОШ ------------------------------- */
