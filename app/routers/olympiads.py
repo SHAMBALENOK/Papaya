@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from app import database, schemas
 from app.core import deps
-from app.routers.docs import document_file_response
+from app.routers.docs import document_file_response, document_has_local_file
 
 olympiads_page = APIRouter(
     prefix='/olympiads',
@@ -150,9 +150,13 @@ async def olympiad_source(olympiad_id: uuid.UUID):
     - импорт РСОШ → ``title`` = название документа-источника;
     - ручное создание → ``title`` = «Создано администратором Papaya».
 
-    ``has_file`` говорит, есть ли у документа локальная копия, доступная по
-    ``/olympiads/{id}/source/file``. Служебные поля документа (UUID, хеш,
-    статус обработки) наружу не отдаются.
+    ``has_file`` говорит, есть ли файл документа, который действительно
+    скачивается через ``/olympiads/{id}/source/file``. Этот маршрут отдаёт
+    документ только опубликованной олимпиады, поэтому у архивной записи
+    ``has_file`` всегда ``false``: интерфейс не должен показывать кнопку
+    скачивания, ведущую в 404. Наличие файла проверяется по диску, а не только
+    по ``storage_key``. Служебные поля документа (UUID, хеш, статус обработки)
+    наружу не отдаются.
     """
     try:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)
@@ -167,7 +171,10 @@ async def olympiad_source(olympiad_id: uuid.UUID):
             doc = await database.docs.get_doc(uuid.UUID(str(doc_id)))
             if doc:
                 title = doc.get('name') or RSOSH_SOURCE_TITLE
-                has_file = bool(doc.get('storage_key'))
+                has_file = (
+                    olympiad.get('status') == 'PUBLISHED'
+                    and document_has_local_file(doc)
+                )
 
         return SourceInfo(title=title, has_file=has_file)
     except HTTPException:

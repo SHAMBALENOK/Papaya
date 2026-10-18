@@ -597,8 +597,7 @@ function adminBviHtml(links) {
             <div class="flex items-center gap-3 flex-wrap shrink-0">
                 ${bviStatusBadge(link.status)}
                 ${link.status === 'CONFIRMED'
-                    ? `<button data-act="rejectBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Удалить связь</button>
-                       <button data-act="revokeBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать подтверждение</button>`
+                    ? `<button data-act="revokeBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать подтверждение</button>`
                     : `<button data-act="rejectBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Отклонить</button>
                        <button data-act="confirmBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить</button>`}
             </div>
@@ -667,7 +666,7 @@ function adminImportsHtml(imports) {
                     ${item.error ? `<p class="mt-3 text-sm text-crimson">${escHtml(item.error)}</p>` : ''}
                 </div>
                 <div class="flex flex-wrap gap-3 shrink-0">
-                    ${state === 'rejected' ? '' : `<button data-act="runImport" data-id="${escAttr(item.id)}" ${state === 'paused' ? 'disabled' : ''} class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Запустить импорт</button>`}
+                    ${state === 'rejected' ? '' : `<button data-act="runImport" data-id="${escAttr(item.id)}" ${state === 'paused' || state === 'processing' ? 'disabled' : ''} class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Запустить импорт</button>`}
                     ${state === 'paused' ? `<button data-act="resumeImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Возобновить</button>` : ''}
                     ${state === 'processing' ? `<button data-act="pauseImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Приостановить</button>` : ''}
                     <button data-act="previewImport" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Открыть результаты</button>
