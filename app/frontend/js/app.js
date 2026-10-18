@@ -446,7 +446,9 @@ function navLinks() {
         { href: '#/olympiads', route: '/olympiads', label: 'Олимпиады' },
     ];
     if (store.user) {
-        if (store.canManageUniversity()) {
+        /* «Мой университет» — кабинет представителя: у администратора он не
+           показывается, иначе раздел дублировал бы модерацию БВИ в панели. */
+        if (store.isUniversityRep()) {
             links.push({ href: '#/my-university', route: '/my-university', label: 'Мой университет' });
         }
         links.push({ href: '#/profile', route: '/profile', label: 'Профиль' });
