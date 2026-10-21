@@ -58,3 +58,12 @@ class Universities(Base):
         cascade='all, delete-orphan',
         passive_deletes=True,
     )
+    # Образовательные программы/направления вуза (ТЗ §4.1): используются в
+    # фильтрах льгот по программе.
+    programs = relationship(
+        'UniversityProgram',
+        back_populates='university',
+        cascade='all, delete-orphan',
+        passive_deletes=True,
+        order_by='UniversityProgram.name_norm',
+    )

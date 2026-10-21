@@ -18,9 +18,11 @@ from app.rsosh.types import RsoshError
 logger = logging.getLogger('papaya.rsosh.ocr')
 
 LANG = 'rus+eng'
-# page-segmentation mode 6: «единый блок текста» — лучший режим для таблиц,
-# где tesseract не может понять структуру колонок, но строки читает верно.
-DEFAULT_PSM = 6
+# page-segmentation mode 3: «полный автомат» — tesseract сам ищет блоки и
+# колонки. Замер на реальном скане перечня (119 страниц): средняя уверенность
+# слов 95.4 против 92.4 у PSM 6, а главное — порядок слов в строке верный
+# (PSM 6 склеивал слова из разных колонок вроде «финансовой по грамотности»).
+DEFAULT_PSM = 3
 
 
 class OcrUnavailable(RsoshError):
@@ -49,9 +51,11 @@ def ensure_available() -> None:
             'scanned documents cannot be imported'
         )
     languages = available_languages()
-    if languages and not ({'rus', 'eng'} & set(languages)):
+    # ``LANG = 'rus+eng'``: tesseract падает, если не хватает ЛЮБОГО из языков,
+    # поэтому проверяются оба, а не хотя бы один.
+    if languages and not set(LANG.split('+')) <= set(languages):
         raise OcrUnavailable(
-            'Tesseract has no Russian or English language data (rus/eng) installed'
+            'Tesseract has no Russian/English language data (rus, eng) installed'
         )
 
 

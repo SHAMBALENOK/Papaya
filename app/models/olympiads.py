@@ -82,3 +82,13 @@ class Olympiads(Base):
         cascade='all, delete-orphan',
         passive_deletes=True,
     )
+    # Сезоны олимпиады: год, уровень РСОШ, даты, профили. Сезон — отдельная
+    # сущность (ТЗ §4.2, §5.2): сезонные параметры не переносятся автоматически
+    # между годами.
+    seasons = relationship(
+        'OlympiadSeason',
+        back_populates='olympiad',
+        cascade='all, delete-orphan',
+        passive_deletes=True,
+        order_by='OlympiadSeason.year.desc()',
+    )

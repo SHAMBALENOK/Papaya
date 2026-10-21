@@ -21,7 +21,7 @@
 """
 
 import uuid as uuid_mod
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -33,9 +33,75 @@ from app.middlewares.serializers import (
     olympiad_to_dict,
     university_to_dict,
 )
+from app.models.benefit_versions import BenefitRuleVersion
 from app.models.bvi import UniversityBvi
 from app.models.olympiads import Olympiads
 from app.models.universities import Universities
+
+#: Допустимые виды льготы (ТЗ §4.3).
+BENEFIT_TYPES = ('BVI', 'EGE_100', 'DVI_100', 'OTHER')
+
+#: Допустимые статусы проверки связи (ТЗ §7.1).
+VERIFICATION_STATUSES = ('unverified', 'verified', 'rejected')
+
+#: Поля правила льготы, участвующие в версионировании (ТЗ §8).
+BENEFIT_RULE_FIELDS = (
+    'benefit_type',
+    'result_requirement',
+    'subject',
+    'programs',
+    'extra_requirements',
+    'source_url',
+    'valid_until',
+    'status',
+    'verification_status',
+    'university_confirmed',
+)
+
+
+def _rule_snapshot(link) -> dict:
+    """Снимок правила льготы для истории версий.
+
+    Снимок уходит в JSONB, поэтому даты приводятся к ISO-строке: ``json`` не
+    умеет сериализовать ``date``/``datetime`` и запись версии падала бы с
+    ``TypeError``. Обратно значения превращаются в даты при откате
+    (``_snapshot_value``), поэтому снимок остаётся пригодным для восстановления.
+    """
+    snapshot = {field: getattr(link, field) for field in BENEFIT_RULE_FIELDS}
+    snapshot = {key: _snapshot_value(value) for key, value in snapshot.items()}
+    snapshot['source_doc_id'] = (
+        str(link.source_doc_id) if link.source_doc_id else None
+    )
+    snapshot['source_meta'] = link.source_meta
+    return snapshot
+
+
+def _snapshot_value(value):
+    """Привести значение поля правила к JSON-совместимому виду."""
+    if isinstance(value, (datetime,)):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _restore_value(field: str, value):
+    """Вернуть полю правила тип, которого ждёт колонка.
+
+    В снимке даты лежат строками, поэтому при откате их нужно разобрать обратно
+    в ``date``/``datetime``: иначе в колонку ``DATE`` уехала бы строка.
+    """
+    if value is None:
+        return None
+    if field == 'valid_until':
+        if isinstance(value, str):
+            return date.fromisoformat(value)
+        return value
+    if field == 'programs':
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return value
+    return value
 
 
 def _as_uuid(value) -> uuid_mod.UUID:
@@ -83,6 +149,11 @@ async def list_links(
 async def list_links_enriched(
     *,
     status: str | None = None,
+    verification_status: str | None = None,
+    benefit_type: str | None = None,
+    university_id=None,
+    olympiad_id=None,
+    subject: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[dict]:
@@ -101,8 +172,15 @@ async def list_links_enriched(
         .join(Olympiads, UniversityBvi.olympiad_id == Olympiads.id)
         .order_by(UniversityBvi.createdAt, UniversityBvi.id)
     )
-    if status is not None:
-        statement = statement.where(UniversityBvi.status == status)
+    statement = _apply_link_filters(
+        statement,
+        status=status,
+        verification_status=verification_status,
+        benefit_type=benefit_type,
+        university_id=university_id,
+        olympiad_id=olympiad_id,
+        subject=subject,
+    )
     if offset:
         statement = statement.offset(offset)
     if limit is not None:
@@ -121,63 +199,201 @@ async def list_links_enriched(
         ]
 
 
-async def count_links(*, status: str | None = None) -> int:
-    """Число связей (с учётом фильтра) — для ``total`` в постраничном ответе."""
-    statement = select(func.count()).select_from(UniversityBvi)
+def _apply_link_filters(
+    statement,
+    *,
+    status: str | None = None,
+    verification_status: str | None = None,
+    benefit_type: str | None = None,
+    university_id=None,
+    olympiad_id=None,
+    subject: str | None = None,
+):
+    """Общие фильтры связей: используются списком и подсчётом.
+
+    Фильтры вынесены в одну функцию, чтобы ``list`` и ``count`` не разошлись:
+    рассинхронизация давала бы ``total`` больше числа реально отдаваемых строк.
+    """
     if status is not None:
         statement = statement.where(UniversityBvi.status == status)
+    if verification_status is not None:
+        statement = statement.where(
+            UniversityBvi.verification_status == verification_status
+        )
+    if benefit_type is not None:
+        statement = statement.where(UniversityBvi.benefit_type == benefit_type)
+    if university_id is not None:
+        statement = statement.where(
+            UniversityBvi.university_id == _as_uuid(university_id)
+        )
+    if olympiad_id is not None:
+        statement = statement.where(
+            UniversityBvi.olympiad_id == _as_uuid(olympiad_id)
+        )
+    if subject is not None:
+        statement = statement.where(UniversityBvi.subject == subject)
+    return statement
+
+
+async def count_links(
+    *,
+    status: str | None = None,
+    verification_status: str | None = None,
+    benefit_type: str | None = None,
+    university_id=None,
+    olympiad_id=None,
+    subject: str | None = None,
+) -> int:
+    """Число связей (с учётом фильтра) — для ``total`` в постраничном ответе."""
+    statement = _apply_link_filters(
+        select(func.count()).select_from(UniversityBvi),
+        status=status,
+        verification_status=verification_status,
+        benefit_type=benefit_type,
+        university_id=university_id,
+        olympiad_id=olympiad_id,
+        subject=subject,
+    )
     async with AsyncSessionLocal() as session:
         return (await session.execute(statement)).scalar_one()
+
+
+def _apply_olympiad_link_filters(
+    statement,
+    *,
+    include_pending: bool = False,
+    benefit_type: str | None = None,
+    subject: str | None = None,
+    verification_status: str | None = None,
+):
+    """Фильтры связей при чтении олимпиад/университетов через JOIN.
+
+    ``benefit_type``/``subject``/``verification_status`` фильтруют именно связь,
+    поэтому условия пишутся по ``UniversityBvi``, а не по каталогу.
+    """
+    if not include_pending:
+        statement = statement.where(UniversityBvi.status == 'CONFIRMED')
+    if benefit_type is not None:
+        statement = statement.where(UniversityBvi.benefit_type == benefit_type)
+    if subject is not None:
+        statement = statement.where(UniversityBvi.subject == subject)
+    if verification_status is not None:
+        statement = statement.where(
+            UniversityBvi.verification_status == verification_status
+        )
+    return statement
 
 
 async def list_olympiads_for_university(
     university_id,
     *,
     include_pending: bool = False,
+    benefit_type: str | None = None,
+    subject: str | None = None,
+    verification_status: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict]:
     """Олимпиады, дающие БВИ в университете (по умолчанию — подтверждённые).
 
     JOIN по ``olympiads`` отсекает связи на несуществующие олимпиады: FK
-    защищает от «висячих» id после ручных правок БД.
+    защищает от «висячих» id после ручных правок БД. Поддерживает фильтры по
+    виду льготы, предмету и статусу проверки, а также страницу (ТЗ §4.5, §10.1).
     """
     statement = (
-        select(Olympiads, UniversityBvi.status)
+        select(Olympiads, UniversityBvi)
         .join(UniversityBvi, UniversityBvi.olympiad_id == Olympiads.id)
         .where(UniversityBvi.university_id == _as_uuid(university_id))
         .order_by(Olympiads.name_norm, Olympiads.id)
     )
-    if not include_pending:
-        statement = statement.where(UniversityBvi.status == 'CONFIRMED')
+    statement = _apply_olympiad_link_filters(
+        statement,
+        include_pending=include_pending,
+        benefit_type=benefit_type,
+        subject=subject,
+        verification_status=verification_status,
+    )
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
         return [
             {
                 **olympiad_to_dict(olympiad),
-                'bvi_status': status,
+                # Правило льготы отдаём рядом с олимпиадой: вид льготы, предмет,
+                # статус проверки и подтверждение вузом нужны карточке.
+                'bvi_status': link.status,
+                'benefit_type': link.benefit_type,
+                'result_requirement': link.result_requirement,
+                'subject': link.subject,
+                'programs': link.programs,
+                'extra_requirements': link.extra_requirements,
+                'source_url_rule': link.source_url,
+                'valid_until': link.valid_until.isoformat() if link.valid_until else None,
+                'verification_status': link.verification_status,
+                'university_confirmed': bool(link.university_confirmed),
                 # Связь историческая, если олимпиады больше нет в актуальном
                 # перечне. Саму связь не удаляем: университет действительно давал
                 # БВИ, пока олимпиада была актуальной.
                 'is_historical': olympiad.status != 'PUBLISHED',
             }
-            for olympiad, status in result.all()
+            for olympiad, link in result.all()
         ]
+
+
+async def count_olympiads_for_university(
+    university_id,
+    *,
+    include_pending: bool = False,
+    benefit_type: str | None = None,
+    subject: str | None = None,
+    verification_status: str | None = None,
+) -> int:
+    """Число олимпиад вуза под фильтром — для ``total``."""
+    statement = _apply_olympiad_link_filters(
+        select(func.count())
+        .select_from(UniversityBvi)
+        .where(UniversityBvi.university_id == _as_uuid(university_id)),
+        include_pending=include_pending,
+        benefit_type=benefit_type,
+        subject=subject,
+        verification_status=verification_status,
+    )
+    async with AsyncSessionLocal() as session:
+        return (await session.execute(statement)).scalar_one()
 
 
 async def list_universities_for_olympiad(
     olympiad_id,
     *,
     include_pending: bool = False,
+    benefit_type: str | None = None,
+    subject: str | None = None,
+    verification_status: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict]:
     """Университеты, дающие БВИ за олимпиаду (обратная сторона связи)."""
     statement = (
-        select(Universities, UniversityBvi.status)
+        select(Universities, UniversityBvi)
         .join(UniversityBvi, UniversityBvi.university_id == Universities.id)
         .where(UniversityBvi.olympiad_id == _as_uuid(olympiad_id))
         .order_by(Universities.name_norm, Universities.id)
     )
-    if not include_pending:
-        statement = statement.where(UniversityBvi.status == 'CONFIRMED')
+    statement = _apply_olympiad_link_filters(
+        statement,
+        include_pending=include_pending,
+        benefit_type=benefit_type,
+        subject=subject,
+        verification_status=verification_status,
+    )
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
@@ -192,11 +408,38 @@ async def list_universities_for_olympiad(
         return [
             {
                 **university_to_dict(university),
-                'bvi_status': status,
+                'bvi_status': link.status,
+                'benefit_type': link.benefit_type,
+                'result_requirement': link.result_requirement,
+                'subject': link.subject,
+                'verification_status': link.verification_status,
+                'university_confirmed': bool(link.university_confirmed),
                 'is_historical': is_historical,
             }
-            for university, status in result.all()
+            for university, link in result.all()
         ]
+
+
+async def count_universities_for_olympiad(
+    olympiad_id,
+    *,
+    include_pending: bool = False,
+    benefit_type: str | None = None,
+    subject: str | None = None,
+    verification_status: str | None = None,
+) -> int:
+    """Число университетов под фильтром — для ``total``."""
+    statement = _apply_olympiad_link_filters(
+        select(func.count())
+        .select_from(UniversityBvi)
+        .where(UniversityBvi.olympiad_id == _as_uuid(olympiad_id)),
+        include_pending=include_pending,
+        benefit_type=benefit_type,
+        subject=subject,
+        verification_status=verification_status,
+    )
+    async with AsyncSessionLocal() as session:
+        return (await session.execute(statement)).scalar_one()
 
 
 class BviRequestError(ValueError):
@@ -464,3 +707,258 @@ async def remove_bvi_link(
                 )
             await session.delete(link)
             return True
+
+
+class BenefitRuleError(ValueError):
+    """Правило нельзя изменить с переданными значениями.
+
+    Несёт ``status_code``/``detail`` для HTTP-слоя, как и прочие ошибки этого
+    модуля. Текст объясняет причину человеку, а не называет код БД.
+    """
+
+    def __init__(self, detail: str, *, status_code: int = 409):
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
+
+
+async def _record_version(
+    session,
+    link,
+    *,
+    changed_by=None,
+    reason: str | None = None,
+    is_rollback: bool = False,
+) -> BenefitRuleVersion:
+    """Записать текущее состояние правила как новую версию.
+
+    Нумерация монотонная в пределах правила. Номер берётся как максимум + 1
+    под блокировкой связи (вызывающий уже держит ``FOR UPDATE`` на ``link``),
+    поэтому параллельные правки одного правила не создают две версии с одним
+    номером.
+    """
+    next_version = (
+        await session.execute(
+            select(func.coalesce(func.max(BenefitRuleVersion.version), 0)).where(
+                BenefitRuleVersion.link_id == link.id
+            )
+        )
+    ).scalar_one() + 1
+    version = BenefitRuleVersion(
+        link_id=link.id,
+        version=next_version,
+        snapshot=_rule_snapshot(link),
+        changed_by=_as_uuid(changed_by) if changed_by else None,
+        changed_at=datetime.now(timezone.utc),
+        reason=reason,
+        verification_status=link.verification_status,
+        source_doc_id=link.source_doc_id,
+        source_meta=link.source_meta,
+        is_rollback=is_rollback,
+    )
+    session.add(version)
+    return version
+
+
+async def update_benefit_rule(
+    olympiad_id,
+    university_id,
+    *,
+    updates: dict,
+    changed_by=None,
+    reason: str | None = None,
+    admin: bool = False,
+) -> dict | None:
+    """Изменить правило льготы и зафиксировать версию.
+
+    ``updates`` содержит только те поля правила, которые нужно поменять. Поля
+    ``benefit_type`` и ``verification_status`` валидируются по спискам
+    допустимых значений. Изменение статуса проверки ``verified`` проставляет
+    ``verified_by``/``verified_at``.
+
+    Возвращает словарь правила с добавленным ``version`` (номер только что
+    записанной версии) или ``None``, если связи нет.
+
+    Версия создаётся на каждое результативное изменение: без этого откат был бы
+    невозможен, а «кто и когда поменял правило льготы» — неотвечаемым.
+    """
+    allowed = set(BENEFIT_RULE_FIELDS)
+    unknown = set(updates) - allowed
+    if unknown:
+        raise BenefitRuleError(
+            f'Неизвестные поля правила: {", ".join(sorted(unknown))}',
+            status_code=400,
+        )
+    if 'benefit_type' in updates and updates['benefit_type'] not in BENEFIT_TYPES:
+        raise BenefitRuleError(
+            'Недопустимый вид льготы. Разрешены: ' + ', '.join(BENEFIT_TYPES) + '.',
+            status_code=400,
+        )
+    if (
+        'verification_status' in updates
+        and updates['verification_status'] not in VERIFICATION_STATUSES
+    ):
+        raise BenefitRuleError(
+            'Недопустимый статус проверки. Разрешены: '
+            + ', '.join(VERIFICATION_STATUSES)
+            + '.',
+            status_code=400,
+        )
+
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session:
+        link = (
+            await session.execute(
+                select(UniversityBvi)
+                .where(
+                    UniversityBvi.olympiad_id == _as_uuid(olympiad_id),
+                    UniversityBvi.university_id == _as_uuid(university_id),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if link is None:
+            return None
+
+        changed = False
+        for field, value in updates.items():
+            if getattr(link, field) != value:
+                setattr(link, field, value)
+                changed = True
+            elif field == 'verification_status':
+                # Значение то же, но повторная проверка администратором
+                # должна обновить метку времени и автора — это тоже факт.
+                changed = changed or value == 'verified'
+
+        if not changed:
+            return {**bvi_link_to_dict(link), 'version': None, 'changed': False}
+
+        if updates.get('verification_status') == 'verified' and admin and changed_by:
+            link.verified_by = _as_uuid(changed_by)
+            link.verified_at = now
+        elif 'verification_status' in updates:
+            # Снятие проверки (unverified/rejected) обнуляет и автора, и время:
+            # иначе по записи было бы видно, кто «проверял» уже неверящее правило.
+            link.verified_by = None
+            link.verified_at = None
+
+        link.updatedAt = now
+        version = await _record_version(
+            session, link, changed_by=changed_by, reason=reason
+        )
+        await session.commit()
+        await session.refresh(link)
+        return {
+            **bvi_link_to_dict(link),
+            'version': version.version,
+            'changed': True,
+        }
+
+
+async def list_benefit_versions(link_id) -> list[dict]:
+    """История версий правила в порядке возрастания номера."""
+    from app.middlewares.serializers import benefit_version_to_dict
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(BenefitRuleVersion)
+            .where(BenefitRuleVersion.link_id == _as_uuid(link_id))
+            .order_by(BenefitRuleVersion.version)
+        )
+        return [benefit_version_to_dict(row) for row in result.scalars().all()]
+
+
+async def rollback_benefit_rule(
+    link_id,
+    version: int,
+    *,
+    changed_by=None,
+    reason: str | None = None,
+) -> dict | None:
+    """Откатить правило к выбранной версии, создав новую версию.
+
+    Промежуточные версии не удаляются: откат — это тоже изменение, и оно
+    должно быть видно в истории. Новая версия помечается ``is_rollback``.
+    Возвращает ``None``, если связи или указанной версии нет.
+    """
+    async with AsyncSessionLocal() as session:
+        link = (
+            await session.execute(
+                select(UniversityBvi)
+                .where(UniversityBvi.id == _as_uuid(link_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if link is None:
+            return None
+        source = (
+            await session.execute(
+                select(BenefitRuleVersion).where(
+                    BenefitRuleVersion.link_id == link.id,
+                    BenefitRuleVersion.version == version,
+                )
+            )
+        ).scalar_one_or_none()
+        if source is None:
+            return None
+
+        snapshot = source.snapshot or {}
+        for field in BENEFIT_RULE_FIELDS:
+            if field in snapshot:
+                setattr(link, field, _restore_value(field, snapshot[field]))
+        if 'source_doc_id' in snapshot and snapshot['source_doc_id']:
+            link.source_doc_id = _as_uuid(snapshot['source_doc_id'])
+        if 'source_meta' in snapshot:
+            link.source_meta = snapshot['source_meta']
+        link.updatedAt = datetime.now(timezone.utc)
+
+        new_version = await _record_version(
+            session,
+            link,
+            changed_by=changed_by,
+            reason=reason or f'Откат к версии {version}',
+            is_rollback=True,
+        )
+        await session.commit()
+        await session.refresh(link)
+        return {**bvi_link_to_dict(link), 'version': new_version.version}
+
+
+async def set_university_confirmation(
+    olympiad_id,
+    university_id,
+    confirmed: bool,
+    *,
+    changed_by=None,
+) -> dict | None:
+    """Отметить подтверждение со стороны вуза (отдельно от проверки Papaya).
+
+    Подтверждение вуза — самостоятельная характеристика: представитель вуза
+    подтверждает правило по своей стороне, администратор Papaya независимо
+    ведёт ``verification_status``. Одно не заменяет другое, поэтому и
+    хранится отдельным полем.
+    """
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session:
+        link = (
+            await session.execute(
+                select(UniversityBvi)
+                .where(
+                    UniversityBvi.olympiad_id == _as_uuid(olympiad_id),
+                    UniversityBvi.university_id == _as_uuid(university_id),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if link is None:
+            return None
+        link.university_confirmed = bool(confirmed)
+        link.university_confirmed_at = now if confirmed else None
+        link.updatedAt = now
+        await _record_version(
+            session, link, changed_by=changed_by,
+            reason='Подтверждение вузом' if confirmed else 'Снятие подтверждения вуза',
+        )
+        await session.commit()
+        await session.refresh(link)
+        return bvi_link_to_dict(link)

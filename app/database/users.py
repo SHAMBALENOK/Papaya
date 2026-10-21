@@ -211,16 +211,57 @@ async def set_active_guarded(user_id, is_active: bool) -> dict | str:
         return user_to_dict(user)
 
 
+async def _apply_role_in_session(
+    session,
+    user_uuid,
+    role: str,
+    university_uuid,
+) -> dict | str:
+    """Назначить роль в уже открытой сессии, без коммита.
+
+    Возвращает обновлённого пользователя либо строку-причину отказа:
+    ``'missing'`` или ``'last_admin'``. Коммит и откат — у вызывающего.
+    """
+    await _lock_admins(session)
+    current = await session.execute(
+        select(Users.role, Users.isActive).where(Users.id == user_uuid)
+    )
+    row = current.one_or_none()
+    if not row:
+        return ADMIN_GUARD_MISSING
+
+    current_role, is_active_now = row
+    if role != ROLE_ADMIN and current_role == ROLE_ADMIN and is_active_now:
+        if await _active_admins_excluding(session, user_uuid) == 0:
+            return ADMIN_GUARD_LAST_ADMIN
+
+    user = (
+        await session.execute(select(Users).where(Users.id == user_uuid))
+    ).scalar_one_or_none()
+    user.role = role
+    user.university_id = university_uuid
+    user.updatedAt = datetime.now(timezone.utc)
+    await session.flush()
+    return user_to_dict(user)
+
+
 async def apply_role_guarded(
     user_id: str,
     role: str,
     university_id: str | None = None,
+    *,
+    session=None,
 ) -> dict | str:
     """Назначить роль, не понизив последнего активного администратора.
 
     Инварианты роли проверяются как обычно (см. ``apply_role``), а запрет на
     понижение последнего администратора проверяется под блокировкой строк
     администраторов, поэтому две параллельные операции не могут пройти обе.
+
+    Если передан ``session``, роль применяется в чужой транзакции: коммит и
+    откат остаются у вызывающего. Это нужно, чтобы назначение роли и запись
+    о решении по заявке фиксировались вместе — иначе одобренная заявка могла
+    остаться без представителя.
 
     Возвращает обновлённого пользователя либо строку-причину отказа:
     ``'missing'`` или ``'last_admin'``.
@@ -241,36 +282,25 @@ async def apply_role_guarded(
         uuid_mod.UUID(str(university_id)) if university_id else None
     )
 
-    async with AsyncSessionLocal() as session:
-        await _lock_admins(session)
-        current = await session.execute(
-            select(Users.role, Users.isActive).where(Users.id == user_uuid)
+    if session is not None:
+        return await _apply_role_in_session(
+            session, user_uuid, role, university_uuid
         )
-        row = current.one_or_none()
-        if not row:
-            await session.rollback()
-            return ADMIN_GUARD_MISSING
 
-        current_role, is_active_now = row
-        if role != ROLE_ADMIN and current_role == ROLE_ADMIN and is_active_now:
-            if await _active_admins_excluding(session, user_uuid) == 0:
-                await session.rollback()
-                return ADMIN_GUARD_LAST_ADMIN
-
-        user = (
-            await session.execute(select(Users).where(Users.id == user_uuid))
-        ).scalar_one_or_none()
-        user.role = role
-        user.university_id = university_uuid
-        user.updatedAt = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as own_session:
+        outcome = await _apply_role_in_session(
+            own_session, user_uuid, role, university_uuid
+        )
+        if isinstance(outcome, str):
+            await own_session.rollback()
+            return outcome
         try:
-            await session.commit()
+            await own_session.commit()
         except IntegrityError:
             # CHECK-ограничение БД: страховка от гонки и прямых правок данных.
-            await session.rollback()
+            await own_session.rollback()
             raise
-        await session.refresh(user)
-        return user_to_dict(user)
+        return outcome
 
 
 async def list_users(

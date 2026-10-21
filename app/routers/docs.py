@@ -271,6 +271,45 @@ async def doc_details(
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
+@docs_page.post(
+    '/{doc_id}/availability',
+    response_model=schemas.docs.DocResponse,
+    responses={
+        200: {'description': 'Доступность документа обновлена'},
+        400: {'description': 'Недопустимое значение availability'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Document not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def set_doc_availability(
+    doc_id: uuid.UUID,
+    body: schemas.docs.DocAvailabilityUpdate,
+    current_user: deps.AdminUser = None,
+):
+    """Отметить доступность файла/ссылки документа (ТЗ §7.3).
+
+    Независимый статус: ``status`` описывает обработку, ``availability`` —
+    сохранность самого файла или работоспособность ссылки-источника.
+    """
+    try:
+        try:
+            doc = await database.docs.set_document_availability(
+                doc_id, body.availability
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not doc:
+            raise HTTPException(status_code=404, detail='Document not found')
+        return doc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
 @docs_page.get(
     '/{doc_id}/file',
     responses={

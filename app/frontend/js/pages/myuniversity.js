@@ -42,9 +42,11 @@ async function renderMyUniversity() {
         return;
     }
 
-    const [uniRes, olyRes] = await Promise.all([
+    const [uniRes, olyRes, rulesRes, programsRes] = await Promise.all([
         api.getUniversity(universityId),
         api.getUniversityOlympiads(universityId, true),
+        api.listBenefitRules(universityId, { include_pending: true }),
+        api.listUniversityPrograms(universityId),
     ]);
     if (!uniRes.ok || !uniRes.data) {
         page.innerHTML = emptyHtml('Университет не найден',
@@ -55,6 +57,8 @@ async function renderMyUniversity() {
     const university = uniRes.data;
     const linked = (olyRes.ok && olyRes.data && olyRes.data.olympiads) || [];
     const linkedIds = new Set(linked.map(item => String(item.id)));
+    const rules = (rulesRes.ok && rulesRes.data && rulesRes.data.rules) || [];
+    const programs = (programsRes.ok && programsRes.data && programsRes.data.programs) || [];
 
     page.innerHTML = `
     <section class="pt-4 pb-12 md:pb-16">
@@ -78,11 +82,139 @@ async function renderMyUniversity() {
             <button type="button" id="bvi-add" class="${UI.btn} ${UI.btnPrimary}">Добавить олимпиаду</button>
         </div>
         <div id="my-bvi-list" class="mt-10">${loadingHtml()}</div>
+    </section>
+
+    <section class="mb-16 md:mb-24" aria-labelledby="my-rules-title">
+        <h2 id="my-rules-title" class="text-2xl font-extrabold tracking-tight">Правила льгот (${rules.length})</h2>
+        <p class="mt-4 text-lg text-ink-soft leading-relaxed max-w-2xl">
+            Условия по каждой олимпиаде: вид льготы, предмет и требования.
+            Правила заполняет администратор Papaya, а вы подтверждаете их со
+            стороны вуза — это две независимые отметки.
+        </p>
+        <div class="mt-10" id="my-rules-list">${myRulesHtml(rules)}</div>
+    </section>
+
+    <section class="mb-16 md:mb-24" aria-labelledby="my-programs-title">
+        <h2 id="my-programs-title" class="text-2xl font-extrabold tracking-tight">Образовательные программы (${programs.length})</h2>
+        <p class="mt-4 text-lg text-ink-soft leading-relaxed max-w-2xl">
+            Направления подготовки, на которые распространяются льготы вуза.
+            По одному названию в строке; набор сохраняется целиком.
+        </p>
+        <div class="mt-8" id="my-programs-box">${myProgramsHtml(programs)}</div>
     </section>`;
 
     drawMyBviList(linked, universityId, linkedIds);
+    wireMyRules(universityId);
+    wireMyPrograms(universityId, programs);
 
     document.getElementById('bvi-add').addEventListener('click', () => openBviPickerModal(universityId, linkedIds));
+}
+
+/** Список образовательных программ вуза. */
+function myProgramsHtml(programs) {
+    const value = programs.map(item => item.name).join('\n');
+    return `
+    <div class="${UI.card} px-8 py-7">
+        <div class="${UI.field}">
+            <label for="my-programs" class="${UI.label}">Программы</label>
+            <textarea id="my-programs" rows="8" class="${UI.input} resize-y"
+                      placeholder="Прикладная математика и информатика&#10;Лингвистика">${escHtml(value)}</textarea>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+            <button type="button" id="my-programs-save" class="${UI.btn} ${UI.btnPrimary}">Сохранить программы</button>
+            <p class="text-sm text-ink-soft">Пустые и повторяющиеся строки игнорируются.</p>
+        </div>
+    </div>`;
+}
+
+/** Сохранение набора образовательных программ. */
+function wireMyPrograms(universityId, programs) {
+    const save = document.getElementById('my-programs-save');
+    const field = document.getElementById('my-programs');
+    if (!save || !field) return;
+
+    save.addEventListener('click', async () => {
+        save.disabled = true;
+        const names = field.value.split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
+        const res = await api.saveUniversityPrograms(universityId, names);
+        if (res.ok) {
+            showToast('Программы сохранены', 'success');
+            renderMyUniversity();
+            return;
+        }
+        showToast(errorText(res), 'error');
+        save.disabled = false;
+    });
+}
+
+/** Список правил льгот вузом: вид льготы, проверка Papaya и подтверждение вуза. */
+function myRulesHtml(rules) {
+    if (!rules.length) {
+        return emptyHtml('Правил пока нет',
+            'Как только администратор Papaya заполнит условия по олимпиаде, '
+            + 'они появятся здесь, и вы сможете подтвердить их от имени вуза.');
+    }
+    const rows = rules.map(rule => {
+        const confirmed = !!rule.university_confirmed;
+        return `
+        <div class="${UI.card} px-8 py-7">
+            <div class="flex flex-col lg:flex-row lg:items-start gap-6">
+                <div class="flex-1 min-w-0">
+                    <p class="font-bold text-ink leading-snug">${escHtml(rule.olympiad_name || 'Олимпиада')}</p>
+                    <div class="mt-3 flex flex-wrap items-center gap-3">
+                        ${benefitTypeBadge(rule.benefit_type)}
+                        ${verificationBadge(rule.verification_status)}
+                        ${rule.subject ? `<span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(rule.subject)}</span>` : ''}
+                    </div>
+                    ${rule.result_requirement
+                        ? `<p class="mt-4 text-base text-ink leading-relaxed">Результат: ${escHtml(rule.result_requirement)}</p>`
+                        : ''}
+                    ${rule.extra_requirements
+                        ? `<p class="mt-2 text-base text-ink-soft leading-relaxed">Дополнительно: ${escHtml(rule.extra_requirements)}</p>`
+                        : ''}
+                    ${rule.programs && rule.programs.length
+                        ? `<p class="mt-2 text-base text-ink-soft leading-relaxed">Программы: ${escHtml(rule.programs.join(', '))}</p>`
+                        : ''}
+                    ${rule.valid_until
+                        ? `<p class="mt-2 text-sm text-ink-faint">Действует до: ${escHtml(String(rule.valid_until).slice(0, 10))}</p>`
+                        : ''}
+                    ${rule.source_url
+                        ? `<a href="${escAttr(rule.source_url)}" target="_blank" rel="noopener noreferrer"
+                              class="mt-3 inline-block text-sm font-semibold text-ink underline">Источник условий</a>`
+                        : ''}
+                </div>
+                <div class="shrink-0">
+                    <button type="button" data-confirm-rule="${escAttr(rule.olympiad_id)}"
+                            data-confirmed="${confirmed ? 'true' : 'false'}"
+                            class="${UI.btn} ${confirmed ? UI.btnSecondary : UI.btnPrimary} ${UI.btnSmall}">
+                        ${confirmed ? 'Подтверждено вузом ✓' : 'Подтвердить от имени вуза'}
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+    return `<div class="space-y-6">${rows}</div>`;
+}
+
+/** Подтверждение правила со стороны вуза (независимо от проверки Papaya). */
+function wireMyRules(universityId) {
+    document.querySelectorAll('[data-confirm-rule]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            const next = btn.dataset.confirmed !== 'true';
+            const res = await api.confirmBenefitRuleByUniversity(
+                universityId, btn.dataset.confirmRule, next);
+            if (res.ok) {
+                showToast(next ? 'Правило подтверждено вузом' : 'Подтверждение вуза снято', 'success');
+                renderMyUniversity();
+                return;
+            }
+            showToast(errorText(res), 'error');
+            btn.disabled = false;
+        });
+    });
 }
 
 function drawMyBviList(linked, universityId, linkedIds) {

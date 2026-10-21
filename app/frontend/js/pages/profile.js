@@ -52,6 +52,107 @@ async function renderProfile() {
     page.innerHTML = userProfileHtml(res.data, { editable: true });
     const editBtn = document.getElementById('btn-edit-profile');
     if (editBtn) editBtn.addEventListener('click', () => openEditProfileModal(res.data));
+
+    loadRepresentativeSection(res.data);
+}
+
+/** Блок «Представитель университета» (ТЗ §3.4).
+ *
+ * Пользователь подаёт заявку на роль представителя; до решения администратора
+ * права не меняются, поэтому блок показывает статус заявки, а не обещает
+ * доступ. Уже одобренному представителю форма не предлагается — заявка от
+ * него была бы лишней.
+ */
+async function loadRepresentativeSection(user) {
+    const box = document.getElementById('rep-section');
+    if (!box) return;
+    const role = user.role || 'USER';
+
+    const [appsRes, unisRes] = await Promise.all([
+        api.myApplications().catch(() => ({ ok: false })),
+        api.listUniversities().catch(() => ({ ok: false })),
+    ]);
+    const applications = (appsRes.ok && appsRes.data && appsRes.data.applications) || [];
+    const universities = (unisRes.ok && unisRes.data && unisRes.data.universities) || [];
+
+    const statusText = {
+        PENDING: 'На рассмотрении',
+        APPROVED: 'Одобрена',
+        REJECTED: 'Отклонена',
+    };
+
+    const listHtml = applications.length
+        ? `<ul class="mt-6 space-y-3">${applications.map(app => `
+            <li class="bg-white shadow-elev-1 px-5 py-4 flex flex-wrap items-center gap-3">
+                <span class="text-sm font-semibold">${escHtml(universityNameById(universities, app.university_id))}</span>
+                <span class="${UI.badge} ${app.status === 'APPROVED' ? UI.badgeSuccess
+                      : (app.status === 'REJECTED' ? UI.badgeDanger : UI.badgePending)}">${
+                      escHtml(statusText[app.status] || app.status)}</span>
+                ${app.decision_note ? `<span class="text-sm text-ink-soft">${escHtml(app.decision_note)}</span>` : ''}
+            </li>`).join('')}</ul>`
+        : '';
+
+    if (role === 'EDITOR' || role === 'ADMIN') {
+        box.innerHTML = `
+        <section class="mt-16" aria-labelledby="rep-title">
+            <h2 id="rep-title" class="${UI.eyebrow}">Представитель университета</h2>
+            <p class="mt-4 text-base text-ink-soft leading-relaxed">
+                ${role === 'ADMIN'
+                    ? 'Вы администратор Papaya: вам доступны все вузы.'
+                    : 'Вы представитель университета.'}
+            </p>
+            ${listHtml}
+        </section>`;
+        return;
+    }
+
+    const hasPending = applications.some(app => app.status === 'PENDING');
+    box.innerHTML = `
+    <section class="mt-16" aria-labelledby="rep-title">
+        <h2 id="rep-title" class="${UI.eyebrow}">Представитель университета</h2>
+        <p class="mt-4 text-base text-ink-soft leading-relaxed max-w-2xl">
+            Представитель university ведёт карточку вуза: заявляет льготы, подтверждает
+            правила и следит за условиями поступления. Заявку рассматривает администратор
+            Papaya — до решения права не меняются.
+        </p>
+        ${listHtml}
+        ${hasPending ? `
+        <p class="mt-6 text-sm text-ink-soft">Заявка уже на рассмотрении — дождитесь решения администратора.</p>
+        ` : `
+        <form id="rep-application-form" class="mt-8 max-w-2xl">
+            ${selectField({ id: 'rep-university', name: 'university_id', label: 'Университет', value: '', options: [
+                { value: '', label: 'Выберите университет' },
+                ...universities.map(u => ({ value: u.id, label: u.name })),
+            ]})}
+            ${textareaField({ id: 'rep-motivation', name: 'motivation', label: 'Почему вы представляете этот вуз', value: '', rows: 3, placeholder: 'Должность, кафедра, контакт приёмной комиссии' })}
+            <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Подать заявку</button>
+        </form>`}
+    </section>`;
+
+    const form = document.getElementById('rep-application-form');
+    if (!form) return;
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const universityId = document.getElementById('rep-university').value;
+        if (!universityId) return;
+        const motivation = document.getElementById('rep-motivation').value.trim();
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        const res = await api.submitApplication({ university_id: universityId, motivation });
+        btn.disabled = false;
+        if (res.ok) {
+            showToast('Заявка отправлена', 'success');
+            loadRepresentativeSection(user);
+        } else {
+            showToast(errorText(res), 'error');
+        }
+    });
+}
+
+/** Название вуза по id (для списка заявок). */
+function universityNameById(universities, id) {
+    const found = (universities || []).find(u => String(u.id) === String(id));
+    return found ? found.name : 'Университет';
 }
 
 function userProfileHtml(u, { editable = false } = {}) {
@@ -110,6 +211,8 @@ function userProfileHtml(u, { editable = false } = {}) {
         </section>
 
         <p class="mt-14 mb-4 text-sm text-ink-faint">Зарегистрирован: ${formatDate(u.createdAt)}</p>
+
+        <div id="rep-section"></div>
     </div>`;
 }
 

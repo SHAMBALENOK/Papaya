@@ -1,4 +1,6 @@
-"""REST-эндпоинты импорта документов РСОШ.
+"""REST-эндпоинты импорта документов РСОШ и приказов университетов.
+
+РСОШ (создаёт олимпиады каталога):
 
     POST /api/v1/imports/rsosh     — начать импорт документа
     GET  /api/v1/imports           — список прогонов импорта
@@ -7,9 +9,21 @@
     POST /api/v1/imports/{id}/confirm   — применить импорт
     POST /api/v1/imports/{id}/reject    — отклонить результаты
 
+Приказ вуза (создаёт только заявки БВИ, олимпиад не создаёт):
+
+    POST /api/v1/imports/university            — начать импорт приказа
+    GET  /api/v1/imports/university            — список прогонов приказов
+    GET  /api/v1/imports/university/{id}       — статус прогона
+    GET  /api/v1/imports/university/{id}/preview  — строки и распознанный вуз
+    POST /api/v1/imports/university/{id}/confirm  — записать заявки БВИ
+    POST /api/v1/imports/university/{id}/reject   — отклонить результаты
+
 Прогон импорта — это обработка конкретного документа, поэтому идентификатор
 прогона совпадает с id документа. Создание и обновление олимпиад происходит
-только на ``confirm``: до этого импорт ничего не пишет в каталог.
+только на ``confirm`` перечня РСОШ; приказ вуза на ``confirm`` создаёт лишь
+``PENDING``-связи БВИ на существующие олимпиады. Маршруты приказов объявлены
+до ``/{import_id}``: статический сегмент ``university`` не должен попадать под
+разбор ``import_id`` как UUID.
 """
 
 import logging
@@ -23,6 +37,13 @@ from app import database
 from app.core import deps
 from app.rsosh import persist, processor, states
 from app.rsosh.types import RsoshConflictError, RsoshError
+from app.university import persist as university_persist
+from app.university import processor as university_processor
+from app.university import states as university_states
+from app.university.types import (
+    UniversityConflictError,
+    UniversityError,
+)
 
 imports_page = APIRouter(
     prefix='/imports',
@@ -82,6 +103,27 @@ class ConfirmRequest(BaseModel):
     # {исходный name_norm: id существующей олимпиады} — принудительное
     # объединение с олимпиадой из каталога.
     merge: Dict[str, str] = Field(default_factory=dict)
+
+
+class UniversityStartRequest(BaseModel):
+    """Запуск импорта приказа университета."""
+
+    doc_id: uuid.UUID
+
+
+class UniversitySelectionRequest(BaseModel):
+    """Выбор администратора для прогона приказа.
+
+    ``skip`` — строки (``name_norm``), снятые администратором: они не пишутся.
+    ``links`` — ручное связывание несопоставленных строк: ``{name_norm: olympiad_id}``
+    для строк, которые автоматически не сопоставились с каталогом.
+    ``university_id`` — целевой университет приказа, если распознанный из шапки
+    не подходит: администратор подтверждает или переопределяет вуз вручную.
+    """
+
+    skip: List[str] = Field(default_factory=list)
+    links: Dict[str, str] = Field(default_factory=dict)
+    university_id: str | None = None
 
 
 class ImportListItem(BaseModel):
@@ -144,6 +186,36 @@ def _import_view(doc: dict) -> dict:
         'name': doc['name'],
         'type': doc['type'],
         'status': doc['status'],
+        # Доступность самого источника (ТЗ §7.3) — независимо от того, как
+        # прошёл импорт: документ мог обработаться, а ссылка протухнуть.
+        'availability': doc.get('availability', 'unknown'),
+        'availability_checked_at': doc.get('availability_checked_at'),
+        'state': section.get('state'),
+        'started_at': section.get('started_at'),
+        'finished_at': section.get('finished_at'),
+        'error': section.get('error'),
+        'progress': section.get('progress') or {},
+        'summary': section.get('summary') or {},
+        'warnings': section.get('warnings') or [],
+        'confirm': section.get('confirm'),
+    }
+
+
+def _university_view(doc: dict) -> dict:
+    """Состояние прогона приказа в том же виде, что и у РСОШ.
+
+    Отдельная функция, а не параметр: разделы состояния разные
+    (``metadata['university']`` против ``metadata['rsosh']``), и смешивать их
+    одним чтением нельзя.
+    """
+    section = university_states.university_section(doc)
+    return {
+        'id': doc['id'],
+        'name': doc['name'],
+        'type': doc['type'],
+        'status': doc['status'],
+        'availability': doc.get('availability', 'unknown'),
+        'availability_checked_at': doc.get('availability_checked_at'),
         'state': section.get('state'),
         'started_at': section.get('started_at'),
         'finished_at': section.get('finished_at'),
@@ -218,6 +290,323 @@ async def list_imports(
             limit=limit,
         )
         return {'imports': [_import_view(doc) for doc in docs]}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/university',
+    status_code=202,
+    responses={
+        202: {'description': 'Import started (processing in background)'},
+        400: {
+            'description': (
+                'Import is not startable from the current state, or the '
+                'document is not a UNIVERSITY_ORDER'
+            ),
+        },
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Permission denied'},
+        404: {'description': 'Document not found'},
+        409: {'description': 'Import is already running'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def start_university_import(
+    payload: UniversityStartRequest,
+    current_user: deps.AdminUser = None,
+):
+    """Начать импорт приказа университета.
+
+    Импортируем только ``UNIVERSITY_ORDER``. Приказ не создаёт олимпиад: на
+    подтверждении появятся лишь заявки БВИ (``PENDING``) на существующие
+    олимпиады каталога.
+    """
+    try:
+        doc, mode = await university_processor.start_import(payload.doc_id)
+        view = _university_view(doc)
+        view['execution'] = mode
+        return view
+    except UniversityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UniversityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.get(
+    '/university',
+    responses={
+        200: {'description': 'Список прогонов импорта приказов'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def list_university_imports(
+    limit: int | None = Query(default=None, ge=1, le=100),
+    current_user: deps.AdminUser = None,
+):
+    """Список прогонов импорта приказов университетов."""
+    try:
+        docs = await database.docs.list_docs(
+            doc_type=university_processor.UNIVERSITY_DOC_TYPE,
+            limit=limit,
+        )
+        return {'imports': [_university_view(doc) for doc in docs]}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.get(
+    '/university/{import_id}',
+    responses={
+        200: {'description': 'Статус импорта приказа'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def university_import_status(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Статус импорта приказа, сводка и предупреждения."""
+    try:
+        doc = await _university_doc(import_id)
+        return _university_view(doc)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.get(
+    '/university/{import_id}/preview',
+    responses={
+        200: {'description': 'Строки приказа и распознанный вуз'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is still processing'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def university_import_preview(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Строки приказа: что сопоставлено, что требует ручного связывания.
+
+    Отдаёт кандидатов, распознанный из шапки вуз и сохранённый выбор
+    администратора. Каталог и связи на этом шаге не меняются.
+    """
+    try:
+        doc = await _university_doc(import_id)
+        section = university_states.university_section(doc)
+        if section.get('state') == 'processing':
+            raise HTTPException(status_code=409, detail='Import is still processing')
+        return {
+            'import': _university_view(doc),
+            'pages': section.get('pages') or [],
+            'university': section.get('university') or {},
+            'candidates': section.get('candidates') or [],
+            'selection': section.get('selection'),
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.put(
+    '/university/{import_id}/selection',
+    responses={
+        200: {'description': 'Selection saved'},
+        400: {'description': 'Unknown candidates in selection'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is not ready for review'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def save_university_selection(
+    import_id: uuid.UUID,
+    payload: UniversitySelectionRequest,
+    current_user: deps.AdminUser = None,
+):
+    """Сохранить выбор администратора (снятые строки, ручные связи, вуз)."""
+    try:
+        await _university_doc(import_id)
+        doc = await university_persist.save_import_selection(
+            import_id, selection=payload.model_dump()
+        )
+        return _university_view(doc)
+    except UniversityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UniversityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/university/{import_id}/confirm',
+    responses={
+        200: {'description': 'Import confirmed: PENDING BVI links created'},
+        400: {'description': 'Import is not confirmable in its state'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is already applied or still processing'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def confirm_university_import(
+    import_id: uuid.UUID,
+    selection: UniversitySelectionRequest | None = None,
+    current_user: deps.AdminUser = None,
+):
+    """Применить импорт приказа: создать заявки БВИ (``PENDING``).
+
+    Олимпиады каталога не создаются и не изменяются, связи не подтверждаются:
+    их подтверждает модератор отдельным действием. Тело запроса не задано —
+    применяется сохранённый выбор администратора.
+    """
+    try:
+        doc = await _university_doc(import_id)
+        if selection is not None:
+            chosen = selection
+        else:
+            stored = university_states.university_section(doc).get('selection')
+            chosen = (
+                UniversitySelectionRequest(**stored)
+                if stored
+                else UniversitySelectionRequest()
+            )
+        result = await university_processor.confirm_import(
+            import_id,
+            selection=chosen.model_dump(),
+            university_id=chosen.university_id,
+        )
+        return {
+            'import': _university_view(result['document']),
+            'result': result['result'],
+        }
+    except UniversityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UniversityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/university/{import_id}/reject',
+    responses={
+        200: {'description': 'Import rejected (nothing persisted)'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is already applied or is being processed'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def reject_university_import(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Отклонить результаты импорта приказа (ни каталог, ни связи не трогаются)."""
+    try:
+        await _university_doc(import_id)
+        rejected = await university_persist.reject_import(import_id)
+        return _university_view(rejected)
+    except UniversityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UniversityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/university/{import_id}/pause',
+    responses={
+        200: {'description': 'Import pause requested / paused'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is not being processed'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def pause_university_import(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Приостановить идущую обработку приказа."""
+    try:
+        await _university_doc(import_id)
+        doc = await university_persist.request_pause(import_id)
+        return _university_view(doc)
+    except UniversityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UniversityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/university/{import_id}/resume',
+    responses={
+        200: {'description': 'Import resumed (processing in background)'},
+        400: {'description': 'Document is not startable'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Import is not paused'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def resume_university_import(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Возобновить приостановленный импорт приказа."""
+    try:
+        doc, mode = await university_processor.resume_import(import_id)
+        view = _university_view(doc)
+        view['execution'] = mode
+        return view
+    except UniversityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UniversityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -599,5 +988,12 @@ async def remove_manual_candidate(
 async def _rsosh_doc(import_id: uuid.UUID) -> dict:
     doc = await database.docs.get_doc(import_id)
     if not doc or doc.get('type') != processor.RSOSH_DOC_TYPE:
+        raise HTTPException(status_code=404, detail='Import not found')
+    return doc
+
+
+async def _university_doc(import_id: uuid.UUID) -> dict:
+    doc = await database.docs.get_doc(import_id)
+    if not doc or doc.get('type') != university_processor.UNIVERSITY_DOC_TYPE:
         raise HTTPException(status_code=404, detail='Import not found')
     return doc

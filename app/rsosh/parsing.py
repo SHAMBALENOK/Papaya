@@ -60,8 +60,11 @@ TITLE_KEYWORDS = frozenset({
     'открытая', 'открытый', 'школьная', 'юношеская',
     'олимпиада', 'олимпиады', 'конкурс',
 })
-# Названия внутри ячейки отделяются в том числе кавычками и переводом строки.
-NAME_SEPARATORS = ('\n', '\r', ';', '»')
+# Названия внутри ячейки отделяются переводом строки, точкой с запятой и
+# началом следующего названия. Закрывающая кавычка «»» — НЕ разделитель:
+# она завершает составное название («Финатлон для старшеклассников» —
+# Всероссийская олимпиада…), и разрезание по ней плодило обрывки записей.
+NAME_SEPARATORS = ('\n', '\r', ';')
 # Признаки того, что перед словом кончилось предыдущее название.
 BOUNDARY_BEFORE = ' \t\n\r|-—–,.;:'
 # Резкий край фрагмента: рамки ячейки и запятые, но не кавычки названия.
@@ -245,6 +248,16 @@ def _is_header_row(row: list[str], next_row: list[str] | None = None) -> bool:
 
 def _name_column_index(header: list[str], rows: list[list[str]]) -> int:
     """Индекс колонки с названием олимпиады."""
+    return _name_column_hint(header, rows) or 0
+
+
+def _name_column_hint(header: list[str], rows: list[list[str]]) -> int | None:
+    """Колонка названия по шапке, а при бесполезной шапке — по содержимому.
+
+    ``None`` означает «шапка не опознана и содержимое не дало надёжного
+    кандидата»: тогда решение принимается по всему документу (голосование по
+    всем строкам), а не по одной странице.
+    """
     normalized = [
         clean_cell(maybe_reverse(cell)).casefold().replace('ё', 'е') for cell in header
     ]
@@ -258,7 +271,7 @@ def _name_column_index(header: list[str], rows: list[list[str]]) -> int:
     # Шапка бесполезна: выбираем самую «текстовую» колонку. При равенстве
     # предпочтение у колонки, где встречается слово «олимпиада»: именно там
     # лежит название, а в соседней колонке — наименование организатора.
-    best_index = 0
+    best_index: int | None = None
     best_score = -1.0
     width = max((len(row) for row in rows), default=0)
     for index in range(width):
@@ -307,29 +320,58 @@ def _voted_name_index(rows: list[list[str]]) -> int | None:
     лежит только поле номера и края скана, где вместо текста — мусор из
     точек и вертикальных чёрточек.
     """
-    width = max((len(row) for row in rows), default=0)
-    if width == 0:
-        return None
+    items: list[tuple[int, str]] = []
+    for row in rows:
+        for index, value in enumerate(row):
+            items.append((index, value))
+    return _best_name_index(items, min_fill=0.6)
 
-    filled: list[int] = []
-    for index in range(width):
-        count = sum(
-            1 for row in rows
-            if index < len(row)
-            and _has_russian_word(clean_cell(row[index]))
-        )
-        filled.append(count)
+
+def _best_name_index(
+    items: list[tuple[int, str]],
+    *,
+    min_fill: float,
+) -> int | None:
+    """Колонка названия по содержимому всех таблиц одной ширины.
+
+    ``items`` — пары (индекс колонки, значение). Название — самая «текстовая»
+    колонка: длинный русский текст с упоминанием олимпиады. Самая левая
+    колонка с текстом названием НЕ является: на сканах перечня слева от
+    названия стоит пустое поле или полоса шума («|», «.», «,»), а поле номера
+    записи вообще оказывается в колонке организатора (числа «34», «100» стоят
+    справа от названия). Поэтому кандидат — колонка с максимальным «весом
+    текста», а при равенстве выигрывает более левая (название стоит перед
+    организатором).
+    """
+    if not items:
+        return None
+    width = max(index for index, _ in items) + 1
+    filled = [0] * width
+    name_score = [0.0] * width
+    for index, value in items:
+        text = clean_cell(value)
+        if not _has_russian_word(text):
+            continue
+        filled[index] += 1
+        # Упоминание олимпиады важнее длины: колонка организатора тоже длинная,
+        # но олимпиаду не называет, а короткое «Всероссийская олимпиада …» —
+        # именно название. Бонус должен перевешивать длину самой длинной
+        # организаторской строки.
+        weight = len(text) + (3000.0 if mentions_olympiad(text) else 0.0)
+        name_score[index] += weight
 
     best = max(filled)
     if best <= 0:
         return None
     # Порог допускает колонку, заполненную чуть реже победителя, но не
     # выбирает колонку, где текста почти нет.
-    threshold = max(1.0, best * 0.6)
-    for index, count in enumerate(filled):
-        if count >= threshold:
-            return index
-    return None
+    threshold = max(1.0, best * min_fill)
+    candidates = [index for index, count in enumerate(filled) if count >= threshold]
+    if not candidates:
+        return None
+    # При равенстве веса — самая левая колонка: у перечня РСОШ название стоит
+    # перед наименованием организатора.
+    return max(candidates, key=lambda index: (name_score[index], -index))
 
 
 def _header_and_body(rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
@@ -360,7 +402,69 @@ def _is_row_number(value: str) -> bool:
     return bool(ROW_NUMBER.match(value.strip()))
 
 
-def _merge_continuation_rows(body: list[list[str]], width: int) -> list[list[str]]:
+def _number_column_index(rows: list[list[str]], width: int) -> int | None:
+    """Колонка с номерами строк перечня.
+
+    Поле номера стоит то слева от названия, то справа (в сканах 2025/26 —
+    внутри полосы организатора), поэтому колонка ищется по содержимому: где
+    больше всего ячеек-номеров. ``None`` — номеров нет вовсе, и различать
+    новую строку и продолжение нечем.
+    """
+    counts = [0] * width
+    for row in rows:
+        for index in range(min(width, len(row))):
+            if _is_row_number(row[index]):
+                counts[index] += 1
+    best = max(counts) if counts else 0
+    if best <= 0:
+        return None
+    # При равенстве — более левая колонка: чаще номер стоит первым.
+    return max(range(width), key=lambda index: (counts[index], -index))
+
+
+# Слова, после которых фраза явно не закончена: «Турнир имени» + «М.В.
+# Ломоносова», «олимпиада по» + «физике», «олимпиада для» + «школьников».
+CONTINUATION_CONNECTORS = frozenset({
+    'имени', 'по', 'и', 'для', 'на', 'в', 'с', 'от', 'до', 'при',
+    'между', 'среди', 'памяти', 'академика', 'профессора',
+})
+
+
+def _continues_previous(previous_name: str, fragment: str) -> bool:
+    """Похоже ли, что строка — продолжение предыдущей записи, а не новая.
+
+    Продолжение начинается со строчной буквы («народного хозяйства», «и
+    государственной службы»), обрывает предыдущую фразу (предыдущая ячейка
+    кончается дефисом или предлогом «имени», «по») либо является её
+    продолжением без своего начала. Ячейка, начинающаяся с заглавной буквы и
+    отдельного слова-начала («Олимпиада», «Всероссийская»), признаётся новой
+    записью: склеивать её с предыдущей нельзя, иначе две олимпиады становятся
+    одной слитной строкой.
+    """
+    if not fragment:
+        return False
+    first = fragment.lstrip(' \t«"\'>|_—–-')
+    if first[:1].islower():
+        return True
+    previous = previous_name.rstrip()
+    if previous.endswith('-'):
+        return True
+    cleaned = previous.strip(' \t|')
+    last_word = (
+        cleaned.rsplit(None, 1)[-1].strip('«»".,:|;').casefold()
+        if cleaned else ''
+    )
+    if last_word in CONTINUATION_CONNECTORS:
+        return True
+    return False
+
+
+def _merge_continuation_rows(
+    body: list[list[str]],
+    width: int,
+    *,
+    name_index: int | None = None,
+) -> list[list[str]]:
     """Собрать строку перечня, разорванную на несколько строк таблицы.
 
     В перечне РСОШ одна строка нередко занимает больше одной строки таблицы:
@@ -369,36 +473,59 @@ def _merge_continuation_rows(body: list[list[str]], width: int) -> list[list[str
     колонке названия обрывки чужого текста («федерального государственного»),
     и каталог засорялся бы вместо того, чтобы пополняться.
 
-    Признаком начала новой строки служит её номер. Ячейка без цифр — либо
-    пустая, либо мусор скана («|», «.»), — значит, это продолжение предыдущей
-    строки. Если в колонке номеров не встретилось ни одного номера, таблица
-    склеивается как есть: без номеров продолжение от первой строки не
-    отличить от новой.
+    Признаком начала новой строки служит её номер. Колонка номера ищется по
+    содержимому (не всегда нулевая). Строка без нового номера — продолжение
+    предыдущей. Но когда номер не распознан у следующей записи, одного
+    отсутствия номера мало: дополнительно проверяется, что ячейка названия
+    действительно обрывает предыдущую фразу, а не начинает новую олимпиаду
+    (см. ``_continues_previous``). Если номеров нет вовсе, таблица склеивается
+    как есть.
     """
     cells_by_row = [(list(row) + [''] * width)[:width] for row in body]
-    if not any(_is_row_number(row[0]) for row in cells_by_row):
+    number_column = _number_column_index(cells_by_row, width)
+    if number_column is None or name_index is None:
         return body
 
+    def _name_of(row: list[str]) -> str:
+        return clean_cell(row[name_index]) if name_index < len(row) else ''
+
+    def _incomplete(name: str) -> bool:
+        """Название ещё не собрано: пустое, из одного слова или оборвано."""
+        tokens = [token for token in re.split(r'\s+', name) if token.strip(' |,.«»"-')]
+        return len(tokens) < 2 or name.rstrip().endswith('-')
+
     merged: list[list[str]] = []
-    numbered: list[bool] = []
+    awaiting_name = False
     for cells in cells_by_row:
-        number = cells[0]
-        continuation = (
-            bool(merged)
-            and not re.sub(r'\D', '', number)
-            and numbered[-1]
-        )
-        if continuation:
-            for index in range(1, len(cells)):
-                part = cells[index]
-                if part.strip():
-                    previous = merged[-1][index]
-                    merged[-1][index] = (
-                        f'{previous} {part}'.strip() if previous else part
-                    )
-            continue
+        number = cells[number_column]
+        has_number = bool(re.sub(r'\D', '', number))
+        fragment = _name_of(cells)
+
+        if merged and not has_number:
+            # Номер у строки не распознан: она продолжение, если текущая
+            # группа ещё ждёт название (номер пришёл отдельной строкой или
+            # имя собрано не полностью) либо фрагмент явно обрывает фразу.
+            if awaiting_name or _continues_previous(
+                _name_of(merged[-1]), fragment
+            ):
+                for index in range(len(cells)):
+                    if index == number_column:
+                        # Колонка номера не склеивается: у продолжения там
+                        # мусор скана («|», «.»), испортивший бы номер записи.
+                        continue
+                    if cells[index].strip():
+                        previous = merged[-1][index]
+                        merged[-1][index] = (
+                            f'{previous} {cells[index]}'.strip()
+                            if previous else cells[index]
+                        )
+                if fragment:
+                    awaiting_name = _incomplete(_name_of(merged[-1]))
+                continue
+
         merged.append(cells)
-        numbered.append(_is_row_number(number))
+        # Номерная строка без полного названия: имя придёт следующими строками.
+        awaiting_name = has_number and _incomplete(fragment)
     return merged
 
 
@@ -465,6 +592,35 @@ def _plausible_name(name: str) -> str | None:
     return text
 
 
+def _is_organizer_only(value: str) -> bool:
+    """Ячейка похожа на реквизиты организатора, а не на название олимпиады.
+
+    В перечне РСОШ напротив олимпиады стоит полное наименование организатора
+    («Федеральное государственное автономное образовательное учреждение
+    высшего образования …»). Если такая ячейка попала в колонку названия (шапка
+    не распознана и колонки сползли), брать её как олимпиаду нельзя: это
+    засоряет каталог учреждениями вместо олимпиад.
+    """
+    text = clean_cell(value)
+    if mentions_olympiad(text) or 'конкурс' in text.casefold():
+        return False
+    markers, _ = _legal_markers_in(text)
+    return len(markers) >= 2
+
+
+def _leftmost_plausible(cells: list[str]) -> str | None:
+    """Первая слева ячейка строки, похожая на название олимпиады."""
+    for cell in cells:
+        text = clean_cell(cell)
+        if not text or is_noise(text) or is_boilerplate(text):
+            continue
+        if _is_organizer_only(text):
+            continue
+        if _plausible_name(text) is not None:
+            return text
+    return None
+
+
 def _table_records(
     table: list[list[str]],
     page: int,
@@ -512,13 +668,21 @@ def _table_records(
     if known_name_index is not None:
         name_index = known_name_index
     else:
-        name_index = _name_column_index(header, body)
+        hint = _name_column_hint(header, body)
+        if hint is not None:
+            name_index = hint
+        else:
+            # Шапка бесполезна и внутри страницы надёжного кандидата нет:
+            # колонка выбирается по всему документу (см. parse_pages).
+            name_index = _voted_name_index(rows)
+            if name_index is None:
+                name_index = _name_column_index(header, body)
     description_index = _description_column_index(header, name_index)
 
     # Одна строка перечня может занимать несколько строк таблицы — тогда
     # колонки склеиваются, и только после этого из строки берётся название.
     width = max((len(row) for row in rows), default=0)
-    body = _merge_continuation_rows(body, width)
+    body = _merge_continuation_rows(body, width, name_index=name_index)
 
     records: list[OlympiadRecord] = []
     skipped_boilerplate = 0
@@ -526,6 +690,8 @@ def _table_records(
     flagged = 0
 
     for position, row in enumerate(body):
+        if name_index is None:
+            break
         if name_index >= len(row):
             continue
         next_row = body[position + 1] if position + 1 < len(body) else None
@@ -538,6 +704,13 @@ def _table_records(
             # олимпиады называются «Всероссийская олимпиада школьников …».
             # Повтор шапки отсекается целиком по строке (см. _is_header_row).
             continue
+        # Ячейка организатора — это не название олимпиады. Если в колонке
+        # названия оказался юридический адрес учреждения, берём правдоподобную
+        # текстовую ячейку левее: колонки могли не совпасть из-за шапки.
+        if _is_organizer_only(raw_name):
+            raw_name = _leftmost_plausible(row[:name_index]) or ''
+            if not raw_name:
+                continue
 
         # В одной ячейке может быть несколько олимпиад подряд — тогда это
         # разные записи каталога, а не одна слитная строка.
@@ -631,6 +804,7 @@ def parse_pages(pages: list[PageTables]) -> tuple[list[OlympiadRecord], list[str
     # ячейки названия, и вместо него выбирается колонка организаторов.
     prepared: list[tuple[PageTables, list[list[str]], list[list[str]], int]] = []
     name_indexes: dict[int, int | None] = {}
+    document_items: dict[int, list[tuple[int, str]]] = {}
     data_widths: set[int] = set()
     for page, table in tables:
         rows = [row for row in table if any(clean_cell(cell) for cell in row)]
@@ -639,11 +813,19 @@ def parse_pages(pages: list[PageTables]) -> tuple[list[OlympiadRecord], list[str
         prepared.append((page, table, rows, width))
         if header or len(body) >= MIN_TABLE_ROWS:
             data_widths.add(width)
+        # Колонка названия по всему документу: собираем значения всех таблиц
+        # одной ширины, чтобы выбрать колонку даже там, где шапка не читается.
+        document_items.setdefault(width, []).extend(
+            (index, value) for row in rows for index, value in enumerate(row)
+        )
         if width in name_indexes:
             continue
-        name_indexes[width] = (
-            _name_column_index(header, body) if header else _voted_name_index(rows)
-        )
+        if header:
+            name_indexes[width] = _name_column_index(header, body)
+        else:
+            name_indexes[width] = _best_name_index(document_items[width], min_fill=0.6)
+            if name_indexes[width] is None:
+                name_indexes[width] = _voted_name_index(rows)
 
     # Счётчики проблем по всему документу. Постраничные предупреждения
     # («страница была повёрнута», «восстановлено по промежуткам» и т.п.) — это

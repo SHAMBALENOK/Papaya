@@ -20,7 +20,7 @@ CONFIRMED  →  связь удалена  (отзыв подтверждени�
 очереди модерации висит как неподтверждённая — то есть ни то, ни другое.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -35,6 +35,14 @@ BVI_STATUSES = ('PENDING', 'CONFIRMED')
 #: ``revoke``  — отозвать подтверждение, связь удаляется.
 BVI_ACTIONS = ('confirm', 'reject', 'revoke')
 
+#: Виды льготы (ТЗ §4.3).
+BENEFIT_TYPES = ('BVI', 'EGE_100', 'DVI_100', 'OTHER')
+
+#: Статусы проверки связи администрацией Papaya (ТЗ §7.1). Отдельная от
+#: статуса заявки характеристика: заявка может быть подтверждена, но сведения
+#: ещё не проверены.
+VERIFICATION_STATUSES = ('unverified', 'verified', 'rejected')
+
 
 class BviLinkRequest(BaseModel):
     """Заявка: представитель университета заявляет, что вуз даёт БВИ.
@@ -44,6 +52,51 @@ class BviLinkRequest(BaseModel):
     """
 
     olympiad_id: UUID
+
+
+class BenefitRuleUpdate(BaseModel):
+    """Правка правила льготы (ТЗ §4.3, §7.1).
+
+    Все поля необязательные: меняются только переданные. ``benefit_type`` и
+    ``verification_status`` валидируются по спискам допустимых значений уже в
+    слое данных; пустая схема тоже недопустима — нечего менять.
+    """
+
+    benefit_type: Optional[str] = None
+    result_requirement: Optional[str] = None
+    subject: Optional[str] = None
+    programs: Optional[List[str]] = None
+    extra_requirements: Optional[str] = None
+    source_url: Optional[str] = None
+    # Дата, до которой правило действует: в БД это колонка DATE, поэтому и
+    # контракт — дата. Дата с временем в колонку DATE не пишется.
+    valid_until: Optional[date] = None
+    verification_status: Optional[str] = None
+    # Необязательное пояснение к правке — попадает в историю версий.
+    reason: Optional[str] = None
+
+    @field_validator('benefit_type')
+    @classmethod
+    def _check_benefit_type(cls, v):
+        if v is not None and v not in BENEFIT_TYPES:
+            raise ValueError('benefit_type must be one of ' + ', '.join(BENEFIT_TYPES))
+        return v
+
+    @field_validator('verification_status')
+    @classmethod
+    def _check_verification(cls, v):
+        if v is not None and v not in VERIFICATION_STATUSES:
+            raise ValueError(
+                'verification_status must be one of '
+                + ', '.join(VERIFICATION_STATUSES)
+            )
+        return v
+
+
+class UniversityConfirmationRequest(BaseModel):
+    """Отметка подтверждения правила со стороны вуза."""
+
+    confirmed: bool = True
 
 
 class BviModerationRequest(BaseModel):
@@ -123,10 +176,24 @@ class BviOlympiadItem(BaseModel):
     status: str | None = None
     bvi_status: str | None = None
     is_historical: bool = False
+    # Поля правила льготы: вид льготы, требуемый результат, предмет и статус
+    # проверки. Последнее — независимая характеристика: непроверенная связь
+    # видна в каталоге с пометкой «Не проверено Papaya».
+    benefit_type: str | None = None
+    result_requirement: str | None = None
+    subject: str | None = None
+    programs: List[str] | None = None
+    extra_requirements: str | None = None
+    source_url_rule: str | None = None
+    valid_until: str | None = None
+    verification_status: str | None = None
+    university_confirmed: bool = False
+    is_historical_note: str | None = None
 
 
 class BviOlympiadsResponse(BaseModel):
     olympiads: List[BviOlympiadItem]
+    total: int = 0
 
 
 class BviUniversityItem(BaseModel):
@@ -141,7 +208,69 @@ class BviUniversityItem(BaseModel):
     image: str | None = None
     bvi_status: str | None = None
     is_historical: bool = False
+    benefit_type: str | None = None
+    result_requirement: str | None = None
+    subject: str | None = None
+    verification_status: str | None = None
+    university_confirmed: bool = False
 
 
 class BviUniversitiesResponse(BaseModel):
     universities: List[BviUniversityItem]
+    total: int = 0
+
+
+class BenefitRuleVersionItem(BaseModel):
+    """Версия правила льготы в истории (ТЗ §8)."""
+
+    id: str | None = None
+    link_id: str | None = None
+    version: int | None = None
+    snapshot: dict | None = None
+    changed_by: str | None = None
+    changed_at: str | None = None
+    reason: str | None = None
+    verification_status: str | None = None
+    source_doc_id: str | None = None
+    is_rollback: bool = False
+
+
+class BenefitRuleVersionsResponse(BaseModel):
+    versions: List[BenefitRuleVersionItem]
+
+
+class BenefitRuleUpdateResponse(BaseModel):
+    """Результат правки правила: текущее состояние и номер версии."""
+
+    rule: dict
+    version: int | None = None
+    changed: bool = False
+
+
+class BenefitRuleListItem(BaseModel):
+    """Строка списка правил вуза (ТЗ §4.5): фильтры и модерация."""
+
+    id: str | None = None
+    university_id: str | None = None
+    olympiad_id: str | None = None
+    olympiad_name: str | None = None
+    status: str | None = None
+    benefit_type: str | None = None
+    result_requirement: str | None = None
+    subject: str | None = None
+    programs: List[str] | None = None
+    source_url: str | None = None
+    valid_until: str | None = None
+    verification_status: str | None = None
+    verified_by: str | None = None
+    verified_at: str | None = None
+    university_confirmed: bool = False
+    university_confirmed_at: str | None = None
+    olympiad_status: str | None = None
+    createdAt: str | None = None
+
+
+class BenefitRulesResponse(BaseModel):
+    rules: List[BenefitRuleListItem]
+    total: int = 0
+

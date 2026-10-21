@@ -79,6 +79,35 @@ async def add_doc(ins: dict) -> dict | None:
         return doc_to_dict(doc)
 
 
+#: Допустимые значения доступности документа (ТЗ §7.3).
+DOC_AVAILABILITY = ('unknown', 'ok', 'broken')
+
+
+async def set_document_availability(doc_id, availability: str) -> dict | None:
+    """Отметить доступность документа-источника (независимо от статуса).
+
+    ``availability`` отвечает на вопрос «файл/ссылка ещё доступны», а не
+    «обработан ли документ»: потерянный файл и неудачный разбор — разные
+    проблемы. Метка времени проверки проставляется здесь же.
+    """
+    if availability not in DOC_AVAILABILITY:
+        raise ValueError(
+            'availability must be one of ' + ', '.join(DOC_AVAILABILITY)
+        )
+    async with AsyncSessionLocal() as session:
+        doc = (
+            await session.execute(select(Docs).where(Docs.id == _as_uuid(doc_id)))
+        ).scalar_one_or_none()
+        if doc is None:
+            return None
+        doc.availability = availability
+        doc.availability_checked_at = datetime.now(timezone.utc)
+        doc.updatedAt = doc.availability_checked_at
+        await session.commit()
+        await session.refresh(doc)
+        return doc_to_dict(doc)
+
+
 _DOC_EDITABLE_FIELDS = frozenset({
     'name', 'type', 'status', 'source_url', 'note', 'metadata',
 })

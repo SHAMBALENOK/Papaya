@@ -128,6 +128,79 @@ function bviStatusBadge(status) {
     return `<span class="${UI.badge} ${UI.badgePending}">Ждёт подтверждения</span>`;
 }
 
+/* ---------- Льготы: вид, проверка, сезон ---------- */
+
+/** Человеческое название вида льготы (ТЗ §4.3).
+ *
+ * enum-значения пользователю не показываются: «EGE_100» ничего не говорит
+ * школьнику, «100 баллов ЕГЭ» говорит всё.
+ */
+function benefitTypeLabel(type) {
+    switch (type) {
+        case 'EGE_100': return '100 баллов ЕГЭ';
+        case 'DVI_100': return '100 баллов ДВИ';
+        case 'OTHER':   return 'Иная льгота';
+        case 'BVI':
+        default:        return 'БВИ';
+    }
+}
+
+/** Бейдж вида льготы. */
+function benefitTypeBadge(type) {
+    const label = benefitTypeLabel(type);
+    if (type === 'BVI') {
+        return `<span class="${UI.badge} ${UI.badgeSuccess}">
+            <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>${label}
+        </span>`;
+    }
+    return `<span class="${UI.badge} ${UI.badgeNeutral}">${label}</span>`;
+}
+
+/** Бейдж статуса проверки Papaya (ТЗ §7.1).
+ *
+ * Проверка — независимая характеристика: она не равна статусу заявки
+ * (подтверждена администратором) и не равна подтверждению со стороны вуза.
+ * Непроверенное показываем явно, но спокойно: это не «ошибка», а «пока не
+ * сверено».
+ */
+function verificationBadge(status) {
+    if (status === 'verified') {
+        return `<span class="${UI.badge} ${UI.badgeSuccess}">Проверено Papaya</span>`;
+    }
+    if (status === 'rejected') {
+        return `<span class="${UI.badge} ${UI.badgeDanger}">Проверка не пройдена</span>`;
+    }
+    return `<span class="${UI.badge} ${UI.badgePending}">Не проверено Papaya</span>`;
+}
+
+/** Состояние сезона олимпиады — человеческим текстом. */
+function seasonStateLabel(state) {
+    switch (state) {
+        case 'upcoming':  return 'Скоро начнётся';
+        case 'active':    return 'Идёт сейчас';
+        case 'completed': return 'Завершён';
+        default:          return 'Состояние неизвестно';
+    }
+}
+
+/** Текст о датах сезона.
+ *
+ * Даты публикуются не всегда: если их нет, это не «сбой», а отсутствие
+ * информации — и пользователю нужно сказать об этом прямо, а не молча
+ * показать пустое место.
+ */
+function seasonDatesText(dates) {
+    if (!dates || !Object.keys(dates).length) {
+        return 'Даты пока не опубликованы';
+    }
+    const parts = [];
+    if (dates.registration_start) parts.push(`регистрация с ${formatDate(dates.registration_start)}`);
+    if (dates.registration_end) parts.push(`по ${formatDate(dates.registration_end)}`);
+    if (dates.start_date) parts.push(`проведение с ${formatDate(dates.start_date)}`);
+    if (dates.end_date) parts.push(`по ${formatDate(dates.end_date)}`);
+    return parts.length ? parts.join(', ') : 'Даты пока не опубликованы';
+}
+
 /* ---------- Поля форм ---------- */
 
 function inputField({ id, label, name, type = 'text', value = '', placeholder = '', required = false, autocomplete = '' }) {

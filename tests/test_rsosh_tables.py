@@ -187,9 +187,9 @@ def test_split_separates_two_olympiads_in_one_cell():
 
 
 def test_split_does_not_break_a_single_title_in_two():
-    """Прилагательное и «олимпиада» — одна фраза, а не два названия."""
+    """Прилагательное и «олимпиада» — одна фраза, а не два названия. Закрывающая кавычка сохраняется."""
     cell = 'Всероссийская олимпиада школьников выполнима. Твое призвание — финансист!»'
-    assert split_olympiad_names(cell) == [cell.rstrip('»')]
+    assert split_olympiad_names(cell) == [cell]
 
 
 def test_voted_name_index_ignores_margin_noise_and_organizer():
@@ -272,19 +272,20 @@ def test_merge_continuation_rows_joins_cells_with_ocr_noise():
 
     В продолжения строки нет номера: колонка номера несёт мусор скана («|»,
     «.»), по которому раньше начиналась новая строка, и олимпиада терялась.
+    Продолжение узнаётся по строчному началу или обрыву фразы.
     """
     body = [
         ['| 14', 'Всесибирская |', 'Министерство образования'],
         ['|', '| открытая олимпиада', 'области'],
-        ['', '| Школьников', ''],
+        ['', '| школьников', ''],
         ['15', 'Вузовско- академическая олимпиада', ''],
     ]
 
-    merged = _merge_continuation_rows(body, 3)
+    merged = _merge_continuation_rows(body, 3, name_index=1)
 
     assert len(merged) == 2
     assert merged[0][0] == '| 14'
-    assert merged[0][1] == 'Всесибирская | | открытая олимпиада | Школьников'
+    assert merged[0][1] == 'Всесибирская | | открытая олимпиада | школьников'
     assert merged[0][2] == 'Министерство образования области'
     assert merged[1][1] == 'Вузовско- академическая олимпиада'
 
@@ -295,7 +296,7 @@ def test_merge_continuation_rows_needs_a_number_anywhere():
         ['', 'Основания и порядок', ''],
         ['', 'подтверждаются свидетельством', ''],
     ]
-    assert _merge_continuation_rows(body, 3) == body
+    assert _merge_continuation_rows(body, 3, name_index=1) == body
 
 
 def test_merge_continuation_rows_does_not_glue_two_olympiads():
@@ -304,11 +305,29 @@ def test_merge_continuation_rows_does_not_glue_two_olympiads():
         ['14', 'Всесибирская олимпиада', ''],
         ['15', 'Вузовско- академическая олимпиада', ''],
     ]
-    merged = _merge_continuation_rows(body, 3)
+    merged = _merge_continuation_rows(body, 3, name_index=1)
     assert [row[1] for row in merged] == [
         'Всесибирская олимпиада',
         'Вузовско- академическая олимпиада',
     ]
+
+
+def test_merge_continuation_rows_does_not_blend_missing_number_record():
+    """Пропущенный номер следующей записи не склеивает две олимпиады в одну.
+
+    Если номер не распознан, отсутствия номера недостаточно для вывода о
+    продолжении: ячейка названия, начинающаяся с заглавной, — это новая
+    олимпиада, а не хвост предыдущей.
+    """
+    body = [
+        ['', 'Олимпиада школьников Российской академии', '100'],
+        ['', 'второго строки продолжение', ''],
+        ['', 'Олимпиада школьников Санкт-Петербургского', ''],
+    ]
+    merged = _merge_continuation_rows(body, 3, name_index=1)
+    names = [row[1] for row in merged]
+    assert names[0] == 'Олимпиада школьников Российской академии второго строки продолжение'
+    assert names[1] == 'Олимпиада школьников Санкт-Петербургского'
 
 
 def test_plausible_name_keeps_real_olympiads():
@@ -347,7 +366,7 @@ def test_continuation_row_becomes_one_record_not_fragments():
     table = [
         ['| 14', 'Всесибирская |', 'Министерство образования'],
         ['|', '| открытая олимпиада', 'области'],
-        ['', '| Школьников', ''],
+        ['', '| школьников', ''],
         ['15', 'Вузовско- академическая олимпиада', ''],
     ]
 
@@ -378,8 +397,9 @@ def test_normalize_olympiad_name_removes_rule_line_pipes():
     assert normalize_olympiad_name('Всесибирская | открытая олимпиада') == (
         'Всесибирская открытая олимпиада'
     )
+    # Кавычки-ёлочки — часть названия, они сохраняются.
     assert normalize_olympiad_name('«Инженерная олимпиада | школьников»') == (
-        'Инженерная олимпиада школьников'
+        '«Инженерная олимпиада школьников»'
     )
 
 

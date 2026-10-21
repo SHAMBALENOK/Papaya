@@ -15,6 +15,7 @@
  *   #/my-university         управление БВИ своего университета
  *   #/admin/*               администрирование Papaya
  *   #/admin/imports/{id}    просмотр и подтверждение результатов импорта
+ *   #/admin/orders/{id}     просмотр и подтверждение приказа университета
  * ========================================================================== */
 
 const PUBLIC_PREFIXES = ['/universities', '/olympiads', '/search'];
@@ -93,6 +94,8 @@ function router() {
             const tab = path.split('/admin/')[1] || 'users';
             if (tab.startsWith('imports/')) {
                 renderImportReview(tab.split('/')[1]);
+            } else if (tab.startsWith('orders/')) {
+                renderUniversityReview(tab.split('/')[1]);
             } else {
                 renderAdmin(tab);
             }

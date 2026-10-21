@@ -11,7 +11,7 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
@@ -45,19 +45,14 @@ async def get_university(university_id) -> dict | None:
         return university_to_dict(university) if university else None
 
 
-async def list_universities(
-    *,
-    search: str | None = None,
-    limit: int | None = None,
-) -> list[dict]:
-    """Список университетов с необязательным поиском.
+def _apply_university_filters(statement, search: str | None):
+    """Общие фильтры списка и подсчёта: поиск по тексту.
 
     ``search`` ищет по полному названию, краткому названию и описанию:
     пользователь ищет «МФТИ», «ИТМО» или «Университет ИТМО» — и хочет найти
     один и тот же вуз. Регистр не учитывается, переводы строк в описании
     схлопываются (см. ``comparable_text``).
     """
-    statement = select(Universities)
     query = (search or '').strip()
     if query:
         pattern = like_pattern(query)
@@ -66,13 +61,39 @@ async def list_universities(
             | _searchable(Universities.short_name).ilike(pattern, escape='\\')
             | _searchable(Universities.description).ilike(pattern, escape='\\')
         )
+    return statement
+
+
+async def list_universities(
+    *,
+    search: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict]:
+    """Список университетов с необязательным поиском и страницей.
+
+    ``limit``/``offset`` ограничивают страницу на уровне СУБД: публичный
+    каталог не должен тянуть весь список, чтобы показать первые строки.
+    """
+    statement = _apply_university_filters(select(Universities), search)
     statement = statement.order_by(Universities.name_norm, Universities.id)
+    if offset:
+        statement = statement.offset(offset)
     if limit is not None:
         statement = statement.limit(limit)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
         return [university_to_dict(item) for item in result.scalars().all()]
+
+
+async def count_universities(*, search: str | None = None) -> int:
+    """Число университетов под фильтром — для ``total`` в постраничном ответе."""
+    statement = _apply_university_filters(
+        select(func.count()).select_from(Universities), search
+    )
+    async with AsyncSessionLocal() as session:
+        return (await session.execute(statement)).scalar_one()
 
 
 async def add_university(ins: dict) -> dict | None:

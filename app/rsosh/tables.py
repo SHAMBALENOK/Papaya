@@ -19,10 +19,15 @@
    вертикальным промежуткам и горизонтальным разрывам между словами.
 """
 
+import re
 import statistics
 from dataclasses import dataclass, field
 
 import numpy as np
+
+# Номер строки перечня в левой колонке: «12», «12.», «| 7». Центральный
+# колонтитул страницы («2») лежит в другой полосе и сюда не попадает.
+ROW_NUMBER = re.compile(r'^[^\d]{0,4}\d{1,4}[.,)]?$')
 
 # Минимальная доля строк, где линия рамки должна иметь чернила. У настоящей
 # линии она около 0.8 (линия не тянется через поля скана), у колонки
@@ -274,6 +279,30 @@ def _column_index(bands: list[tuple[float, float]], x_center: float) -> int:
     return min(distances)[1] if distances else 0
 
 
+def _column_index_by_overlap(
+    bands: list[tuple[float, float]],
+    word: dict,
+) -> int:
+    """Столбец слова по максимальному горизонтальному перекрытию.
+
+    Центр слова может оказаться в соседней полосе, если слово широкое и
+    немного выходит за границу колонки (частый случай на сканах с наклоном).
+    Перекрытие устойчивее: ячейке принадлежит та полоса, с которой у слова
+    больше общих пикселей, а не та, куда попал его центр.
+    """
+    x0, x1 = word['x0'], word['x1']
+    best_index = 0
+    best_overlap = -1.0
+    for index, (start, end) in enumerate(bands):
+        overlap = min(x1, end) - max(x0, start)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_index = index
+    if best_overlap > 0:
+        return best_index
+    return _column_index(bands, (x0 + x1) / 2)
+
+
 def _rows_from_gaps(lines: list[list[dict]]) -> list[list[int]]:
     """Сгруппировать строки в строки таблицы по вертикальным промежуткам."""
     boxes = _line_boxes(lines)
@@ -364,6 +393,64 @@ def vote_row_boundaries(
     return [statistics.median(group) for group in votes if len(group) >= needed]
 
 
+def _row_starts_from_numbers(
+    words: list[dict],
+    column_bands: list[tuple[float, float]],
+    *,
+    line_height: float,
+) -> list[float]:
+    """Границы строк по номерам записей перечня.
+
+    На сканах перечня горизонтальных линеек нет, а голосование по промежуткам
+    часто принимает за границу записей первую строку многострочной ячейки:
+    тогда название и организатор одной олимпиады попадают в разные строки.
+    Номер записи стоит ровно на её верхней границе, поэтому он надёжнее.
+
+    Номера ищутся не в фиксированной колонке, а в той полосе, где сосредоточены
+    числа: в разных документах перечня поле номера оказывается то слева от
+    названия, то справа (сканы 2025/26 — номер стоит внутри полосы
+    организатора). Полоса-кандидат должна содержать не меньше двух чисел и
+    быть заполнена ими заметно чаще, чем остальные полосы.
+    """
+    if not words or not column_bands:
+        return []
+
+    word_bands = [
+        _column_index_by_overlap(column_bands, word) for word in words
+    ]
+    numeric = [
+        ROW_NUMBER.match(word['text'].strip()) is not None
+        and 0 < int(re.sub(r'\D', '', word['text']) or 0) <= 500
+        for word in words
+    ]
+
+    counts: list[int] = [0] * len(column_bands)
+    for index, is_number in zip(word_bands, numeric):
+        if is_number:
+            counts[index] += 1
+
+    if not counts or max(counts) < 2:
+        return []
+    # Полоса с наибольшим числом номеров; при равенстве — более левая: у
+    # большинства перечней поле номера стоит первым.
+    number_column = max(
+        range(len(counts)), key=lambda index: (counts[index], -index)
+    )
+
+    starts: list[int] = []
+    for index, is_number in enumerate(numeric):
+        if not is_number or word_bands[index] != number_column:
+            continue
+        starts.append(int(words[index]['y0'] - line_height * 0.6))
+
+    if not starts:
+        return []
+    clustered = _cluster_positions(
+        starts, tolerance=max(6, int(line_height))
+    )
+    return [float(value) for value in clustered]
+
+
 def _bands_from_edges(edges: list[float]) -> list[tuple[float, float]]:
     """Полосы между соседними границами, без пустых и пересекающихся."""
     ordered = sorted(set(edges))
@@ -392,15 +479,33 @@ def _bands_from_line_groups(
 
 
 def _cell_text(words: list[dict]) -> str:
-    """Собрать текст ячейки в порядке чтения."""
-    ordered = sorted(words, key=lambda word: (word['y0'], word['x0']))
+    """Собрать текст ячейки в порядке чтения построчно.
+
+    Сортировка всех слов по ``(y0, x0)`` перемешивает соседние строки, когда
+    слова в них чуть разной высоты: получалось «финансовой по грамотности»
+    вместо «по финансовой грамотности». Поэтому слова сначала группируются в
+    строки, а затем строки склеиваются сверху вниз.
+    """
+    lines = group_lines(words)
     parts: list[str] = []
-    for word in ordered:
-        text = word['text']
-        if parts and _needs_space(parts[-1], text):
-            parts.append(text)
+    for line in lines:
+        line_parts: list[str] = []
+        for word in line:
+            text = word['text']
+            if line_parts and _needs_space(line_parts[-1], text):
+                line_parts.append(' ' + text)
+            else:
+                line_parts.append(text)
+        line_text = ''.join(line_parts).strip()
+        if not line_text:
+            continue
+        if not parts:
+            parts.append(line_text)
+        elif _needs_space(parts[-1], line_text):
+            parts.append(line_text)
         else:
-            parts.append(text)
+            # Перенос по дефису: «Вузовско-» + «академическая» — одно слово.
+            parts[-1] += line_text
     return ' '.join(parts).strip()
 
 
@@ -444,7 +549,14 @@ def build_table(binary, words: list[dict]) -> Table:
         row_edges = [float(page_top), *map(float, horizontal_rules), float(page_bottom)]
         row_bands = _bands_from_edges(row_edges)
     else:
-        boundaries = vote_row_boundaries(words, column_bands)
+        # Номера записей точнее голосования по промежуткам: они стоят ровно
+        # на верхней границе строки и не зависят от того, в какой колонке
+        # оказалась самая длинная ячейка.
+        boundaries = _row_starts_from_numbers(
+            words, column_bands, line_height=line_height
+        )
+        if not boundaries:
+            boundaries = vote_row_boundaries(words, column_bands)
         if boundaries:
             row_edges = [float(page_top), *boundaries, float(page_bottom)]
             row_bands = _bands_from_edges(row_edges)
@@ -461,8 +573,7 @@ def build_table(binary, words: list[dict]) -> Table:
             cell_words = [
                 word for word in words
                 if word['y1'] > top and word['y0'] < bottom
-                and _column_index(column_bands, (word['x0'] + word['x1']) / 2)
-                == column
+                and _column_index_by_overlap(column_bands, word) == column
             ]
             text = _cell_text(cell_words) if cell_words else ''
             if cell_words:

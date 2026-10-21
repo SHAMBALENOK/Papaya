@@ -90,6 +90,14 @@ class AdminBviListItem(BaseModel):
     # Актуальна ли олимпиада: по архивной новая заявка невозможна, и
     # администратор должен видеть это до нажатия кнопок.
     olympiad_status: str | None = None
+    # Поля правила льготы и проверки: администратор видит вид льготы и статус
+    # проверки прямо в очереди, без открытия карточки.
+    benefit_type: str | None = None
+    subject: str | None = None
+    verification_status: str | None = None
+    university_confirmed: bool = False
+    verified_by: str | None = None
+    verified_at: str | None = None
     createdAt: str | None = None
 
 
@@ -243,6 +251,8 @@ async def list_olympiads(
 )
 async def list_bvi_links(
     status: str | None = None,
+    verification_status: str | None = None,
+    benefit_type: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     current_user: deps.AdminUser = None,
@@ -260,9 +270,17 @@ async def list_bvi_links(
     """
     try:
         links = await database.bvi.list_links_enriched(
-            status=status, limit=limit, offset=offset
+            status=status,
+            verification_status=verification_status,
+            benefit_type=benefit_type,
+            limit=limit,
+            offset=offset,
         )
-        total = await database.bvi.count_links(status=status)
+        total = await database.bvi.count_links(
+            status=status,
+            verification_status=verification_status,
+            benefit_type=benefit_type,
+        )
         return {'links': links, 'total': total}
     except Exception:
         logger.exception('Unhandled error')

@@ -7,6 +7,27 @@
  * ========================================================================== */
 const API_BASE = '/api/v1';
 
+/* Имена фильтров в интерфейсе — в camelCase, в API — в snake_case.
+ * Без приведения ключей фильтр «вид льготы» уезжал бы под именем
+ * `benefitType`, а сервер его тихо игнорировал: список выглядел бы
+ * отфильтрованным, а остался бы прежним. */
+const FILTER_KEYS = {
+    benefitType: 'benefit_type',
+    verificationStatus: 'verification_status',
+    includePending: 'include_pending',
+    universityId: 'university_id',
+    olympiadId: 'olympiad_id',
+};
+
+function filterQuery(filters) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return;
+        params.set(FILTER_KEYS[key] || key, value);
+    });
+    return params.toString();
+}
+
 /* Query-строка для постраничных административных списков (limit/offset/search).
    Пустой объект даёт пустую строку — вызов без параметров возвращает всё. */
 function adminQuery(opts) {
@@ -130,9 +151,14 @@ const api = {
         return this.get(`/universities${query}`, { skipAuthRedirect: true });
     },
     getUniversity(id) { return this.get(`/universities/${id}`, { skipAuthRedirect: true }); },
-    getUniversityOlympiads(id, includePending) {
-        const query = includePending ? '?include_pending=true' : '';
-        return this.get(`/universities/${id}/olympiads${query}`, { skipAuthRedirect: true });
+    getUniversityOlympiads(id, includePending, filters) {
+        const params = new URLSearchParams();
+        if (includePending) params.set('include_pending', 'true');
+        const query = filterQuery(filters);
+        return this.get(
+            `/universities/${id}/olympiads${query ? `?${query}` : ''}`,
+            { skipAuthRedirect: true },
+        );
     },
     addUniversity(d)     { return this.post('/universities/add_university', d); },
     editUniversity(id, d) { return this.post(`/universities/edit_university/${id}`, d); },
@@ -141,6 +167,67 @@ const api = {
     },
     removeBvi(universityId, olympiadId) {
         return this.post(`/universities/${universityId}/bvi/remove`, { olympiad_id: olympiadId });
+    },
+
+    /* Правила льгот: вид льготы, проверка, подтверждение вузом, версии. */
+    listBenefitRules(universityId, filters) {
+        const query = filterQuery(filters);
+        return this.get(
+            `/universities/${universityId}/benefit-rules${query ? `?${query}` : ''}`,
+            { skipAuthRedirect: true },
+        );
+    },
+    updateBenefitRule(universityId, olympiadId, body) {
+        return this.put(`/universities/${universityId}/benefit-rules/${olympiadId}`, body);
+    },
+    benefitRuleVersions(universityId, olympiadId) {
+        return this.get(`/universities/${universityId}/benefit-rules/${olympiadId}/versions`);
+    },
+    rollbackBenefitRule(universityId, olympiadId, version) {
+        return this.post(`/universities/${universityId}/benefit-rules/${olympiadId}/rollback/${version}`);
+    },
+    confirmBenefitRuleByUniversity(universityId, olympiadId, confirmed) {
+        return this.post(
+            `/universities/${universityId}/benefit-rules/${olympiadId}/university-confirmation`,
+            { confirmed: confirmed !== false },
+        );
+    },
+
+    /* Сезоны олимпиады и профили. */
+    listOlympiadSeasons(id) { return this.get(`/olympiads/${id}/seasons`, { skipAuthRedirect: true }); },
+    getOlympiadSeason(id, seasonId) {
+        return this.get(`/olympiads/${id}/seasons/${seasonId}`, { skipAuthRedirect: true });
+    },
+    upsertOlympiadSeason(id, year, body) {
+        return this.put(`/olympiads/${id}/seasons/${year}`, body);
+    },
+    archiveOlympiadSeason(id, seasonId) {
+        return this.post(`/olympiads/${id}/seasons/${seasonId}/archive`);
+    },
+    addOlympiadSeasonProfile(id, seasonId, body) {
+        return this.post(`/olympiads/${id}/seasons/${seasonId}/profiles`, body);
+    },
+
+    /* Образовательные программы университета. */
+    listUniversityPrograms(universityId) {
+        return this.get(`/universities/${universityId}/programs`, { skipAuthRedirect: true });
+    },
+    saveUniversityPrograms(universityId, programs) {
+        return this.put(`/universities/${universityId}/programs`, { programs });
+    },
+
+    /* Заявки на роль представителя вуза. */
+    submitApplication(body)      { return this.post('/applications', body); },
+    myApplications()             { return this.get('/applications/mine'); },
+    listApplications(status) {
+        const query = status ? `?status=${encodeURIComponent(status)}` : '';
+        return this.get(`/applications${query}`);
+    },
+    decideApplication(id, body)  { return this.post(`/applications/${id}/decision`, body); },
+
+    /* Доступность документа-источника (независимо от статуса обработки). */
+    setDocAvailability(id, availability) {
+        return this.post(`/docs/${id}/availability`, { availability });
     },
 
     listOlympiads(search, includeArchived) {
@@ -180,6 +267,17 @@ const api = {
     removeImportCandidate(id, nameNorm) {
         return this.post(`/imports/${id}/candidates/remove`, { name_norm: nameNorm });
     },
+
+    /* Импорт приказов университетов (администратор). Отдельные маршруты:
+       приказ не создаёт олимпиад, а заводит заявки БВИ на существующие. */
+    listUniversityImports()          { return this.get('/imports/university'); },
+    startUniversityImport(docId)     { return this.post('/imports/university', { doc_id: docId }); },
+    universityImportPreview(id)      { return this.get(`/imports/university/${id}/preview`); },
+    confirmUniversityImport(id, body) { return this.post(`/imports/university/${id}/confirm`, body || {}); },
+    rejectUniversityImport(id)       { return this.post(`/imports/university/${id}/reject`); },
+    pauseUniversityImport(id)        { return this.post(`/imports/university/${id}/pause`); },
+    resumeUniversityImport(id)       { return this.post(`/imports/university/${id}/resume`); },
+    saveUniversitySelection(id, body) { return this.put(`/imports/university/${id}/selection`, body); },
 
     /* Администрирование */
     adminUsers(opts) {

@@ -68,12 +68,16 @@ async function renderOlympiad(olympiadId) {
     if (!olympiadId) { renderNotFound(); return; }
     page.innerHTML = loadingHtml('Открываем олимпиаду…');
 
-    const [olyRes, uniRes, srcRes] = await Promise.all([
+    const [olyRes, uniRes, srcRes, seasonsRes] = await Promise.all([
         api.getOlympiad(olympiadId),
         api.getOlympiadUniversities(olympiadId),
         // Источник публичный и необязательный: его отсутствие — не ошибка
         // страницы, поэтому гасим неудачу вместо того, чтобы ломать рендер.
         api.getOlympiadSource(olympiadId).catch(() => ({ ok: false })),
+        // Сезоны — необязательный блок: олимпиады без заведённого сезона
+        // существуют (запись могла прийти из перечня РСОШ), и страница не
+        // должна из-за этого падать.
+        api.listOlympiadSeasons(olympiadId).catch(() => ({ ok: false })),
     ]);
 
     if (!olyRes.ok || !olyRes.data) {
@@ -86,6 +90,7 @@ async function renderOlympiad(olympiadId) {
     const olympiad = olyRes.data;
     const universities = (uniRes.ok && uniRes.data && uniRes.data.universities) || [];
     const source = (srcRes.ok && srcRes.data) || null;
+    const seasons = (seasonsRes.ok && seasonsRes.data && seasonsRes.data.seasons) || [];
     const isAdmin = store.isAdmin();
     const isArchived = olympiad.status === 'ARCHIVED';
 
@@ -102,13 +107,19 @@ async function renderOlympiad(olympiadId) {
     function universityLinkHtml(university, historical) {
         const badge = historical
             ? `<span class="${UI.badge} ${UI.badgeNeutral}">Историческая связь</span>`
-            : `<span class="${UI.badge} ${UI.badgeSuccess}">
-                   <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
-               </span>`;
+            : benefitTypeBadge(university.benefit_type);
+        const verification = historical
+            ? ''
+            : `<span class="${UI.badge} ${UI.badgePending}">${escHtml(
+                  university.verification_status === 'verified'
+                      ? 'Проверено Papaya'
+                      : (university.verification_status === 'rejected'
+                          ? 'Проверка не пройдена'
+                          : 'Не проверено Papaya'))}</span>`;
         return `
         <a href="#/universities/${escAttr(university.id)}"
            class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-            ${badge}
+            <div class="flex items-center gap-3 flex-wrap">${badge}${verification}</div>
             ${entityTitleHtml(university)}
             <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть →</p>
         </a>`;
@@ -170,6 +181,8 @@ async function renderOlympiad(olympiadId) {
         </section>` : ''}
 
         ${sourceBlockHtml(source, olympiadId)}
+
+        ${seasonsBlockHtml(seasons)}
 
         ${isAdmin ? `
         <section class="mt-12">
@@ -233,4 +246,67 @@ function sourceBlockHtml(source, olympiadId) {
             <p class="mt-4 text-base font-semibold">${escHtml(title || 'Источник не указан')}</p>
             ${downloadHtml}
         </section>`;
+}
+
+/** Блок сезонов олимпиады (ТЗ §4.4).
+ *
+ * Сезон — отдельная сущность: год, уровень РСОШ, даты и состояние. Даты
+ * публикуются не всегда, поэтому при их отсутствии показываем прямую фразу
+ * «Даты пока не опубликованы», а не пустое место: иначе посетитель решит,
+ * что у олимпиады вообще нет расписания.
+ */
+function seasonsBlockHtml(seasons) {
+    if (!seasons || !seasons.length) {
+        return `
+        <section class="mt-14">
+            <h2 class="${UI.eyebrow}">Сезоны</h2>
+            <p class="mt-4 text-base text-ink-soft leading-relaxed">
+                Сезон олимпиады (год, уровень РСОШ, даты) в каталоге пока не заведён.
+            </p>
+        </section>`;
+    }
+
+    const items = seasons.map(season => `
+        <div class="bg-white shadow-elev-1 p-6">
+            <div class="flex items-center gap-3 flex-wrap">
+                <span class="text-lg font-bold tracking-tight">${escHtml(String(season.year))}</span>
+                <span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(seasonStateLabel(season.state))}</span>
+                ${season.rsoh_level
+                    ? `<span class="${UI.badge} ${UI.badgePending}">Уровень РСОШ: ${escHtml(season.rsoh_level)}</span>`
+                    : ''}
+            </div>
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">${escHtml(seasonDatesText(season.dates))}</p>
+            ${seasonProfilesHtml(season.profiles)}
+            ${season.source_url
+                ? `<a href="${escAttr(season.source_url)}" target="_blank" rel="noopener noreferrer"
+                      class="mt-3 inline-block text-sm font-semibold text-ink underline">Официальные условия</a>`
+                : ''}
+        </div>`).join('');
+
+    return `
+        <section class="mt-14">
+            <h2 class="${UI.eyebrow}">Сезоны</h2>
+            <p class="mt-4 text-base text-ink-soft leading-relaxed max-w-2xl">
+                Условия участия меняются год от года, поэтому Papaya хранит их по
+                сезонам, а не приписывает олимпиаде навсегда.
+            </p>
+            <div class="mt-8 grid gap-6 sm:grid-cols-2">${items}</div>
+        </section>`;
+}
+
+/** Профили сезона — предметная номенклатура олимпиады (ТЗ §4.4). */
+function seasonProfilesHtml(profiles) {
+    if (!profiles || !profiles.length) return '';
+    const items = profiles.map(profile => `
+        <li class="flex flex-wrap items-baseline gap-2">
+            <span class="font-semibold text-ink">${escHtml(profile.name)}</span>
+            ${profile.subject
+                ? `<span class="text-sm text-ink-soft">${escHtml(profile.subject)}</span>`
+                : ''}
+        </li>`).join('');
+    return `
+        <div class="mt-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-ink-faint">Профили</p>
+            <ul class="mt-2 space-y-1 text-sm text-ink-soft">${items}</ul>
+        </div>`;
 }

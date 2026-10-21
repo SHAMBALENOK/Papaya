@@ -44,6 +44,42 @@ def _token_overlap(first: str, second: str) -> float:
     return len(first_tokens & second_tokens) / len(first_tokens | second_tokens)
 
 
+def best_catalog_match(
+    name_norm: str,
+    catalog: dict[str, dict],
+) -> tuple[dict | None, float]:
+    """Самая близкая олимпиада каталога и оценка близости (0..1).
+
+    Общее ядро нечёткого сравнения для импорта РСОШ и приказов вузов: смысл
+    сравнения названий не зависит от источника. Точное совпадение по
+    ``name_norm`` даёт 1.0; иначе — взвешенная близость строк и пересечение
+    слов с защитой от коротких названий.
+    """
+    exact = catalog.get(name_norm)
+    if exact:
+        return exact, 1.0
+    if len(name_norm) < MIN_FUZZY_LENGTH:
+        return None, 0.0
+
+    best_score = 0.0
+    best_olympiad = None
+    for candidate_norm, olympiad in catalog.items():
+        if abs(len(candidate_norm) - len(name_norm)) > max(
+            12, int(len(name_norm) * 0.4)
+        ):
+            continue
+        overlap = _token_overlap(name_norm, candidate_norm)
+        if overlap < 0.5:
+            # Наборы слов не пересекаются — это заведомо разные олимпиады,
+            # даже если строки случайно похожи по символам.
+            continue
+        score = _similarity(name_norm, candidate_norm) * 0.6 + overlap * 0.4
+        if score > best_score:
+            best_score = score
+            best_olympiad = olympiad
+    return best_olympiad, round(best_score, 3)
+
+
 def match_record(
     record: OlympiadRecord,
     catalog: dict[str, dict],
@@ -61,47 +97,19 @@ def match_record(
         issues=list(record.issues),
     )
 
-    exact = catalog.get(candidate.name_norm)
-    if exact:
-        candidate.action = 'merge'
-        candidate.matched_olympiad_id = exact['id']
-        candidate.match_score = 1.0
-        candidate.confidence = 'ok'
-        return candidate
-
-    if len(candidate.name_norm) < MIN_FUZZY_LENGTH:
-        return candidate
-
-    best_score = 0.0
-    best_olympiad = None
-    for name_norm, olympiad in catalog.items():
-        if abs(len(name_norm) - len(candidate.name_norm)) > max(
-            12, int(len(candidate.name_norm) * 0.4)
-        ):
-            continue
-        score = _similarity(candidate.name_norm, name_norm)
-        overlap = _token_overlap(candidate.name_norm, name_norm)
-        if overlap < 0.5:
-            # Наборы слов не пересекаются — это заведомо разные олимпиады,
-            # даже если строки случайно похожи по символам.
-            continue
-        score = score * 0.6 + overlap * 0.4
-        if score > best_score:
-            best_score = score
-            best_olympiad = olympiad
-
-    if best_olympiad is None or best_score < REVIEW_THRESHOLD:
+    olympiad, score = best_catalog_match(candidate.name_norm, catalog)
+    if olympiad is None or score < REVIEW_THRESHOLD:
         return candidate
 
     candidate.action = 'merge'
-    candidate.matched_olympiad_id = best_olympiad['id']
-    candidate.match_score = round(best_score, 3)
-    if best_score >= MERGE_THRESHOLD:
+    candidate.matched_olympiad_id = olympiad['id']
+    candidate.match_score = score
+    if score >= MERGE_THRESHOLD:
         candidate.confidence = 'ok'
     else:
         candidate.confidence = 'review'
         candidate.issues.append(
-            'Похоже на «' + (best_olympiad['name'] or '') + '» — проверьте вручную'
+            'Похоже на «' + (olympiad['name'] or '') + '» — проверьте вручную'
         )
     return candidate
 

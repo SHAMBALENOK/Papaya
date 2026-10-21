@@ -20,6 +20,8 @@ from app.database.search import normalize_name
 _CITATION = re.compile(r'^\s*(?:[-–—•*·]|\d+[.)])\s+')
 _QUOTES = re.compile(r'[«»„“”"\'`‘’«»]')
 _SPACES = re.compile(r'[\s\u00a0]+')
+# Перенос слова по дефису: «Вузовско- академическая» — это одно слово.
+_HYPHENATED = re.compile(r'-\s+')
 _DIGITS_ONLY = re.compile(r'^[\d\s.,%/–—-]+$')
 _CODE_LIKE = re.compile(r'^[A-Za-zА-Яа-яЁё]{1,2}\s?\d{0,3}$')
 
@@ -29,9 +31,14 @@ def clean_cell(value) -> str:
     if value is None:
         return ''
     text = str(value).replace('\r\n', '\n').replace('\r', '\n')
+    # Мягкий перенос и «лишние» дефисы, разорванные переносом строки,
+    # склеиваются: иначе «Вузовско‑» и «академическая» так и останутся
+    # двумя словами с пробелом после дефиса.
+    text = text.replace('\xad', '')
+    text = _HYPHENATED.sub('-', text)
     text = _SPACES.sub(' ', text).strip()
     text = _CITATION.sub('', text)
-    return text.strip(' \t ;,')
+    return text.strip(' \t ;,')
 
 
 def clean_description(value) -> str | None:
@@ -126,24 +133,19 @@ def maybe_reverse(value: str) -> str:
 
 
 # Служебные строки документа, которые не являются олимпиадами: шапка письма,
-# реквизиты приказа, подписи, колонтитулы.
+# реквизиты приказа, подписи, колонтитулы. Маркеры, которые могут встретиться
+# в названии олимпиады («приказ», «содержание», «учредитель»), сюда не
+# входят — иначе настоящие записи молча выпадали бы из каталога.
 _BOILERPLATE_MARKERS = (
     'министерство',
     'федеральное государственное',
     'федеральное автономное',
-    'приложение',
     'утверждено',
     'утверждаю',
-    'приказ',
-    'содержание',
-    'оглавление',
-    'страница',
     'телефон',
     'электронная почта',
     'факс',
-    'подпись',
     'место печати',
-    'учредитель',
 )
 
 
@@ -160,11 +162,17 @@ def mentions_olympiad(value: str) -> bool:
 
 
 def normalize_olympiad_name(value: str) -> str:
-    """Название олимпиады для каталога: человекочитаемое и устойчивое к OCR."""
+    """Название олимпиады для каталога: человекочитаемое и устойчивое к OCR.
+
+    Кавычки-ёлочки сохраняются: «Высшая проба» — это название вместе с
+    кавычками, а не «Высшая проба. Закрывающая кавычка срезалась раньше и
+    ломала составные названия, начинающиеся с кавычки.
+    """
     text = maybe_reverse(value)
     text = text.replace('|', ' ')
     text = _SPACES.sub(' ', text)
-    return text.strip().strip('«»"“”„')
+    text = _HYPHENATED.sub('-', text)
+    return text.strip().strip('"“”„')
 
 
 def name_key(value: str) -> str:

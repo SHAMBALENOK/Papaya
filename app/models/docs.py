@@ -50,6 +50,12 @@ class Docs(Base):
     source_url = Column(String, nullable=True)
     checksum = Column(String, nullable=True)
     status = Column(String, nullable=False, default='UPLOADED', index=True)
+    # Доступность самого файла/ссылки — независимая характеристика (ТЗ §7.3):
+    # 'unknown' (не проверялось), 'ok' (файл на месте / ссылка отвечает),
+    # 'broken' (файл потерян или ссылка не работает). Не путать со ``status``
+    # (состояние обработки) и с проверкой льготы.
+    availability = Column(String, nullable=False, default='unknown', index=True)
+    availability_checked_at = Column(DateTime(timezone=True), nullable=True)
     processedAt = Column(DateTime(timezone=True), nullable=True)
     # Атрибут ``meta``: имя ``metadata`` зарезервировано Declarative API,
     # а колонка в БД так и называется (``docs.metadata``).

@@ -17,6 +17,7 @@ from app.core import deps
 from app.database.database import db_lifespan
 from app.routers import (
     admin,
+    applications,
     auth,
     docs,
     health,
@@ -54,6 +55,7 @@ app.include_router(docs.docs_page, prefix='/api/v1')
 app.include_router(imports.imports_page, prefix='/api/v1')
 app.include_router(search.search_page, prefix='/api/v1')
 app.include_router(admin.admin_page, prefix='/api/v1')
+app.include_router(applications.applications_page, prefix='/api/v1')
 app.include_router(health.health_page)
 
 

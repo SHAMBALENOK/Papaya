@@ -1,1 +1,11 @@
-from . import bvi, docs, olympiads, universities, users
+from . import (
+    applications,
+    benefit_versions,
+    bvi,
+    docs,
+    olympiads,
+    programs,
+    seasons,
+    universities,
+    users,
+)

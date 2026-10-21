@@ -21,6 +21,28 @@ DOC_STATUSES = (
     'REJECTED',
 )
 
+#: Доступность самого файла/ссылки (ТЗ §7.3) — независимо от статуса
+#: обработки: ``unknown`` (не проверялось), ``ok``, ``broken``.
+DOC_AVAILABILITY = ('unknown', 'ok', 'broken')
+DOC_AVAILABILITY_NAMES = {
+    'unknown': 'не проверялось',
+    'ok': 'доступен',
+    'broken': 'недоступен',
+}
+
+
+class DocAvailabilityUpdate(BaseModel):
+    availability: str
+
+    @field_validator('availability')
+    @classmethod
+    def _check_availability(cls, v):
+        if v not in DOC_AVAILABILITY:
+            raise ValueError(
+                'availability must be one of ' + ', '.join(DOC_AVAILABILITY)
+            )
+        return v
+
 
 class DocBase(BaseModel):
     id: Optional[UUID] = None
@@ -85,6 +107,8 @@ class DocUpdate(BaseModel):
 class DocResponse(DocBase):
     storage_key: Optional[str] = None
     checksum: Optional[str] = None
+    availability: str = 'unknown'
+    availability_checked_at: Optional[datetime] = None
     processedAt: Optional[datetime] = None
     metadata: Optional[dict[str, Any]] = None
     createdAt: Optional[datetime] = None
