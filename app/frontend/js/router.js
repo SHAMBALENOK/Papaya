@@ -4,21 +4,22 @@
  * Публичные маршруты (доступны гостю):
  *   #/                      главная: поиск + каталоги
  *   #/universities          каталог университетов
- *   #/universities/{id}     университет и его БВИ-олимпиады
+ *   #/universities/{id}     университет, его олимпиады и правила льгот
  *   #/olympiads             каталог олимпиад
- *   #/olympiads/{id}        олимпиада, её сайты и вузы с БВИ
+ *   #/olympiads/{id}        олимпиада, сезоны, организатор и вузы с правилами
+ *   #/benefits/{id}         публичная карточка правила льготы
  *   #/search?q=…            результаты поиска
  *   #/auth                  вход и регистрация
  *
  * Маршруты с авторизацией:
  *   #/profile               профиль
- *   #/my-university         управление БВИ своего университета
+ *   #/my-university         кабинет представителя: правила льгот своего вуза
  *   #/admin/*               администрирование Papaya
  *   #/admin/imports/{id}    просмотр и подтверждение результатов импорта
  *   #/admin/orders/{id}     просмотр и подтверждение приказа университета
  * ========================================================================== */
 
-const PUBLIC_PREFIXES = ['/universities', '/olympiads', '/search'];
+const PUBLIC_PREFIXES = ['/universities', '/olympiads', '/search', '/benefits'];
 
 function navigate(hash) {
     if (window.location.hash === hash) {
@@ -80,6 +81,8 @@ function router() {
             renderOlympiads();
         } else if (path.startsWith('/olympiads/')) {
             renderOlympiad(path.split('/olympiads/')[1]);
+        } else if (path.startsWith('/benefits/')) {
+            renderBenefitRule(path.split('/benefits/')[1]);
         } else if (path === '/search') {
             renderSearch(new URLSearchParams(currentQuery()).get('q') || '');
         } else if (path === '/profile') {

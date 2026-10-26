@@ -43,17 +43,17 @@ function renderHome() {
         </article>
         <article class="${UI.card} p-8">
             <p class="text-sm font-extrabold text-ember">02</p>
-            <h2 class="mt-6 text-xl font-bold tracking-tight">Посмотрите олимпиады с БВИ</h2>
+            <h2 class="mt-6 text-xl font-bold tracking-tight">Посмотрите правила льгот</h2>
             <p class="mt-4 text-ink-soft leading-relaxed">
-                На странице университета — олимпиады, которые именно этот вуз
-                засчитывает для БВИ.
+                На странице университета — олимпиады и правила: вид льготы (БВИ,
+                100 баллов), сезон, профиль, программы и документ-основание.
             </p>
         </article>
         <article class="${UI.card} p-8">
             <p class="text-sm font-extrabold text-ember">03</p>
             <h2 class="mt-6 text-xl font-bold tracking-tight">Откройте сайт олимпиады</h2>
             <p class="mt-4 text-ink-soft leading-relaxed">
-                В карточке олимпиады — описание, официальный сайт и список вузов с БВИ.
+                В карточке олимпиады — описание, организатор, сезоны, официальный сайт и вузы с льготами.
             </p>
         </article>
     </section>
@@ -104,7 +104,7 @@ async function loadHomeCatalog() {
 
     box.innerHTML = `
     <div class="mb-16 md:mb-24">
-        <p class="${UI.eyebrow}">Каталог БВИ университетов</p>
+        <p class="${UI.eyebrow}">Каталог университетов</p>
         <h2 class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">Университеты</h2>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Главный раздел Papaya: университет и олимпиады, которые дают поступающим
@@ -124,22 +124,6 @@ async function loadHomeCatalog() {
     </div>`;
 }
 
-/** Историческая ли связь БВИ.
- *
- * Единственное место, где это решается во фронтенде: раздел актуальных и
- * исторических связей на страницах университета и олимпиады обязан считать
- * одинаково, иначе одна страница покажет олимпиаду как действующую льготу,
- * а другая — как историю.
- *
- * Проверяются оба признака: сервер отдаёт `is_historical` (унаследовано от
- * олимпиады), а на всякий случай и её собственный статус. `is_archived` —
- * дублирование того же факта, поэтому в проверке не участвует.
- */
-function isHistoricalBvi(item) {
-    return Boolean(item.is_historical) || item.status === 'ARCHIVED';
-}
-
-
 function universityCardHtml(university) {
     return `
     <a href="#/universities/${escAttr(university.id)}"
@@ -148,7 +132,7 @@ function universityCardHtml(university) {
             ${cardImageHtml(university)}
             ${entityTitleHtml(university)}
             <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-3">${escHtml(university.description || '')}</p>
-            <p class="mt-7 text-sm font-semibold text-ink group-hover:text-black transition-colors">Олимпиады с БВИ →</p>
+            <p class="mt-7 text-sm font-semibold text-ink group-hover:text-black transition-colors">Льготы за олимпиады →</p>
         </div>
     </a>`;
 }

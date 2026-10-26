@@ -1276,13 +1276,22 @@ async def attach_document(
 
 
 async def list_versions(rule_id) -> list[dict]:
+    """Версии по порядку с именем автора (один JOIN, без N+1)."""
+    from app.models.users import Users
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(BenefitRuleVersion)
+            select(BenefitRuleVersion, Users.name, Users.surname)
+            .outerjoin(Users, BenefitRuleVersion.changed_by == Users.id)
             .where(BenefitRuleVersion.rule_id == _as_uuid(rule_id))
             .order_by(BenefitRuleVersion.version)
         )
-        return [benefit_version_to_dict(row) for row in result.scalars().all()]
+        versions = []
+        for row, name, surname in result.all():
+            item = benefit_version_to_dict(row)
+            item['changed_by_name'] = ' '.join(p for p in (name, surname) if p) or None
+            versions.append(item)
+        return versions
 
 
 async def rollback_rule(

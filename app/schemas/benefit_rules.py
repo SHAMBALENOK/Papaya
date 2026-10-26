@@ -293,6 +293,7 @@ class BenefitRuleVersionItem(BaseModel):
     version: int | None = None
     snapshot: dict | None = None
     changed_by: str | None = None
+    changed_by_name: str | None = None
     changed_at: str | None = None
     reason: str | None = None
     verification_status: str | None = None

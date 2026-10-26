@@ -14,9 +14,12 @@ const API_BASE = '/api/v1';
 const FILTER_KEYS = {
     benefitType: 'benefit_type',
     verificationStatus: 'verification_status',
-    includePending: 'include_pending',
+    includeDrafts: 'include_drafts',
     universityId: 'university_id',
     olympiadId: 'olympiad_id',
+    seasonId: 'season_id',
+    profileId: 'profile_id',
+    programId: 'program_id',
 };
 
 function filterQuery(filters) {
@@ -118,7 +121,11 @@ const api = {
         }
 
         if (!res.ok) {
-            console.error(`[API] ${method} ${path} → ${res.status}`, data);
+            // Для гостя 401 на публичных вызовах (проверка сессии) — норма,
+            // а не ошибка, поэтому в консоль он не попадает.
+            if (!(skipAuthRedirect && res.status === 401)) {
+                console.error(`[API] ${method} ${path} → ${res.status}`, data);
+            }
             if (!skipAuthRedirect && isJwtAuthError(res.status, data)) {
                 redirectToAuthAfterJwtError();
             }
@@ -151,9 +158,7 @@ const api = {
         return this.get(`/universities${query}`, { skipAuthRedirect: true });
     },
     getUniversity(id) { return this.get(`/universities/${id}`, { skipAuthRedirect: true }); },
-    getUniversityOlympiads(id, includePending, filters) {
-        const params = new URLSearchParams();
-        if (includePending) params.set('include_pending', 'true');
+    getUniversityOlympiads(id, filters) {
         const query = filterQuery(filters);
         return this.get(
             `/universities/${id}/olympiads${query ? `?${query}` : ''}`,
@@ -162,14 +167,10 @@ const api = {
     },
     addUniversity(d)     { return this.post('/universities/add_university', d); },
     editUniversity(id, d) { return this.post(`/universities/edit_university/${id}`, d); },
-    requestBvi(universityId, olympiadId) {
-        return this.post(`/universities/${universityId}/bvi`, { olympiad_id: olympiadId });
-    },
-    removeBvi(universityId, olympiadId) {
-        return this.post(`/universities/${universityId}/bvi/remove`, { olympiad_id: olympiadId });
-    },
 
-    /* Правила льгот: вид льготы, проверка, подтверждение вузом, версии. */
+    /* Правила льгот — отдельная сущность (университет + олимпиада + сезон +
+       профиль + вид льготы + программы). Адрес правила — его id, а не пара
+       «вуз–олимпиада»: у одной пары может быть несколько правил. */
     listBenefitRules(universityId, filters) {
         const query = filterQuery(filters);
         return this.get(
@@ -177,20 +178,57 @@ const api = {
             { skipAuthRedirect: true },
         );
     },
-    updateBenefitRule(universityId, olympiadId, body) {
-        return this.put(`/universities/${universityId}/benefit-rules/${olympiadId}`, body);
+    benefitRuleFacets(universityId) {
+        return this.get(`/universities/${universityId}/benefit-rules/facets`, { skipAuthRedirect: true });
     },
-    benefitRuleVersions(universityId, olympiadId) {
-        return this.get(`/universities/${universityId}/benefit-rules/${olympiadId}/versions`);
+    createBenefitRule(universityId, body) {
+        return this.post(`/universities/${universityId}/benefit-rules`, body);
     },
-    rollbackBenefitRule(universityId, olympiadId, version) {
-        return this.post(`/universities/${universityId}/benefit-rules/${olympiadId}/rollback/${version}`);
+    getBenefitRule(universityId, ruleId) {
+        return this.get(`/universities/${universityId}/benefit-rules/${ruleId}`, { skipAuthRedirect: true });
     },
-    confirmBenefitRuleByUniversity(universityId, olympiadId, confirmed) {
+    updateBenefitRule(universityId, ruleId, body) {
+        return this.put(`/universities/${universityId}/benefit-rules/${ruleId}`, body);
+    },
+    deleteBenefitRule(universityId, ruleId) {
+        return this.request('DELETE', `/universities/${universityId}/benefit-rules/${ruleId}`);
+    },
+    setBenefitRuleStatus(universityId, ruleId, body) {
+        return this.post(`/universities/${universityId}/benefit-rules/${ruleId}/status`, body);
+    },
+    verifyBenefitRule(universityId, ruleId, body) {
+        return this.post(`/universities/${universityId}/benefit-rules/${ruleId}/verification`, body);
+    },
+    uploadBenefitRuleDocument(universityId, ruleId, formData) {
+        return this.postForm(`/universities/${universityId}/benefit-rules/${ruleId}/document`, formData);
+    },
+    benefitRuleDocumentUrl(universityId, ruleId) {
+        return `${API_BASE}/universities/${universityId}/benefit-rules/${ruleId}/document`;
+    },
+    benefitRuleVersions(universityId, ruleId) {
+        return this.get(`/universities/${universityId}/benefit-rules/${ruleId}/versions`);
+    },
+    rollbackBenefitRule(universityId, ruleId, body) {
+        return this.post(`/universities/${universityId}/benefit-rules/${ruleId}/rollback`, body);
+    },
+    confirmBenefitRuleByUniversity(universityId, ruleId, confirmed) {
         return this.post(
-            `/universities/${universityId}/benefit-rules/${olympiadId}/university-confirmation`,
+            `/universities/${universityId}/benefit-rules/${ruleId}/university-confirmation`,
             { confirmed: confirmed !== false },
         );
+    },
+    /* Публичная карточка правила: без университета в пути. */
+    getPublicBenefitRule(ruleId) {
+        return this.get(`/benefit-rules/${ruleId}`, { skipAuthRedirect: true });
+    },
+    publicBenefitRuleDocumentUrl(ruleId) { return `${API_BASE}/benefit-rules/${ruleId}/document`; },
+
+    /* Заявки представителя на пополнение каталога (нет нужной олимпиады). */
+    listCatalogRequests(universityId) {
+        return this.get(`/universities/${universityId}/catalog-requests`);
+    },
+    createCatalogRequest(universityId, body) {
+        return this.post(`/universities/${universityId}/catalog-requests`, body);
     },
 
     /* Сезоны олимпиады и профили. */
@@ -207,6 +245,15 @@ const api = {
     addOlympiadSeasonProfile(id, seasonId, body) {
         return this.post(`/olympiads/${id}/seasons/${seasonId}/profiles`, body);
     },
+    updateOlympiadSeasonProfile(id, seasonId, profileId, body) {
+        return this.put(`/olympiads/${id}/seasons/${seasonId}/profiles/${profileId}`, body);
+    },
+    deleteOlympiadSeasonProfile(id, seasonId, profileId) {
+        return this.request('DELETE', `/olympiads/${id}/seasons/${seasonId}/profiles/${profileId}`);
+    },
+    olympiadBenefitFacets(id) {
+        return this.get(`/olympiads/${id}/benefit-facets`, { skipAuthRedirect: true });
+    },
 
     /* Образовательные программы университета. */
     listUniversityPrograms(universityId) {
@@ -214,6 +261,12 @@ const api = {
     },
     saveUniversityPrograms(universityId, programs) {
         return this.put(`/universities/${universityId}/programs`, { programs });
+    },
+    addUniversityProgram(universityId, body) {
+        return this.post(`/universities/${universityId}/programs`, body);
+    },
+    deleteUniversityProgram(universityId, programId) {
+        return this.request('DELETE', `/universities/${universityId}/programs/${programId}`);
     },
 
     /* Заявки на роль представителя вуза. */
@@ -238,7 +291,10 @@ const api = {
         return this.get(`/olympiads${query ? `?${query}` : ''}`, { skipAuthRedirect: true });
     },
     getOlympiad(id)      { return this.get(`/olympiads/${id}`, { skipAuthRedirect: true }); },
-    getOlympiadUniversities(id) { return this.get(`/olympiads/${id}/universities`, { skipAuthRedirect: true }); },
+    getOlympiadUniversities(id, filters) {
+        const query = filterQuery(filters);
+        return this.get(`/olympiads/${id}/universities${query ? `?${query}` : ''}`, { skipAuthRedirect: true });
+    },
     getOlympiadSource(id) { return this.get(`/olympiads/${id}/source`, { skipAuthRedirect: true }); },
     /* Публичная ссылка на файл документа-источника олимпиады (если есть). */
     olympiadSourceFileUrl(id) { return `${API_BASE}/olympiads/${id}/source/file`; },
@@ -269,7 +325,7 @@ const api = {
     },
 
     /* Импорт приказов университетов (администратор). Отдельные маршруты:
-       приказ не создаёт олимпиад, а заводит заявки БВИ на существующие. */
+       приказ не создаёт олимпиад, а заводит черновики правил по существующим. */
     listUniversityImports()          { return this.get('/imports/university'); },
     startUniversityImport(docId)     { return this.post('/imports/university', { doc_id: docId }); },
     universityImportPreview(id)      { return this.get(`/imports/university/${id}/preview`); },
@@ -286,13 +342,35 @@ const api = {
     adminOlympiads(opts) {
         return this.get(`/admin/olympiads${adminQuery(opts)}`);
     },
-    adminBviLinks(status, opts) {
+    /* Реестр правил льгот по всем вузам: статус, проверка, поиск. */
+    adminBenefitRules(filters, opts) {
+        const params = new URLSearchParams(filterQuery(filters));
+        if (opts && opts.search) params.set('search', opts.search);
+        if (opts && opts.limit != null) params.set('limit', opts.limit);
+        if (opts && opts.offset != null) params.set('offset', opts.offset);
+        const query = params.toString();
+        return this.get(`/admin/benefit-rules${query ? `?${query}` : ''}`);
+    },
+    /* Персистентный журнал административных событий. */
+    adminAudit(filters, opts) {
+        const params = new URLSearchParams();
+        if (filters && filters.action) params.set('action', filters.action);
+        if (filters && filters.targetId) params.set('target_id', filters.targetId);
+        if (opts && opts.limit != null) params.set('limit', opts.limit);
+        if (opts && opts.offset != null) params.set('offset', opts.offset);
+        const query = params.toString();
+        return this.get(`/admin/audit${query ? `?${query}` : ''}`);
+    },
+    adminCatalogRequests(status, opts) {
         const params = new URLSearchParams();
         if (status) params.set('status', status);
         if (opts && opts.limit != null) params.set('limit', opts.limit);
         if (opts && opts.offset != null) params.set('offset', opts.offset);
         const query = params.toString();
-        return this.get(`/admin/bvi${query ? `?${query}` : ''}`);
+        return this.get(`/admin/catalog-requests${query ? `?${query}` : ''}`);
+    },
+    resolveCatalogRequest(id, body) {
+        return this.post(`/admin/catalog-requests/${id}/resolve`, body);
     },
     banUser(id)      { return this.post(`/admin/ban/${id}`); },
     unbanUser(id)    { return this.post(`/admin/unban/${id}`); },
@@ -304,16 +382,6 @@ const api = {
             role,
             university_id: universityId || null,
         });
-    },
-    /** Модерация заявки БВИ.
-     *
-     * Действия явные: 'confirm' (подтвердить), 'reject' (отклонить заявку) и
-     * 'revoke' (отозвать подтверждение). Произвольной смены статуса нет:
-     * отзыв подтверждения — это удаление связи, а не возврат в PENDING.
-     */
-    moderateBvi(universityId, olympiadId, action) {
-        return this.post(
-            `/universities/${universityId}/bvi/${olympiadId}/moderation`, { action });
     },
     archiveOlympiad(id, archived) {
         return this.post(`/admin/archive_olympiad/${id}?archived=${archived === false ? 'false' : 'true'}`);

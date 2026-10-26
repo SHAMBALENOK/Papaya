@@ -6,7 +6,8 @@
  *                          GET /api/v1/universities/{id}/olympiads
  *
  * Страница университета — главный экран продукта: основная информация
- * плюс список олимпиад, дающих БВИ.
+ * плюс олимпиады с вложенными правилами льгот (БВИ, 100 баллов и т. д.)
+ * и комбинируемые фильтры по виду льготы, предмету, программе и сезону.
  * ========================================================================== */
 
 function universitySearchFormHtml(value = '') {
@@ -75,12 +76,13 @@ async function renderUniversity(universityId) {
 
     // Фильтры льгот живут в состоянии страницы: смена фильтра перезапрашивает
     // список, но не перерисовывает всю страницу целиком.
-    const filterState = { benefitType: '', subject: '' };
+    const filterState = { benefitType: '', subject: '', programId: '', seasonId: '' };
 
-    const [uniRes, olyRes, programsRes] = await Promise.all([
+    const [uniRes, olyRes, programsRes, facetsRes] = await Promise.all([
         api.getUniversity(universityId),
         api.getUniversityOlympiads(universityId),
         api.listUniversityPrograms(universityId),
+        api.benefitRuleFacets(universityId).catch(() => ({ ok: false })),
     ]);
 
     if (!uniRes.ok || !uniRes.data) {
@@ -94,35 +96,17 @@ async function renderUniversity(universityId) {
     const all = (olyRes.ok && olyRes.data && olyRes.data.olympiads) || [];
     const total = (olyRes.ok && olyRes.data && olyRes.data.total) || all.length;
     const isAdmin = store.isAdmin();
+    const canManage = isAdmin
+        || (store.isUniversityRep() && String(store.user.university_id) === String(universityId));
     const programs = (programsRes.ok && programsRes.data && programsRes.data.programs) || [];
+    const facets = (facetsRes.ok && facetsRes.data) || null;
 
-    // Актуальные и исторические связи — разные ответы на разные вопросы.
-    // «Какие олимпиады дают БВИ здесь сейчас?» — только про актуальные;
-    // архивные показываются отдельно и не входят в счётчик, иначе страница
-    // отвечала бы на вопрос завышенным числом.
-    const current = all.filter(item => !isHistoricalBvi(item));
-    const historical = all.filter(isHistoricalBvi);
-
-    const olympiadsHtml = current.length
-        ? `<div class="grid gap-8 md:grid-cols-2">` + current.map(bviOlympiadCardHtml).join('') + `</div>`
-        : emptyHtml('Пока нет олимпиад с БВИ',
-            'Олимпиады появляются здесь, когда представитель запросит связь, '
-            + 'а модератор Papaya её подтвердит. Перечень олимпиад приходит из РСОШ.');
-
-    // Исторический блок — визуально второстепенный и только при наличии.
-    const historicalHtml = historical.length
-        ? `<div class="mt-14 pt-10 border-t border-mist">
-               <h2 class="${UI.eyebrow}">Исторические связи</h2>
-<p class="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
-                    Олимпиады, которые университет учитывал для БВИ раньше. Сейчас
-                    их нет в актуальном перечне РСОШ, поэтому вуз их не показывает
-                    среди действующих — связи сохранены как история.
-                </p>
-               <div class="mt-8 grid gap-6 md:grid-cols-2 opacity-70">
-                   ${historical.map(bviOlympiadCardHtml).join('')}
-               </div>
-           </div>`
-        : '';
+    // Действующие и исторические правила — разные ответы на разные вопросы.
+    // «Какие олимпиады дают льготу здесь сейчас?» — только про действующие;
+    // архивные показываются отдельно и не входят в счётчик.
+    const current = all.filter(item => !isHistoricalRule(item));
+    const historical = all.filter(isHistoricalRule);
+    const rulesCount = current.reduce((sum, item) => sum + ((item.rules || []).length), 0);
 
     page.innerHTML = `
     <article class="pb-16 md:pb-24">
@@ -164,7 +148,7 @@ async function renderUniversity(universityId) {
 
         <section class="mt-12">
             <h2 class="${UI.eyebrow}">Информация</h2>
-            <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">
+            <dl class="mt-8 grid sm:grid-cols-3 gap-x-12 gap-y-9">
                 <div>
                     <dt class="text-sm font-medium text-ink-faint">Официальный сайт</dt>
                     <dd class="mt-3">
@@ -175,31 +159,36 @@ async function renderUniversity(universityId) {
                     </dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-ink-faint">Олимпиад с БВИ сейчас</dt>
+                    <dt class="text-sm font-medium text-ink-faint">Олимпиад с льготами сейчас</dt>
                     <dd class="mt-2 text-base font-semibold">${current.length}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-ink-faint">Действующих правил</dt>
+                    <dd class="mt-2 text-base font-semibold">${rulesCount}</dd>
                 </div>
             </dl>
         </section>
 
-        ${isAdmin ? `
-        <section class="mt-12">
-            <button type="button" id="uni-edit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Редактировать университет</button>
+        ${(isAdmin || canManage) ? `
+        <section class="mt-12 flex flex-wrap gap-3">
+            ${isAdmin ? `<button type="button" id="uni-edit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Редактировать университет</button>` : ''}
+            <a href="${isAdmin ? '#/admin/benefit-rules' : '#/my-university'}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Управлять правилами льгот</a>
         </section>` : ''}
 
-        <section class="mt-20 md:mt-28" aria-labelledby="uni-bvi-title">
+        <section class="mt-20 md:mt-28" aria-labelledby="uni-benefits-title">
             <p class="${UI.eyebrow}">Главное для поступления</p>
-            <h2 id="uni-bvi-title" class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">
-                Олимпиады, которые университет учитывает для БВИ
+            <h2 id="uni-benefits-title" class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">
+                Олимпиады, за которые университет даёт льготы
             </h2>
             <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-                Дипломы этих олимпиад университет засчитывает для поступления без
-                вступительных испытаний. Условия засчитывания устанавливает сам
-                университет.
+                Под каждой олимпиадой — правила: вид льготы, сезон, профиль, требуемый
+                результат и программы. Условия устанавливает сам университет; отметка
+                «Проверено Papaya» означает, что модератор сверил правило с документом.
             </p>
-            ${benefitFiltersHtml(filterState)}
-            <p class="mt-6 text-sm text-ink-faint" id="uni-bvi-count">Показано: ${current.length} из ${total}</p>
-            <div class="mt-8" id="uni-bvi-list">${olympiadsHtml}</div>
-            ${historicalHtml}
+            ${benefitFiltersHtml(filterState, facets, { prefix: 'uni' })}
+            <p class="mt-6 text-sm text-ink-faint" id="uni-benefits-count">Показано олимпиад: ${current.length} из ${total}</p>
+            <div class="mt-8" id="uni-benefits-list">${universityOlympiadsListHtml(current, false)}</div>
+            <div id="uni-benefits-history">${universityHistoricalHtml(historical)}</div>
         </section>
     </article>`;
 
@@ -209,128 +198,58 @@ async function renderUniversity(universityId) {
             openUniversityFormModal(university, () => renderUniversity(universityId)));
     }
 
-    // Фильтры применяются к списку льгот: перезапрашиваем данные и меняем
+    // Фильтры применяются к списку правил: перезапрашиваем данные и меняем
     // только блок списка, чтобы не терять позицию и заголовок страницы.
-    const typeSelect = document.getElementById('uni-benefit-type');
-    const subjectInput = document.getElementById('uni-benefit-subject');
-    const listBox = document.getElementById('uni-bvi-list');
-    const countBox = document.getElementById('uni-bvi-count');
-    const applyFilters = async () => {
+    const listBox = document.getElementById('uni-benefits-list');
+    const historyBox = document.getElementById('uni-benefits-history');
+    const countBox = document.getElementById('uni-benefits-count');
+    bindBenefitFilters('uni', filterState, async state => {
         if (!listBox) return;
-        filterState.benefitType = typeSelect ? typeSelect.value : '';
-        filterState.subject = subjectInput ? subjectInput.value.trim() : '';
+        const filtered = Object.values(state).some(Boolean);
         listBox.innerHTML = loadingHtml('Применяем фильтр…');
-        const res = await api.getUniversityOlympiads(universityId, false, filterState);
+        const res = await api.getUniversityOlympiads(universityId, state);
         if (!res.ok) {
             listBox.innerHTML = alertHtml(errorText(res), 'error');
             return;
         }
         const items = (res.data && res.data.olympiads) || [];
-        const visible = items.filter(item => !isHistoricalBvi(item));
-        listBox.innerHTML = visible.length
-            ? `<div class="grid gap-8 md:grid-cols-2">${visible.map(bviOlympiadCardHtml).join('')}</div>`
-            : emptyHtml('По этому фильтру ничего не найдено',
-                        'Смягчите условия: снимите фильтр по виду льготы или предмету.');
+        const visible = items.filter(item => !isHistoricalRule(item));
+        listBox.innerHTML = universityOlympiadsListHtml(visible, filtered);
+        if (historyBox) historyBox.innerHTML = universityHistoricalHtml(items.filter(isHistoricalRule));
         // Счётчик считаем по тем же данным, что и список: иначе после
         // фильтрации он продолжал бы показывать число без фильтра.
         if (countBox) {
             const newTotal = (res.data && res.data.total) || visible.length;
-            countBox.textContent = `Показано: ${visible.length} из ${newTotal}`;
+            countBox.textContent = `Показано олимпиад: ${visible.length} из ${newTotal}`;
         }
-    };
-    if (typeSelect) typeSelect.addEventListener('change', applyFilters);
-    if (subjectInput) {
-        subjectInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') { e.preventDefault(); applyFilters(); }
-        });
+    });
+}
+
+/** Список олимпиад с вложенными правилами или пустое состояние. */
+function universityOlympiadsListHtml(items, filtered) {
+    if (items.length) {
+        return `<div class="grid gap-8 md:grid-cols-2">${items.map(olympiadWithRulesCardHtml).join('')}</div>`;
     }
+    return filtered
+        ? emptyHtml('По этому фильтру ничего не найдено',
+                    'Смягчите условия: снимите фильтр по виду льготы, предмету, программе или сезону.')
+        : emptyHtml('Пока нет опубликованных правил',
+            'Правила появляются здесь, когда представитель университета публикует их '
+            + 'в своём кабинете. Перечень олимпиад приходит из РСОШ.');
 }
 
-/** Карточка олимпиады в списке БВИ университета.
- *
- * Разница между действующей и исторической связью — не в оформлении, а в
- * подписи: подтверждённая связь с актуальной олимпиадой даёт «БВИ», а связь с
- * архивной олимпиадой — «Архивная олимпиада» и «Историческая связь».
- * Помечать архивную олимпиаду зелёным «БВИ» значило бы показывать льготу,
- * которой сейчас нет.
- */
-function bviOlympiadCardHtml(olympiad) {
-    const historical = isHistoricalBvi(olympiad);
-    const badge = historical
-        ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архивная олимпиада</span>`
-        : benefitTypeBadge(olympiad.benefit_type);
-    const note = historical
-        ? `<p class="mt-3 text-sm text-ink-faint">Историческая связь: университет давал БВИ, пока олимпиада была в перечне РСОШ.</p>`
-        : '';
-
-    // Статус проверки Papaya показываем рядом с видом льготы: это независимая
-    // характеристика, и «не проверено» не должно выглядеть как «льготы нет».
-    const verification = historical
-        ? ''
-        : `<span class="${UI.badge} ${UI.badgePending}">${escHtml(
-              olympiad.verification_status === 'verified'
-                  ? 'Проверено Papaya'
-                  : (olympiad.verification_status === 'rejected'
-                      ? 'Проверка не пройдена'
-                      : 'Не проверено Papaya'))}</span>`;
-
-    const requirements = [
-        olympiad.result_requirement
-            ? `<li>Требуемый результат: ${escHtml(
-                  olympiad.result_requirement === 'winner' ? 'победитель'
-                  : (olympiad.result_requirement === 'prize' ? 'призёр' : olympiad.result_requirement))}</li>`
-            : '',
-        olympiad.subject ? `<li>Предмет: ${escHtml(olympiad.subject)}</li>` : '',
-        olympiad.valid_until ? `<li>Действует до ${escHtml(formatDate(olympiad.valid_until))}</li>` : '',
-    ].filter(Boolean).join('');
-
-    const details = requirements
-        ? `<ul class="mt-4 space-y-1 text-sm text-ink-soft">${requirements}</ul>`
-        : '';
-
-    return `
-    <a href="#/olympiads/${escAttr(olympiad.id)}"
-       class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-        ${cardImageHtml(olympiad)}
-        <div class="flex items-center gap-3 flex-wrap">
-            ${badge}
-            ${verification}
-        </div>
-        <h3 class="mt-5 text-lg font-bold tracking-tight leading-snug">${escHtml(olympiad.name)}</h3>
-        ${note}
-        ${details}
-        <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(olympiad.description || '')}</p>
-        <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть олимпиаду →</p>
-    </a>`;
-}
-
-/** Фильтры каталога льгот: вид льготы и предмет (ТЗ §4.5).
- *
- * Раньше фильтр был только по вузу — выбрать «100 баллов ЕГЭ» или
- * конкретный предмет было нельзя.
- */
-function benefitFiltersHtml(state) {
-    const benefitTypes = [
-        { value: '', label: 'Любая льгота' },
-        { value: 'BVI', label: 'БВИ' },
-        { value: 'EGE_100', label: '100 баллов ЕГЭ' },
-        { value: 'DVI_100', label: '100 баллов ДВИ' },
-        { value: 'OTHER', label: 'Иная льгота' },
-    ];
-    return `
-    <div class="mt-10 flex flex-col sm:flex-row gap-4 sm:items-end">
-        <div class="flex-1">
-            <label for="uni-benefit-type" class="${UI.label}">Вид льготы</label>
-            <select id="uni-benefit-type" class="${UI.input}">
-                ${benefitTypes.map(item => `
-                    <option value="${escAttr(item.value)}"${item.value === state.benefitType ? ' selected' : ''}>${escHtml(item.label)}</option>
-                `).join('')}
-            </select>
-        </div>
-        <div class="flex-1">
-            <label for="uni-benefit-subject" class="${UI.label}">Предмет</label>
-            <input id="uni-benefit-subject" type="search" class="${UI.input}" value="${escAttr(state.subject)}"
-                   placeholder="Например, математика">
+/** Исторический блок — визуально второстепенный и только при наличии. */
+function universityHistoricalHtml(historical) {
+    if (!historical.length) return '';
+    return `<div class="mt-14 pt-10 border-t border-mist">
+        <h2 class="${UI.eyebrow}">Исторические правила</h2>
+        <p class="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
+            Олимпиады, которые университет учитывал раньше. Сейчас их нет в
+            актуальном перечне РСОШ, поэтому правила сохранены как история и
+            не считаются действующими.
+        </p>
+        <div class="mt-8 grid gap-6 md:grid-cols-2 opacity-70">
+            ${historical.map(olympiadWithRulesCardHtml).join('')}
         </div>
     </div>`;
 }

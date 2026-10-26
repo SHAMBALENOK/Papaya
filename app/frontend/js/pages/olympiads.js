@@ -5,8 +5,9 @@
  *   #/olympiads/{id}     → GET /api/v1/olympiads/{id}
  *                          GET /api/v1/olympiads/{id}/universities
  *
- * Страница олимпиады завершает сценарий: описание, официальный сайт,
- * источник информации и обратная связь — вузы, дающие БВИ.
+ * Страница олимпиады завершает сценарий: организатор, описание, сайт,
+ * сезоны (с архивом прошлых), источник и обратная связь — вузы с правилами
+ * льгот за эту олимпиаду.
  * ========================================================================== */
 
 async function renderOlympiads() {
@@ -17,7 +18,7 @@ async function renderOlympiads() {
         <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Олимпиады</h1>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Единый каталог олимпиад перечня РСОШ. На странице олимпиады видно,
-            какие университеты дают за неё БВИ.
+            какие университеты дают за неё льготы и на каких условиях.
         </p>
         <form id="oly-search" class="mt-10 max-w-2xl" role="search">
             <label for="oly-search-input" class="sr-only">Поиск олимпиады</label>
@@ -68,7 +69,9 @@ async function renderOlympiad(olympiadId) {
     if (!olympiadId) { renderNotFound(); return; }
     page.innerHTML = loadingHtml('Открываем олимпиаду…');
 
-    const [olyRes, uniRes, srcRes, seasonsRes] = await Promise.all([
+    const filterState = { benefitType: '', subject: '', seasonId: '', profileId: '' };
+
+    const [olyRes, uniRes, srcRes, seasonsRes, facetsRes] = await Promise.all([
         api.getOlympiad(olympiadId),
         api.getOlympiadUniversities(olympiadId),
         // Источник публичный и необязательный: его отсутствие — не ошибка
@@ -78,6 +81,7 @@ async function renderOlympiad(olympiadId) {
         // существуют (запись могла прийти из перечня РСОШ), и страница не
         // должна из-за этого падать.
         api.listOlympiadSeasons(olympiadId).catch(() => ({ ok: false })),
+        api.olympiadBenefitFacets(olympiadId).catch(() => ({ ok: false })),
     ]);
 
     if (!olyRes.ok || !olyRes.data) {
@@ -91,60 +95,9 @@ async function renderOlympiad(olympiadId) {
     const universities = (uniRes.ok && uniRes.data && uniRes.data.universities) || [];
     const source = (srcRes.ok && srcRes.data) || null;
     const seasons = (seasonsRes.ok && seasonsRes.data && seasonsRes.data.seasons) || [];
+    const facets = (facetsRes.ok && facetsRes.data) || null;
     const isAdmin = store.isAdmin();
     const isArchived = olympiad.status === 'ARCHIVED';
-
-    // Актуальные и исторические связи — разные блоки. У архивной олимпиады
-    // историческими являются все оставшиеся связи: университеты учитывали её
-    // для БВИ, пока она была в перечне РСОШ. Выбрасывать их нельзя — это
-    // стёрло бы историю, но и подписывать их «БВИ» значило бы обещать льготу,
-    // которой сейчас нет.
-    const currentUniversities = universities.filter(
-        item => !(isArchived || isHistoricalBvi(item)));
-    const historicalUniversities = universities.filter(
-        item => isArchived || isHistoricalBvi(item));
-
-    function universityLinkHtml(university, historical) {
-        const badge = historical
-            ? `<span class="${UI.badge} ${UI.badgeNeutral}">Историческая связь</span>`
-            : benefitTypeBadge(university.benefit_type);
-        const verification = historical
-            ? ''
-            : `<span class="${UI.badge} ${UI.badgePending}">${escHtml(
-                  university.verification_status === 'verified'
-                      ? 'Проверено Papaya'
-                      : (university.verification_status === 'rejected'
-                          ? 'Проверка не пройдена'
-                          : 'Не проверено Papaya'))}</span>`;
-        return `
-        <a href="#/universities/${escAttr(university.id)}"
-           class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
-            <div class="flex items-center gap-3 flex-wrap">${badge}${verification}</div>
-            ${entityTitleHtml(university)}
-            <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть →</p>
-        </a>`;
-    }
-
-    const universitiesHtml = currentUniversities.length
-        ? `<div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">`
-            + currentUniversities.map(item => universityLinkHtml(item, false)).join('')
-            + `</div>`
-        : emptyHtml('Университеты с БВИ пока не указаны',
-                    'Представители университетов заявляют такие связи, администратор подтверждает их.');
-
-    const historicalHtml = historicalUniversities.length
-        ? `<div class="mt-14 pt-10 border-t border-mist">
-               <h3 class="${UI.eyebrow}">Исторические связи</h3>
-               <p class="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
-                   ${isArchived
-                       ? 'Олимпиада не входит в актуальный перечень РСОШ. Университеты учитывали её для БВИ раньше — связи сохранены как история.'
-                       : 'Ранее подтверждённые связи, которые сейчас не действуют.'}
-               </p>
-               <div class="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3 opacity-70">
-                   ${historicalUniversities.map(item => universityLinkHtml(item, true)).join('')}
-               </div>
-           </div>`
-        : '';
 
     page.innerHTML = `
     <article class="max-w-narrow mx-auto pb-16 md:pb-24">
@@ -162,6 +115,9 @@ async function renderOlympiad(olympiadId) {
         <header class="mt-14">
             ${olympiadStatusBadge(olympiad.status)}
             <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(olympiad.name)}</h1>
+            ${olympiad.organizer
+                ? `<p class="mt-4 text-lg text-ink-soft leading-snug">Организатор: ${escHtml(olympiad.organizer)}</p>`
+                : `<p class="mt-4 text-sm text-ink-faint">Организатор пока не указан в каталоге.</p>`}
         </header>
 
         <section class="mt-8">
@@ -185,20 +141,20 @@ async function renderOlympiad(olympiadId) {
         ${seasonsBlockHtml(seasons)}
 
         ${isAdmin ? `
-        <section class="mt-12">
+        <section class="mt-12 flex flex-wrap gap-3">
             <button type="button" id="oly-edit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Редактировать олимпиаду</button>
+            <button type="button" id="oly-seasons" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Сезоны и профили</button>
         </section>` : ''}
 
         <section class="mt-20 md:mt-28">
-            <h2 class="${UI.eyebrow}">БВИ</h2>
-            <h3 class="mt-5 text-3xl font-extrabold tracking-tight leading-[1.1]">Университеты, учитывающие олимпиаду для БВИ</h3>
+            <h2 class="${UI.eyebrow}">Льготы</h2>
+            <h3 class="mt-5 text-3xl font-extrabold tracking-tight leading-[1.1]">Университеты, которые дают льготы за эту олимпиаду</h3>
             <p class="mt-6 text-lg text-ink-soft leading-relaxed">
-                Эти университеты засчитывают диплом олимпиады для поступления без
-                вступительных испытаний. В других университетах условия
-                устанавливает сам вуз.
+                Под каждым университетом — его правила: вид льготы, сезон, профиль,
+                требуемый результат и программы. Условия устанавливает сам вуз.
             </p>
-            <div class="mt-12">${universitiesHtml}</div>
-            ${historicalHtml}
+            ${benefitFiltersHtml(filterState, facets, { prefix: 'oly', withPrograms: false })}
+            <div class="mt-12" id="oly-universities">${olympiadUniversitiesHtml(universities, isArchived, false)}</div>
         </section>
     </article>`;
 
@@ -207,6 +163,63 @@ async function renderOlympiad(olympiadId) {
         editBtn.addEventListener('click', () =>
             openOlympiadFormModal(olympiad, () => renderOlympiad(olympiadId)));
     }
+    const seasonsBtn = document.getElementById('oly-seasons');
+    if (seasonsBtn) {
+        seasonsBtn.addEventListener('click', () =>
+            openSeasonsModal(olympiadId, olympiad.name, () => renderOlympiad(olympiadId)));
+    }
+    bindSeasonArchiveToggle();
+
+    const listBox = document.getElementById('oly-universities');
+    bindBenefitFilters('oly', filterState, async state => {
+        if (!listBox) return;
+        const filtered = Object.values(state).some(Boolean);
+        listBox.innerHTML = loadingHtml('Применяем фильтр…');
+        const res = await api.getOlympiadUniversities(olympiadId, state);
+        if (!res.ok) {
+            listBox.innerHTML = alertHtml(errorText(res), 'error');
+            return;
+        }
+        listBox.innerHTML = olympiadUniversitiesHtml(
+            (res.data && res.data.universities) || [], isArchived, filtered);
+    });
+}
+
+/**
+ * Университеты с правилами по олимпиаде: действующие и исторические блоки.
+ *
+ * У архивной олимпиады историческими являются все оставшиеся правила:
+ * университеты учитывали её, пока она была в перечне РСОШ. Выбрасывать их
+ * нельзя — это стёрло бы историю, но и подписывать их «БВИ» значило бы
+ * обещать льготу, которой сейчас нет.
+ */
+function olympiadUniversitiesHtml(universities, isArchived, filtered) {
+    const isHistoricalUniversity = item =>
+        isArchived || (item.rules || []).every(rule => isHistoricalRule(rule));
+    const current = universities.filter(item => !isHistoricalUniversity(item));
+    const historical = universities.filter(isHistoricalUniversity);
+
+    const currentHtml = current.length
+        ? `<div class="grid gap-8 md:grid-cols-2">${current.map(universityWithRulesCardHtml).join('')}</div>`
+        : (filtered
+            ? emptyHtml('По этому фильтру ничего не найдено', 'Снимите фильтр по виду льготы, предмету, сезону или профилю.')
+            : emptyHtml('Университеты с льготами пока не указаны',
+                        'Представители университетов публикуют правила в своём кабинете; модератор Papaya проверяет их.'));
+
+    const historicalHtml = historical.length
+        ? `<div class="mt-14 pt-10 border-t border-mist">
+               <h3 class="${UI.eyebrow}">Исторические правила</h3>
+               <p class="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
+                   ${isArchived
+                       ? 'Олимпиада не входит в актуальный перечень РСОШ. Университеты учитывали её раньше — правила сохранены как история.'
+                       : 'Ранее действовавшие правила, которые сейчас не применяются.'}
+               </p>
+               <div class="mt-8 grid gap-6 md:grid-cols-2 opacity-70">
+                   ${historical.map(universityWithRulesCardHtml).join('')}
+               </div>
+           </div>`
+        : '';
+    return currentHtml + historicalHtml;
 }
 
 
@@ -262,20 +275,28 @@ function seasonsBlockHtml(seasons) {
             <h2 class="${UI.eyebrow}">Сезоны</h2>
             <p class="mt-4 text-base text-ink-soft leading-relaxed">
                 Сезон олимпиады (год, уровень РСОШ, даты) в каталоге пока не заведён.
+                Даты пока не опубликованы.
             </p>
         </section>`;
     }
 
-    const items = seasons.map(season => `
-        <div class="bg-white shadow-elev-1 p-6">
+    // Актуальные сезоны — сверху и развёрнуты; завершённые — в архиве под
+    // переключателем, чтобы прошлогодние условия не выдавались за нынешние.
+    const sorted = seasons.slice().sort((a, b) => (b.year || 0) - (a.year || 0));
+    const currentSeasons = sorted.filter(season => season.state !== 'completed');
+    const pastSeasons = sorted.filter(season => season.state === 'completed');
+
+    const items = list => list.map(season => `
+        <div class="bg-white shadow-elev-1 p-6" data-season-id="${escAttr(season.id)}">
             <div class="flex items-center gap-3 flex-wrap">
-                <span class="text-lg font-bold tracking-tight">${escHtml(String(season.year))}</span>
+                <span class="text-lg font-bold tracking-tight">${escHtml(seasonLabel(season))}</span>
                 <span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(seasonStateLabel(season.state))}</span>
                 ${season.rsoh_level
                     ? `<span class="${UI.badge} ${UI.badgePending}">Уровень РСОШ: ${escHtml(season.rsoh_level)}</span>`
                     : ''}
             </div>
             <p class="mt-4 text-sm text-ink-soft leading-relaxed">${escHtml(seasonDatesText(season.dates))}</p>
+            ${season.description ? `<p class="mt-2 text-sm text-ink-soft leading-relaxed">${escHtml(season.description)}</p>` : ''}
             ${seasonProfilesHtml(season.profiles)}
             ${season.source_url
                 ? `<a href="${escAttr(season.source_url)}" target="_blank" rel="noopener noreferrer"
@@ -290,8 +311,29 @@ function seasonsBlockHtml(seasons) {
                 Условия участия меняются год от года, поэтому Papaya хранит их по
                 сезонам, а не приписывает олимпиаде навсегда.
             </p>
-            <div class="mt-8 grid gap-6 sm:grid-cols-2">${items}</div>
+            ${currentSeasons.length
+                ? `<div class="mt-8 grid gap-6 sm:grid-cols-2">${items(currentSeasons)}</div>`
+                : `<p class="mt-8 text-sm text-ink-soft">Актуального сезона нет: все заведённые сезоны завершены.</p>`}
+            ${pastSeasons.length ? `
+            <div class="mt-8">
+                <button type="button" id="season-archive-toggle" aria-expanded="false" aria-controls="season-archive"
+                        class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Показать архив сезонов (${pastSeasons.length})</button>
+                <div id="season-archive" class="hidden mt-6 grid gap-6 sm:grid-cols-2 opacity-80">${items(pastSeasons)}</div>
+            </div>` : ''}
         </section>`;
+}
+
+/** Раскрытие архива сезонов без перерисовки страницы. */
+function bindSeasonArchiveToggle() {
+    const toggle = document.getElementById('season-archive-toggle');
+    const box = document.getElementById('season-archive');
+    if (!toggle || !box) return;
+    const count = toggle.textContent.match(/\((\d+)\)/);
+    toggle.addEventListener('click', () => {
+        const open = box.classList.toggle('hidden') === false;
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        toggle.textContent = `${open ? 'Скрыть архив сезонов' : 'Показать архив сезонов'}${count ? ` (${count[1]})` : ''}`;
+    });
 }
 
 /** Профили сезона — предметная номенклатура олимпиады (ТЗ §4.4). */

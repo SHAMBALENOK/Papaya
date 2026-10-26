@@ -1,22 +1,27 @@
 /* ==========================================================================
- * pages/myuniversity.js — управление БВИ своего университета.
+ * pages/myuniversity.js — кабинет представителя университета.
  *
- *   #/my-university → GET /api/v1/user/ (профиль)
- *                     GET /api/v1/universities/{id}/olympiads?include_pending=true
- *                     GET /api/v1/olympiads (поиск олимпиады)
+ *   #/my-university → GET /api/v1/universities/{id}
+ *                     GET /api/v1/universities/{id}/benefit-rules?include_drafts=true
+ *                     GET /api/v1/universities/{id}/programs
+ *                     GET /api/v1/universities/{id}/catalog-requests
  *
- * Представитель университета не создаёт олимпиады: он выбирает
- * существующие олимпиады из каталога и заявляет, что вуз даёт за них БВИ.
- * Заявка уходит администратору на подтверждение.
+ * Представитель не создаёт олимпиады: он выбирает их из каталога и заводит
+ * правила льгот своего вуза — черновик → публикация. Загружает документы,
+ * смотрит историю версий и откатывает. Проверку Papaya ставит только
+ * администратор; подтверждение вуза — отдельная отметка представителя.
  * ========================================================================== */
+
+/** Состояние кабинета: фильтр по статусу правил и загруженные данные. */
+let myUniversityState = { statusFilter: '', rules: [], programs: [], requests: [] };
 
 async function renderMyUniversity() {
     const page = document.getElementById('page');
 
     if (!store.canManageUniversity()) {
         renderForbidden('Нет доступа к управлению университетом',
-            'Связи своего университета может вести представитель университета,'
-            + ' назначенный администратором.');
+            'Правила льгот своего университета может вести представитель университета,'
+            + ' назначенный администратором. Подать заявку можно в профиле.');
         return;
     }
 
@@ -36,29 +41,40 @@ async function renderMyUniversity() {
 
     const universityId = store.isAdmin() ? null : store.user.university_id;
     if (!universityId) {
-        page.innerHTML = emptyHtml('Выберите университет',
-            'Администратор управляет каталогом всех университетов в разделе «Администрирование».',
-            '<a href="#/admin/universities" class="' + UI.btn + ' ' + UI.btnSecondary + '">Университеты</a>');
+        page.innerHTML = emptyHtml('Кабинет представителя не нужен администратору',
+            'Администратор ведёт правила всех университетов в разделе «Администрирование → Льготы».',
+            '<a href="#/admin/benefit-rules" class="' + UI.btn + ' ' + UI.btnSecondary + '">Открыть реестр правил</a>');
         return;
     }
 
-    const [uniRes, olyRes, rulesRes, programsRes] = await Promise.all([
+    const [uniRes, rulesRes, programsRes, requestsRes] = await Promise.all([
         api.getUniversity(universityId),
-        api.getUniversityOlympiads(universityId, true),
-        api.listBenefitRules(universityId, { include_pending: true }),
+        api.listBenefitRules(universityId, { includeDrafts: true, limit: 500 }),
         api.listUniversityPrograms(universityId),
+        api.listCatalogRequests(universityId).catch(() => ({ ok: false })),
     ]);
     if (!uniRes.ok || !uniRes.data) {
         page.innerHTML = emptyHtml('Университет не найден',
             'Обратитесь к администратору: привязка представителя, возможно, потеряна.');
         return;
     }
+    if (!rulesRes.ok) {
+        page.innerHTML = alertHtml(errorText(rulesRes), 'error');
+        return;
+    }
 
     const university = uniRes.data;
-    const linked = (olyRes.ok && olyRes.data && olyRes.data.olympiads) || [];
-    const linkedIds = new Set(linked.map(item => String(item.id)));
-    const rules = (rulesRes.ok && rulesRes.data && rulesRes.data.rules) || [];
-    const programs = (programsRes.ok && programsRes.data && programsRes.data.programs) || [];
+    myUniversityState.rules = (rulesRes.data && rulesRes.data.rules) || [];
+    myUniversityState.programs = (programsRes.ok && programsRes.data && programsRes.data.programs) || [];
+    myUniversityState.requests = (requestsRes.ok && requestsRes.data && requestsRes.data.requests) || [];
+    const rules = myUniversityState.rules;
+    const programs = myUniversityState.programs;
+
+    const counts = {
+        draft: rules.filter(rule => rule.status === 'draft').length,
+        published: rules.filter(rule => rule.status === 'published').length,
+        archived: rules.filter(rule => rule.status === 'archived').length,
+    };
 
     page.innerHTML = `
     <section class="pt-4 pb-12 md:pb-16">
@@ -70,144 +86,128 @@ async function renderMyUniversity() {
             ? `<p class="mt-3 text-lg text-ink-soft leading-snug">${escHtml(university.name)}</p>`
             : ''}
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-            Выберите олимпиады из каталога, за которые университет даёт БВИ.
-            Связь появится на странице университета после подтверждения администратором.
+            Заводите правила льгот за олимпиады из каталога, прикладывайте документы
+            и публикуйте. Опубликованное правило сразу видно в каталоге с пометкой
+            «Не проверено Papaya», пока модератор не сверит его с документом.
         </p>
-        <p class="mt-6"><a href="#/universities/${escAttr(university.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть страницу университета</a></p>
-    </section>
-
-    <section class="mb-16 md:mb-24" aria-labelledby="my-bvi-title">
-        <div class="flex flex-wrap items-center justify-between gap-6">
-            <h2 id="my-bvi-title" class="text-2xl font-extrabold tracking-tight">Олимпиады с БВИ (${linked.length})</h2>
-            <button type="button" id="bvi-add" class="${UI.btn} ${UI.btnPrimary}">Добавить олимпиаду</button>
+        <div class="mt-6 flex flex-wrap gap-3">
+            <a href="#/universities/${escAttr(university.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть публичную страницу</a>
+            <button type="button" id="catalog-request" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Нет нужной олимпиады?</button>
         </div>
-        <div id="my-bvi-list" class="mt-10">${loadingHtml()}</div>
     </section>
 
     <section class="mb-16 md:mb-24" aria-labelledby="my-rules-title">
-        <h2 id="my-rules-title" class="text-2xl font-extrabold tracking-tight">Правила льгот (${rules.length})</h2>
-        <p class="mt-4 text-lg text-ink-soft leading-relaxed max-w-2xl">
-            Условия по каждой олимпиаде: вид льготы, предмет и требования.
-            Правила заполняет администратор Papaya, а вы подтверждаете их со
-            стороны вуза — это две независимые отметки.
-        </p>
-        <div class="mt-10" id="my-rules-list">${myRulesHtml(rules)}</div>
+        <div class="flex flex-wrap items-center justify-between gap-6">
+            <h2 id="my-rules-title" class="text-2xl font-extrabold tracking-tight">Правила льгот (${rules.length})</h2>
+            <button type="button" id="rule-create" class="${UI.btn} ${UI.btnPrimary}">Новое правило</button>
+        </div>
+        <div class="mt-6 flex flex-wrap gap-2" role="tablist" aria-label="Фильтр по статусу">
+            ${[
+                { value: '', label: `Все · ${rules.length}` },
+                { value: 'draft', label: `Черновики · ${counts.draft}` },
+                { value: 'published', label: `Опубликованные · ${counts.published}` },
+                { value: 'archived', label: `Архив · ${counts.archived}` },
+            ].map(item => `
+            <button type="button" data-status-filter="${item.value}" role="tab" aria-selected="${item.value === myUniversityState.statusFilter}"
+                    class="px-4 py-2 rounded text-sm font-semibold ${item.value === myUniversityState.statusFilter ? 'bg-ink text-white' : 'bg-mist text-ink-soft hover:text-ink'}">
+                ${item.label}
+            </button>`).join('')}
+        </div>
+        <div id="my-rules-list" class="mt-8">${myRulesListHtml()}</div>
     </section>
 
     <section class="mb-16 md:mb-24" aria-labelledby="my-programs-title">
         <h2 id="my-programs-title" class="text-2xl font-extrabold tracking-tight">Образовательные программы (${programs.length})</h2>
         <p class="mt-4 text-lg text-ink-soft leading-relaxed max-w-2xl">
-            Направления подготовки, на которые распространяются льготы вуза.
-            По одному названию в строке; набор сохраняется целиком.
+            Направления подготовки, к которым привязываются правила. Программу,
+            на которую ссылается хотя бы одно правило, удалить нельзя — сначала
+            уберите её из правил.
         </p>
         <div class="mt-8" id="my-programs-box">${myProgramsHtml(programs)}</div>
+    </section>
+
+    <section class="mb-16 md:mb-24" aria-labelledby="my-requests-title">
+        <h2 id="my-requests-title" class="text-2xl font-extrabold tracking-tight">Заявки на пополнение каталога (${myUniversityState.requests.length})</h2>
+        <div class="mt-8">${myCatalogRequestsHtml(myUniversityState.requests)}</div>
     </section>`;
 
-    drawMyBviList(linked, universityId, linkedIds);
-    wireMyRules(universityId);
-    wireMyPrograms(universityId, programs);
-
-    document.getElementById('bvi-add').addEventListener('click', () => openBviPickerModal(universityId, linkedIds));
+    const reload = () => renderMyUniversity();
+    document.getElementById('rule-create').addEventListener('click', () =>
+        openBenefitRuleEditor({ universityId, onDone: reload }));
+    document.getElementById('catalog-request').addEventListener('click', () =>
+        openCatalogRequestModal(universityId, reload));
+    document.querySelectorAll('[data-status-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            myUniversityState.statusFilter = btn.dataset.statusFilter;
+            renderMyUniversity();
+        });
+    });
+    bindRuleManageActions(document.getElementById('my-rules-list'), () => myUniversityState.rules, reload);
+    wireMyPrograms(universityId);
 }
 
-/** Список образовательных программ вуза. */
+/** Список правил кабинета с учётом фильтра по статусу. */
+function myRulesListHtml() {
+    const filter = myUniversityState.statusFilter;
+    const rules = myUniversityState.rules.filter(rule => !filter || rule.status === filter);
+    if (!rules.length) {
+        if (filter) return emptyHtml('В этом разделе пусто', 'Правил с таким статусом пока нет.');
+        return emptyHtml('Правил пока нет',
+            'Нажмите «Новое правило», выберите олимпиаду из каталога и опишите условия льготы. '
+            + 'Черновик не виден в каталоге, пока вы его не опубликуете.');
+    }
+    return `<div class="space-y-6">${rules.map(rule => benefitRuleManageCardHtml(rule)).join('')}</div>`;
+}
+
+/** Список образовательных программ вуза с добавлением и удалением. */
 function myProgramsHtml(programs) {
-    const value = programs.map(item => item.name).join('\n');
+    const rows = programs.length
+        ? `<ul class="space-y-2">${programs.map(item => `
+            <li class="flex items-center justify-between gap-4 rounded bg-mist px-4 py-3" data-program-id="${escAttr(item.id)}">
+                <span class="text-sm text-ink">${escHtml(item.name)}
+                    ${item.rules_count ? `<span class="text-ink-faint"> · в правилах: ${item.rules_count}</span>` : ''}
+                </span>
+                ${item.rules_count
+                    ? `<span class="text-xs text-ink-faint" title="Программа используется в правилах">нельзя удалить</span>`
+                    : `<button type="button" data-remove-program="${escAttr(item.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Удалить</button>`}
+            </li>`).join('')}</ul>`
+        : `<p class="text-sm text-ink-soft">Программ пока нет. Добавьте первую — и правила можно будет привязывать к направлениям.</p>`;
     return `
     <div class="${UI.card} px-8 py-7">
-        <div class="${UI.field}">
-            <label for="my-programs" class="${UI.label}">Программы</label>
-            <textarea id="my-programs" rows="8" class="${UI.input} resize-y"
-                      placeholder="Прикладная математика и информатика&#10;Лингвистика">${escHtml(value)}</textarea>
-        </div>
-        <div class="flex flex-wrap items-center gap-4">
-            <button type="button" id="my-programs-save" class="${UI.btn} ${UI.btnPrimary}">Сохранить программы</button>
-            <p class="text-sm text-ink-soft">Пустые и повторяющиеся строки игнорируются.</p>
-        </div>
+        ${rows}
+        <form id="my-program-add" class="mt-6 flex flex-col sm:flex-row gap-3">
+            <label for="my-program-name" class="sr-only">Название программы</label>
+            <input id="my-program-name" type="text" class="${UI.input} flex-1" placeholder="Прикладная математика и информатика" autocomplete="off" required>
+            <button type="submit" class="${UI.btn} ${UI.btnSecondary} shrink-0">Добавить программу</button>
+        </form>
     </div>`;
 }
 
-/** Сохранение набора образовательных программ. */
-function wireMyPrograms(universityId, programs) {
-    const save = document.getElementById('my-programs-save');
-    const field = document.getElementById('my-programs');
-    if (!save || !field) return;
-
-    save.addEventListener('click', async () => {
-        save.disabled = true;
-        const names = field.value.split('\n')
-            .map(line => line.trim())
-            .filter(Boolean);
-        const res = await api.saveUniversityPrograms(universityId, names);
-        if (res.ok) {
-            showToast('Программы сохранены', 'success');
-            renderMyUniversity();
-            return;
-        }
-        showToast(errorText(res), 'error');
-        save.disabled = false;
-    });
-}
-
-/** Список правил льгот вузом: вид льготы, проверка Papaya и подтверждение вуза. */
-function myRulesHtml(rules) {
-    if (!rules.length) {
-        return emptyHtml('Правил пока нет',
-            'Как только администратор Papaya заполнит условия по олимпиаде, '
-            + 'они появятся здесь, и вы сможете подтвердить их от имени вуза.');
-    }
-    const rows = rules.map(rule => {
-        const confirmed = !!rule.university_confirmed;
-        return `
-        <div class="${UI.card} px-8 py-7">
-            <div class="flex flex-col lg:flex-row lg:items-start gap-6">
-                <div class="flex-1 min-w-0">
-                    <p class="font-bold text-ink leading-snug">${escHtml(rule.olympiad_name || 'Олимпиада')}</p>
-                    <div class="mt-3 flex flex-wrap items-center gap-3">
-                        ${benefitTypeBadge(rule.benefit_type)}
-                        ${verificationBadge(rule.verification_status)}
-                        ${rule.subject ? `<span class="${UI.badge} ${UI.badgeNeutral}">${escHtml(rule.subject)}</span>` : ''}
-                    </div>
-                    ${rule.result_requirement
-                        ? `<p class="mt-4 text-base text-ink leading-relaxed">Результат: ${escHtml(rule.result_requirement)}</p>`
-                        : ''}
-                    ${rule.extra_requirements
-                        ? `<p class="mt-2 text-base text-ink-soft leading-relaxed">Дополнительно: ${escHtml(rule.extra_requirements)}</p>`
-                        : ''}
-                    ${rule.programs && rule.programs.length
-                        ? `<p class="mt-2 text-base text-ink-soft leading-relaxed">Программы: ${escHtml(rule.programs.join(', '))}</p>`
-                        : ''}
-                    ${rule.valid_until
-                        ? `<p class="mt-2 text-sm text-ink-faint">Действует до: ${escHtml(String(rule.valid_until).slice(0, 10))}</p>`
-                        : ''}
-                    ${rule.source_url
-                        ? `<a href="${escAttr(rule.source_url)}" target="_blank" rel="noopener noreferrer"
-                              class="mt-3 inline-block text-sm font-semibold text-ink underline">Источник условий</a>`
-                        : ''}
-                </div>
-                <div class="shrink-0">
-                    <button type="button" data-confirm-rule="${escAttr(rule.olympiad_id)}"
-                            data-confirmed="${confirmed ? 'true' : 'false'}"
-                            class="${UI.btn} ${confirmed ? UI.btnSecondary : UI.btnPrimary} ${UI.btnSmall}">
-                        ${confirmed ? 'Подтверждено вузом ✓' : 'Подтвердить от имени вуза'}
-                    </button>
-                </div>
-            </div>
-        </div>`;
-    }).join('');
-    return `<div class="space-y-6">${rows}</div>`;
-}
-
-/** Подтверждение правила со стороны вуза (независимо от проверки Papaya). */
-function wireMyRules(universityId) {
-    document.querySelectorAll('[data-confirm-rule]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            btn.disabled = true;
-            const next = btn.dataset.confirmed !== 'true';
-            const res = await api.confirmBenefitRuleByUniversity(
-                universityId, btn.dataset.confirmRule, next);
+/** Добавление/удаление программ по одной. */
+function wireMyPrograms(universityId) {
+    const form = document.getElementById('my-program-add');
+    if (form) {
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const input = document.getElementById('my-program-name');
+            const name = input.value.trim();
+            if (!name) return;
+            const res = await api.addUniversityProgram(universityId, { name });
             if (res.ok) {
-                showToast(next ? 'Правило подтверждено вузом' : 'Подтверждение вуза снято', 'success');
+                showToast('Программа добавлена', 'success');
+                renderMyUniversity();
+                return;
+            }
+            showToast(errorText(res), 'error');
+        });
+    }
+    document.querySelectorAll('[data-remove-program]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!window.confirm('Удалить программу из каталога университета?')) return;
+            btn.disabled = true;
+            const res = await api.deleteUniversityProgram(universityId, btn.dataset.removeProgram);
+            if (res.ok) {
+                showToast('Программа удалена', 'success');
                 renderMyUniversity();
                 return;
             }
@@ -217,122 +217,24 @@ function wireMyRules(universityId) {
     });
 }
 
-function drawMyBviList(linked, universityId, linkedIds) {
-    const box = document.getElementById('my-bvi-list');
-    if (!box) return;
-
-    if (!linked.length) {
-        box.innerHTML = emptyHtml('Пока нет связей',
-            'Нажмите «Добавить олимпиаду» и выберите олимпиаду из каталога.');
-        return;
+/** Заявки представителя на пополнение каталога и их состояние. */
+function myCatalogRequestsHtml(requests) {
+    if (!requests.length) {
+        return `<p class="text-sm text-ink-soft">Заявок нет. Если в каталоге не хватает олимпиады или сезона — нажмите «Нет нужной олимпиады?».</p>`;
     }
-
-    box.innerHTML = `<div class="space-y-6">` + linked.map(item => {
-        const confirmed = item.bvi_status === 'CONFIRMED';
-        const archived = item.status === 'ARCHIVED' || item.is_historical;
-        // Архивная олимпиада не попадает в выбор новых заявок, поэтому по
-        // такой связи представителю нечего отзывать: заявка уже подтверждена,
-        // а олимпиады нет в актуальном перечне.
-        const note = archived
-            ? `Связь историческая: олимпиады больше нет в перечне РСОШ.
-               Связь сохранена, но новые заявки по ней невозможны.`
-            : (confirmed
-                ? `Связь подтверждена. Снять подтверждение может администратор Papaya.`
-                : `Заявка ждёт подтверждения администратором.`);
-        return `
-        <div class="${UI.card} px-8 py-7 flex flex-col lg:flex-row lg:items-center gap-6">
-            <div class="flex-1 min-w-0">
-                <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
-                <div class="mt-3 flex items-center gap-3 flex-wrap">
-                    ${bviStatusBadge(item.bvi_status)}
-                    ${archived
-                        ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архивная олимпиада</span>`
-                        : ''}
-                </div>
+    const statusBadge = status => {
+        if (status === 'resolved') return `<span class="${UI.badge} ${UI.badgeSuccess}">Выполнено</span>`;
+        if (status === 'rejected') return `<span class="${UI.badge} ${UI.badgeDanger}">Отклонено</span>`;
+        return `<span class="${UI.badge} ${UI.badgePending}">Открыта</span>`;
+    };
+    const kindLabel = kind => ({ olympiad: 'Олимпиада', season: 'Сезон', profile: 'Профиль', other: 'Другое' }[kind] || kind || '');
+    return `<div class="space-y-4">${requests.map(item => `
+        <div class="${UI.card} px-8 py-6">
+            <div class="flex flex-wrap items-center gap-3">
+                ${statusBadge(item.status)}
+                <span class="text-sm text-ink-faint">${escHtml(kindLabel(item.kind))} · ${formatDate(item.createdAt)}</span>
             </div>
-            <div class="flex flex-col lg:items-end gap-3 shrink-0">
-                <a href="#/olympiads/${escAttr(item.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть</a>
-                ${confirmed || archived
-                    ? `<p class="text-xs text-ink-faint max-w-[18rem] text-right">${escHtml(note)}</p>`
-                    : `<button type="button" data-remove="${escAttr(item.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать заявку</button>`}
-            </div>
-        </div>`;
-    }).join('') + `</div>`;
-
-    box.querySelectorAll('[data-remove]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            btn.disabled = true;
-            const res = await api.removeBvi(universityId, btn.dataset.remove);
-            if (res.ok) {
-                showToast('Заявка отозвана', 'success');
-                renderMyUniversity();
-                return;
-            }
-            showToast(errorText(res), 'error');
-            btn.disabled = false;
-        });
-    });
-}
-
-async function openBviPickerModal(universityId, linkedIds) {
-    const body = `
-        <div id="modal-alert"></div>
-        <div class="${UI.field}">
-            <label for="bvi-query" class="${UI.label}">Поиск олимпиады</label>
-            <input id="bvi-query" type="search" class="${UI.input}" placeholder="Название олимпиады" autocomplete="off">
-        </div>
-        <div id="bvi-results" class="space-y-3 max-h-96 overflow-y-auto modal-scroll">${loadingHtml('Загружаем каталог…')}</div>
-        <div class="flex flex-wrap justify-end gap-3 mt-10">
-            <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Закрыть</button>
-        </div>`;
-    const { overlay, close } = openModal('Добавить олимпиаду с БВИ', body, { wide: true });
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
-
-    const results = overlay.querySelector('#bvi-results');
-    const queryInput = overlay.querySelector('#bvi-query');
-
-    async function load(query) {
-        results.innerHTML = loadingHtml('Ищем…');
-        const res = await api.listOlympiads(query || '');
-        if (!res.ok) {
-            results.innerHTML = alertHtml(errorText(res), 'error');
-            return;
-        }
-        const items = (res.data.olympiads || []).filter(item => !linkedIds.has(String(item.id)));
-        if (!items.length) {
-            results.innerHTML = `<p class="py-12 text-center text-ink-soft">Олимпиад не найдено</p>`;
-            return;
-        }
-        results.innerHTML = items.map(item => `
-            <div class="${UI.card} px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
-                <div class="flex-1 min-w-0">
-                    <p class="font-semibold text-ink leading-snug">${escHtml(item.name)}</p>
-                    ${item.status === 'ARCHIVED' ? `<div class="mt-2">${olympiadStatusBadge(item.status)}</div>` : ''}
-                </div>
-                <button type="button" data-pick="${escAttr(item.id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall} shrink-0">Добавить</button>
-            </div>`).join('');
-
-        results.querySelectorAll('[data-pick]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                btn.disabled = true;
-                const res2 = await api.requestBvi(universityId, btn.dataset.pick);
-                if (res2.ok) {
-                    showToast('Заявка отправлена на подтверждение', 'success');
-                    close();
-                    renderMyUniversity();
-                    return;
-                }
-                const alertBox = overlay.querySelector('#modal-alert');
-                if (alertBox) alertBox.innerHTML = alertHtml(errorText(res2), 'error');
-                btn.disabled = false;
-            });
-        });
-    }
-
-    let timer = null;
-    queryInput.addEventListener('input', () => {
-        clearTimeout(timer);
-        timer = setTimeout(() => load(queryInput.value.trim()), 300);
-    });
-    load('');
+            <p class="mt-3 text-base text-ink leading-relaxed whitespace-pre-wrap">${escHtml(item.text || '')}</p>
+            ${item.admin_note ? `<p class="mt-3 text-sm text-ink-soft">Ответ администратора: ${escHtml(item.admin_note)}</p>` : ''}
+        </div>`).join('')}</div>`;
 }

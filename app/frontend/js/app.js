@@ -121,13 +121,6 @@ function archiveReasonText(reason) {
          + 'Она вернётся автоматически, если снова появится в перечне.';
 }
 
-function bviStatusBadge(status) {
-    if (status === 'CONFIRMED') {
-        return `<span class="${UI.badge} ${UI.badgeSuccess}">Подтверждено</span>`;
-    }
-    return `<span class="${UI.badge} ${UI.badgePending}">Ждёт подтверждения</span>`;
-}
-
 /* ---------- Льготы: вид, проверка, сезон ---------- */
 
 /** Человеческое название вида льготы (ТЗ §4.3).
@@ -391,6 +384,7 @@ function openOlympiadFormModal(olympiad, onDone) {
         <div id="modal-alert"></div>
         <form id="olympiad-form">
             ${inputField({ id: 'ol-name', name: 'name', label: 'Название олимпиады', required: true, value: (olympiad || {}).name || '' })}
+            ${inputField({ id: 'ol-organizer', name: 'organizer', label: 'Организатор', value: (olympiad || {}).organizer || '', placeholder: 'например: МФТИ' })}
             ${inputField({ id: 'ol-site', name: 'official_url', label: 'Официальный сайт', type: 'url', value: (olympiad || {}).official_url || '', placeholder: 'https://…' })}
             ${inputField({ id: 'ol-preview', name: 'preview_image', label: 'Превью для карточек (URL)', type: 'url', value: (olympiad || {}).preview_image || '', placeholder: 'https://…' })}
             ${inputField({ id: 'ol-image', name: 'image', label: 'Большая картинка для страницы (URL)', type: 'url', value: (olympiad || {}).image || '', placeholder: 'https://…' })}
@@ -418,6 +412,7 @@ function openOlympiadFormModal(olympiad, onDone) {
         const payload = {
             name: (fd.get('name') || '').trim(),
             official_url: (fd.get('official_url') || '').trim() || null,
+            organizer: (fd.get('organizer') || '').trim() || null,
             preview_image: (fd.get('preview_image') || '').trim() || null,
             image: (fd.get('image') || '').trim() || null,
             description: (fd.get('description') || '').trim() || null,
@@ -520,7 +515,7 @@ function navLinks() {
     ];
     if (store.user) {
         /* «Мой университет» — кабинет представителя: у администратора он не
-           показывается, иначе раздел дублировал бы модерацию БВИ в панели. */
+           показывается, иначе раздел дублировал бы реестр правил в панели. */
         if (store.isUniversityRep()) {
             links.push({ href: '#/my-university', route: '/my-university', label: 'Мой университет' });
         }
@@ -546,8 +541,8 @@ function renderHeader() {
             userBox.innerHTML = `
             <div class="bg-mist rounded p-4">
                 <p class="text-sm text-ink-soft leading-relaxed">
-                    Каталоги и поиск открыты без входа. Войдите, чтобы управлять
-                    каталогом и БВИ своего университета.
+                    Каталоги и поиск открыты без входа. Войдите, чтобы вести
+                    правила льгот своего университета.
                 </p>
                 <a href="#/auth" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall} w-full mt-4">Войти</a>
             </div>`;
