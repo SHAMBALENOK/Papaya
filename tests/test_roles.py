@@ -71,7 +71,7 @@ async def test_admin_has_full_access(client):
 
     assert (await client.get('/api/v1/admin/users')).status_code == 200
     assert (await client.get('/api/v1/admin/olympiads')).status_code == 200
-    assert (await client.get('/api/v1/admin/bvi')).status_code == 200
+    assert (await client.get('/api/v1/admin/benefit-rules')).status_code == 200
     assert (await client.get('/api/v1/docs')).status_code == 200
 
     edited = await client.post(
@@ -108,7 +108,7 @@ async def test_admin_assigns_university_representative(client):
     await login_user(client, rep['email'])
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
     linked = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
+        f"/api/v1/universities/{university['id']}/benefit-rules",
         json={'olympiad_id': olympiad['id']},
     )
     assert linked.status_code == 201
@@ -122,7 +122,7 @@ async def test_admin_assigns_university_representative(client):
 
     await login_user(client, rep['email'])
     blocked = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
+        f"/api/v1/universities/{university['id']}/benefit-rules",
         json={'olympiad_id': olympiad['id']},
     )
     assert blocked.status_code == 403
@@ -169,11 +169,11 @@ async def test_representative_university_can_be_changed(client):
     # Права следуют за новым вузом: старый больше недоступен.
     await login_user(client, rep['email'])
     assert (await client.post(
-        f"/api/v1/universities/{first['id']}/bvi",
+        f"/api/v1/universities/{first['id']}/benefit-rules",
         json={'olympiad_id': olympiad['id']},
     )).status_code == 403
     assert (await client.post(
-        f"/api/v1/universities/{second['id']}/bvi",
+        f"/api/v1/universities/{second['id']}/benefit-rules",
         json={'olympiad_id': olympiad['id']},
     )).status_code == 201
 
@@ -334,7 +334,7 @@ async def test_rep_cannot_import_documents(client):
         files={'file': ('rsosh.xlsx', xlsx_bytes(), 'application/octet-stream')},
         data={'type': 'RSOSH_LIST'},
     )).status_code == 403
-    assert (await client.get('/api/v1/admin/bvi')).status_code == 403
+    assert (await client.get('/api/v1/admin/benefit-rules')).status_code == 403
 
 
 async def test_admin_users_supports_pagination(client):

@@ -1,6 +1,8 @@
 from . import (
     applications,
-    bvi,
+    audit,
+    benefit_rules,
+    catalog_requests,
     database,
     docs,
     olympiads,

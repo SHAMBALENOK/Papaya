@@ -227,7 +227,7 @@ Tests run in an isolated container of the `testing` profile and never touch the 
 docker compose --profile testing run --rm test
 ```
 
-Covered scenarios: catalogs and search, the two images per entity, the public source endpoint, manual archive and the manual-restore restriction, BVI links on both sides, moderation, role boundaries (student / representative / administrator), and the importer — XLSX, PDF with a text layer, scanned PDF, pages rotated by 90/180/270, PNG/JPEG images, multi-line and merged cells, repeated import of the same document, archiving of missing olympiads, unreadable documents, and permissions.
+Covered scenarios: catalogs and search, the two images per entity, the public source endpoint, manual archive and the manual-restore restriction, benefit rules on both sides (drafts, publication, verification policy, versions and rollback, optimistic locking, documents, audit log), role boundaries (student / representative / administrator), and the importer — XLSX, PDF with a text layer, scanned PDF, pages rotated by 90/180/270, PNG/JPEG images, multi-line and merged cells, repeated import of the same document, archiving of missing olympiads, unreadable documents, and permissions.
 
 ## API and routes
 
@@ -237,16 +237,24 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/universities?search=` | University catalog | Public |
 | `GET` | `/api/v1/universities/<id>` | University page | Public |
-| `GET` | `/api/v1/universities/<id>/olympiads` | Olympiads granting BVI (`?include_pending=true` for own requests) | Public / own requests |
+| `GET` | `/api/v1/universities/<id>/olympiads` | Olympiads with published benefit rules, filters `benefit_type`, `subject`, `program_id`, `season_id` (`?include_drafts=true` for own drafts) | Public / own drafts |
+| `GET` | `/api/v1/universities/<id>/programs` | Structured study programmes of a university | Public |
 | `POST` | `/api/v1/universities/add_university` | Create a university | `ADMIN` |
 | `POST` | `/api/v1/universities/edit_university/<id>` | Update a university | `ADMIN` |
-| `POST` | `/api/v1/universities/<id>/bvi` | Request a BVI link to an existing olympiad | `EDITOR` (own university) or `ADMIN` |
-| `POST` | `/api/v1/universities/<id>/bvi/remove` | Remove a BVI link | `EDITOR` (own university) or `ADMIN` |
-| `POST` | `/api/v1/universities/<id>/bvi/<olympiad_id>/moderation` | Confirm, reject or revoke a BVI link | `ADMIN` |
+| `GET` | `/api/v1/universities/<id>/benefit-rules` | Flat list of benefit rules (+ `/facets` for filter values) | Public (published) / own drafts |
+| `POST` | `/api/v1/universities/<id>/benefit-rules` | Create a benefit rule for an existing olympiad | `EDITOR` (own university) or `ADMIN` |
+| `GET`/`PUT`/`DELETE` | `/api/v1/universities/<id>/benefit-rules/<rule_id>` | Rule card, versioned edit with `expected_version`, delete a draft | Public card / `EDITOR` (own) or `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/benefit-rules/<rule_id>/status` | Publish, unpublish or archive a rule | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/benefit-rules/<rule_id>/verification` | Papaya verification: verified (needs document + source URL), rejected (needs a note), unverified | `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/benefit-rules/<rule_id>/document` | Upload the official document for a rule | `EDITOR` (own university) or `ADMIN` |
+| `GET` | `/api/v1/universities/<id>/benefit-rules/<rule_id>/versions` | Version history (`POST …/rollback` restores a version as a new one) | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/catalog-requests` | Ask administrators to add an olympiad / season / profile | `EDITOR` (own university) or `ADMIN` |
+| `GET` | `/api/v1/benefit-rules/<rule_id>` | Public rule card (+ `/document`) | Public |
 | `GET` | `/api/v1/olympiads?search=&include_archived=` | Olympiad catalog | Public |
 | `GET` | `/api/v1/olympiads/<id>/source` | Where the olympiad data came from | Public |
 | `GET` | `/api/v1/olympiads/<id>` | Olympiad page | Public |
-| `GET` | `/api/v1/olympiads/<id>/universities` | Universities granting BVI for this olympiad | Public |
+| `GET` | `/api/v1/olympiads/<id>/universities` | Universities with published benefit rules for this olympiad (same filters) | Public |
+| `GET` | `/api/v1/olympiads/<id>/seasons` | Seasons with profiles (`PUT /seasons/<year>`, `POST /seasons/<season_id>/archive`, profiles CRUD — `ADMIN`) | Public |
 | `POST` | `/api/v1/olympiads/add_olympiad` | Create an olympiad manually | `ADMIN` |
 | `POST` | `/api/v1/olympiads/edit_olympiad/<id>` | Update an olympiad | `ADMIN` |
 | `GET` | `/api/v1/search?q=` | Search both catalogs | Public |
@@ -262,7 +270,9 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `PUT` | `/api/v1/imports/<id>/selection` | Save the administrator's review choices | `ADMIN` |
 | `POST` | `/api/v1/admin/archive_olympiad/<id>` | Archive or restore an olympiad (409 when restoring one absent in the RSOSH list) | `ADMIN` |
 | `GET` | `/api/v1/admin/users` | Manage users and roles | `ADMIN` |
-| `GET` | `/api/v1/admin/bvi` | BVI request moderation queue | `ADMIN` |
+| `GET` | `/api/v1/admin/benefit-rules` | Registry and moderation queue of benefit rules | `ADMIN` |
+| `GET` | `/api/v1/admin/audit` | Persistent audit log of critical actions | `ADMIN` |
+| `GET` | `/api/v1/admin/catalog-requests` | Catalog requests from representatives (`POST …/<id>/resolve`) | `ADMIN` |
 | `POST` | `/api/v1/auth/register` | Register a user | Public |
 | `POST` | `/api/v1/auth/login` | Log in and set JWT cookies | Public |
 | `POST` | `/api/v1/auth/logout` | Log out and remove JWT cookies | Authenticated |

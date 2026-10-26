@@ -55,6 +55,8 @@ class Olympiads(Base):
     name_norm = Column(String, nullable=False, unique=True, index=True)
     description = Column(Text, nullable=True)
     official_url = Column(String, nullable=True)
+    # Организатор (вуз/организация), как указано в перечне РСОШ или на сайте.
+    organizer = Column(String, nullable=True)
     # Маленькая картинка для карточек каталога.
     preview_image = Column(String, nullable=True)
     # Большая картинка для страницы олимпиады.
@@ -76,8 +78,8 @@ class Olympiads(Base):
         onupdate=_utcnow,
     )
 
-    bvi_links = relationship(
-        'UniversityBvi',
+    benefit_rules = relationship(
+        'BenefitRule',
         back_populates='olympiad',
         cascade='all, delete-orphan',
         passive_deletes=True,

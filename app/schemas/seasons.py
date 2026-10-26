@@ -12,7 +12,9 @@ SEASON_STATES = ('unknown', 'upcoming', 'active', 'completed')
 
 
 class SeasonUpsert(BaseModel):
-    year: int
+    #: Год дублирует путь ``/seasons/{year}``; в теле необязателен.
+    year: Optional[int] = None
+    label: Optional[str] = None
     rsoh_level: Optional[str] = None
     state: str = 'unknown'
     dates: Optional[dict] = None
@@ -31,6 +33,7 @@ class SeasonItem(BaseModel):
     id: str | None = None
     olympiad_id: str | None = None
     year: int | None = None
+    label: str | None = None
     rsoh_level: str | None = None
     state: str | None = None
     dates: dict | None = None
@@ -51,6 +54,12 @@ class SeasonsResponse(BaseModel):
 
 class ProfileCreate(BaseModel):
     name: str
+    subject: Optional[str] = None
+    description: Optional[str] = None
+
+
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
     subject: Optional[str] = None
     description: Optional[str] = None
 

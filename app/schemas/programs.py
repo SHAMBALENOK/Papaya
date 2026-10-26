@@ -19,6 +19,21 @@ class UniversityProgramItem(BaseModel):
     university_id: Optional[UUID] = None
     name: Optional[str] = None
     description: Optional[str] = None
+    #: Сколько правил льгот ссылается на программу: такую программу нельзя
+    #: удалить, пока её не убрали из правил.
+    rules_count: int = 0
+
+
+class UniversityProgramCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+    @field_validator('name')
+    @classmethod
+    def _name_not_blank(cls, v):
+        if not v or not v.strip():
+            raise ValueError('name is required')
+        return v.strip()
 
 
 class UniversityProgramsResponse(BaseModel):

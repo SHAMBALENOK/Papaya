@@ -165,10 +165,12 @@ async def decide_application(
                 status_code=409,
                 detail='Не удалось назначить роль представителя, заявка осталась в ожидании (ограничение ролей)',
             )
-        audit.log_admin_action(
+        await audit.audit(
             'application_' + body.decision.lower(),
             actor_id=current_user.get('id'),
+            target_type='representative_application',
             target_id=application_id,
+            note=body.note,
         )
         return outcome
     except HTTPException:

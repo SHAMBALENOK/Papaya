@@ -38,6 +38,8 @@ class OlympiadSeason(Base):
         index=True,
     )
     year = Column(Integer, nullable=False)
+    #: Человекочитаемое название сезона («2025/26»); если пусто — год.
+    label = Column(String, nullable=True)
     #: Уровень РСОШ (1/2/3) — сезонная характеристика.
     rsoh_level = Column(String, nullable=True)
     state = Column(String, nullable=False, default='unknown', index=True)

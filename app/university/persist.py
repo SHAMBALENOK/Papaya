@@ -1,30 +1,34 @@
 """Запись подтверждённого импорта приказа университета.
 
 Главное отличие от ``app.rsosh.persist``: приказ вуза **не пишет в каталог
-олимпиад**. Он создаёт только связи БВИ «этот университет даёт БВИ за эту
-олимпиаду» — и то лишь как **заявки** (``PENDING``). Подтверждает их человек
-штатной модерацией (``app.database.bvi.moderate_bvi_link``), а не импорт:
-автоподтверждение запрещено, потому что распознавание приказа может ошибиться
-и в олимпиаде, и в самом факте БВИ.
+олимпиад**. Он создаёт только **черновики правил льгот** «этот университет
+даёт БВИ за эту олимпиаду» (``benefit_rules`` в состоянии ``draft``).
+Публикует и проверяет их человек штатным путём (панель администратора /
+кабинет представителя), а не импорт: автопубликация и автопроверка
+запрещены, потому что распознавание приказа может ошибиться и в олимпиаде, и
+в самом факте льготы (ТЗ §11).
 
 Из этого следуют правила модуля:
 
 - **никаких олимпиад**: строка приказа либо ссылается на существующую
   олимпиаду каталога, либо не применяется вовсе (несопоставленные строки
   администратор связывает вручную в окне проверки);
-- **никаких подтверждений**: записанная связь всегда ``PENDING``, даже если
-  такая же связь уже была подтверждена ранее — повторный импорт не должен
-  «разжаловать» подтверждённую связь и не должен выдавать её за новую заявку;
-- **никаких дублей**: запись идемпотентна по уникальной паре
-  ``(university_id, olympiad_id)``; уже существующая связь пропускается;
+- **никаких публикаций и проверок**: записанное правило всегда ``draft`` и
+  ``unverified``; уже существующее правило пары повторный импорт не трогает
+  (не «разжалует» опубликованное и не создаёт второе);
+- **никаких дублей**: запись идемпотентна по паре ``(university_id,
+  olympiad_id)`` — если у пары уже есть неархивное правило, новое не
+  создаётся, а у черновика лишь дополняется происхождение;
 - всё применение идёт в одной транзакции под advisory-блокировкой применения
   приказов и блокировкой строки документа — так два подтверждения одного
-  документа не пересекаются, а состояние прогона и записи связей согласованы.
+  документа не пересекаются, а состояние прогона и записи правил согласованы.
 
-Происхождение связи сохраняется рядом: ``source_doc_id`` (документ-источник) и
-``source_meta`` (распознанные характеристики строки — направление, профиль,
-предмет, уровень, диплом). Сущностей «сезон/профиль/правило» в модели Papaya
-нет, поэтому распознанные поля хранятся как есть и не создают новых записей.
+Происхождение правила сохраняется рядом: ``source_doc_id`` (сам приказ — он же
+официальный документ правила) и ``source_meta`` (распознанные характеристики
+строки — направление, профиль, предмет, уровень, диплом). Распознанный
+предмет и диплом переносятся в поля правила как текст; направление
+сопоставляется с **существующей** программой вуза по нормализованному имени
+(новые программы импорт не создаёт).
 """
 
 import logging
@@ -35,7 +39,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
 from app.middlewares.serializers import doc_to_dict
-from app.models.bvi import UniversityBvi
+from app.database.benefit_rules import build_dedup_key
+from app.database.search import normalize_name
+from app.models.benefit_rules import BenefitRule, BenefitRuleProgram
+from app.models.benefit_versions import BenefitRuleVersion
+from app.models.programs import UniversityProgram
 from app.models.docs import Docs
 from app.models.olympiads import Olympiads
 from app.models.universities import Universities
@@ -48,7 +56,7 @@ from app.university.types import (
 
 logger = logging.getLogger('papaya.university.persist')
 
-#: Единственный тип документа, который может создавать связи БВИ.
+#: Единственный тип документа, который может создавать черновики правил.
 UNIVERSITY_DOC_TYPE = 'UNIVERSITY_ORDER'
 
 #: Статусы документа, из которых импорт приказа запустить можно.
@@ -386,7 +394,7 @@ async def apply_confirmed_import(
     selection: dict | None = None,
     university_id=None,
 ) -> dict:
-    """Создать связи БВИ (``PENDING``) по подтверждённым сопоставлениям.
+    """Создать черновики правил льгот по подтверждённым сопоставлениям.
 
     Возвращает ``{'document', 'result'}: сам документ и итоги записи
     (``linked``/``skipped``/``unmatched``/``errors``).
@@ -400,9 +408,9 @@ async def apply_confirmed_import(
     - определён целевой университет (из шапки документа либо переопределён
       администратором).
 
-    Одна олимпиада в строке = одна связь: дубли внутри документа схлопнуты
-    ещё при сопоставлении, а повторный импорт не создаёт второй связи
-    (идемпотентность по уникальной паре).
+    Одна олимпиада в строке = одно правило: дубли внутри документа схлопнуты
+    ещё при сопоставлении, а повторный импорт не создаёт второго правила
+    (идемпотентность по паре университет — олимпиада).
     """
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -535,8 +543,8 @@ async def _apply_candidates(
         except UniversityError:
             unmatched += 1
         except IntegrityError:
-            # Гонка на уникальной паре: связь уже есть. Для импорта это
-            # идемпотентный результат, а не ошибка строки.
+            # Гонка на ключе содержимого: такое правило уже есть. Для импорта
+            # это идемпотентный результат, а не ошибка строки.
             linked += 1
         except Exception as exc:  # noqa: BLE001 - одна строка не роняет импорт
             logger.exception(
@@ -561,11 +569,12 @@ async def _upsert_link(
     source_meta: dict,
     candidate: UniversityCandidate,
 ) -> None:
-    """Создать связь ``PENDING`` либо обновить ``source_meta`` у существующей.
+    """Создать черновик правила либо дополнить ``source_meta`` у существующего.
 
-    Подтверждённая связь не трогается: повторный импорт не «разжаловывает»
-    её и не переписывает историю модерации. У существующей заявки дополняется
-    только происхождение (распознанные характеристики могли уточниться).
+    Опубликованное/архивное правило не трогается: повторный импорт не
+    «разжалует» его и не переписывает историю. У существующего черновика
+    дополняется только происхождение (распознанные характеристики могли
+    уточниться) и документ, если его ещё не было.
     """
     olympiad_uuid = _as_uuid(olympiad_id)
     exists = (
@@ -577,42 +586,128 @@ async def _upsert_link(
         # Олимпиада из выбора администратора не найдена в каталоге.
         raise UniversityError('Олимпиада не найдена в каталоге')
 
-    link = (
+    existing = (
         await session.execute(
-            select(UniversityBvi).where(
-                UniversityBvi.university_id == university_uuid,
-                UniversityBvi.olympiad_id == olympiad_uuid,
+            select(BenefitRule)
+            .where(
+                BenefitRule.university_id == university_uuid,
+                BenefitRule.olympiad_id == olympiad_uuid,
+                BenefitRule.status != 'archived',
             )
+            .order_by(BenefitRule.createdAt)
         )
-    ).scalar_one_or_none()
+    ).scalars().all()
 
     now = datetime.now(timezone.utc)
-    if link is None:
-        payload_meta = dict(source_meta or {})
-        payload_meta.setdefault('olympiad_name', candidate.olympiad_name)
-        session.add(
-            UniversityBvi(
-                university_id=university_uuid,
-                olympiad_id=olympiad_uuid,
-                status='PENDING',
-                source_doc_id=doc_id,
-                source_meta=payload_meta,
-                createdAt=now,
-                updatedAt=now,
-            )
-        )
+    payload_meta = dict(source_meta or {})
+    payload_meta.setdefault('olympiad_name', candidate.olympiad_name)
+
+    if existing:
+        for rule in existing:
+            if rule.status != 'draft':
+                continue
+            if rule.source_doc_id is None:
+                rule.source_doc_id = doc_id
+            merged_meta = dict(rule.source_meta or {})
+            merged_meta.update(payload_meta)
+            rule.source_meta = merged_meta
+            rule.updatedAt = now
         return
 
-    if link.status != 'PENDING':
-        # Уже подтверждённая/иная связь: статус и автора не трогаем.
-        return
-    if link.source_doc_id is None:
-        link.source_doc_id = doc_id
-    merged_meta = dict(link.source_meta or {})
-    merged_meta.update(source_meta or {})
-    merged_meta.setdefault('olympiad_name', candidate.olympiad_name)
-    link.source_meta = merged_meta
-    link.updatedAt = now
+    meta = payload_meta
+    subject = _text(meta.get('subject'))
+    result = _text(meta.get('diploma'))
+    direction = _text(meta.get('direction'))
+    profile = _text(meta.get('profile'))
+
+    program_ids: list = []
+    if direction:
+        program_id = (
+            await session.execute(
+                select(UniversityProgram.id).where(
+                    UniversityProgram.university_id == university_uuid,
+                    UniversityProgram.name_norm == normalize_name(direction),
+                )
+            )
+        ).scalar_one_or_none()
+        if program_id is not None:
+            program_ids = [program_id]
+
+    extra_parts = []
+    if direction and not program_ids:
+        extra_parts.append(f'Направление: {direction}')
+    if profile:
+        extra_parts.append(f'Профиль: {profile}')
+    if meta.get('level'):
+        extra_parts.append(f'Уровень: {_text(meta.get("level"))}')
+
+    rule = BenefitRule(
+        university_id=university_uuid,
+        olympiad_id=olympiad_uuid,
+        status='draft',
+        source_doc_id=doc_id,
+        source_meta=meta,
+        benefit_type='BVI',
+        result_requirement=result,
+        subject=subject,
+        extra_requirements='; '.join(extra_parts) or None,
+        verification_status='unverified',
+        version=1,
+        createdAt=now,
+        updatedAt=now,
+    )
+    rule.dedup_key = build_dedup_key(
+        season_id=None,
+        profile_id=None,
+        benefit_type='BVI',
+        result_requirement=result,
+        subject=subject,
+        program_ids=program_ids,
+    )
+    session.add(rule)
+    await session.flush()
+    for program_id in program_ids:
+        session.add(
+            BenefitRuleProgram(
+                rule_id=rule.id, program_id=program_id, university_id=university_uuid
+            )
+        )
+    session.add(
+        BenefitRuleVersion(
+            rule_id=rule.id,
+            version=1,
+            snapshot={
+                'season_id': None,
+                'profile_id': None,
+                'benefit_type': 'BVI',
+                'result_requirement': result,
+                'subject': subject,
+                'extra_requirements': rule.extra_requirements,
+                'source_url': None,
+                'valid_until': None,
+                'source_doc_id': str(doc_id) if doc_id else None,
+                'status': 'draft',
+                'verification_status': 'unverified',
+                'verification_note': None,
+                'university_confirmed': False,
+                'program_ids': [str(item) for item in program_ids],
+                'programs': [direction] if program_ids else [],
+            },
+            changed_at=now,
+            reason='Создано импортом приказа вуза',
+            verification_status='unverified',
+            source_doc_id=doc_id,
+            source_meta=meta,
+            is_rollback=False,
+        )
+    )
+
+
+def _text(value) -> str | None:
+    if value is None:
+        return None
+    text_value = ' '.join(str(value).split())
+    return text_value or None
 
 
 def _error_text(exc: Exception) -> str:

@@ -1,9 +1,10 @@
 """Импорт приказа университета: preview без записи, confirm без автоподтверждения.
 
 Проверяется главный инвариант вузовского адаптера, отличающий его от импорта
-РСОШ: приказ **не создаёт олимпиад** и **не подтверждает связи**. До ``confirm``
-каталог и связи пусты; после ``confirm`` появляются только заявки (``PENDING``)
-на уже существующие олимпиады, и подтверждает их человек, а не импорт.
+РСОШ: приказ **не создаёт олимпиад** и **не публикует правила**. До ``confirm``
+каталог и правила пусты; после ``confirm`` появляются только черновики правил
+(``draft``) по уже существующим олимпиадам, и публикует/проверяет их человек,
+а не импорт.
 
 Тесты идут через API загрузки документа (он же проверяет тип) и напрямую через
 ``app.university.processor``/``persist``: HTTP-роуты импорта приказа —
@@ -33,21 +34,25 @@ REAL_ORDER_PDF = (
 
 
 async def _stored_links(university_id: str, olympiad_id: str) -> dict | None:
-    """Связь БВИ между парой напрямую из БД (в обход API)."""
+    """Правило льготы для пары напрямую из БД (в обход API)."""
+    import uuid as uuid_mod
+
     from sqlalchemy import select
 
     from app.database.database import AsyncSessionLocal
-    from app.models.bvi import UniversityBvi
+    from app.models.benefit_rules import BenefitRule
 
     async with AsyncSessionLocal() as session:
         link = (
             await session.execute(
-                select(UniversityBvi).where(
-                    UniversityBvi.university_id == university_id,
-                    UniversityBvi.olympiad_id == olympiad_id,
+                select(BenefitRule)
+                .where(
+                    BenefitRule.university_id == uuid_mod.UUID(str(university_id)),
+                    BenefitRule.olympiad_id == uuid_mod.UUID(str(olympiad_id)),
                 )
+                .order_by(BenefitRule.createdAt)
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
         if link is None:
             return None
         return {
@@ -86,8 +91,8 @@ async def test_import_order_preview_creates_no_links(client):
     assert 'Всероссийская олимпиада школьников «Высшая проба»' in names
 
 
-async def test_confirm_creates_pending_links_only(client):
-    """Confirm создаёт только PENDING-связи на существующие олимпиады.
+async def test_confirm_creates_draft_rules_only(client):
+    """Confirm создаёт только черновики правил по существующим олимпиадам.
 
     Олимпиада, которой не было в каталоге, приказом не создаётся: такие строки
     остаются несопоставленными и требуют ручного связывания.
@@ -115,7 +120,7 @@ async def test_confirm_creates_pending_links_only(client):
 
     link = await _stored_links(university['id'], olympiad['id'])
     assert link is not None
-    assert link['status'] == 'PENDING'
+    assert link['status'] == 'draft'
     assert str(link['source_doc_id']) == str(doc['id'])
     assert link['source_meta'].get('olympiad_name')
 
@@ -155,7 +160,7 @@ async def test_confirm_records_source_provenance(client):
 
 
 async def test_confirm_is_idempotent(client):
-    """Повторный confirm не создаёт вторую связь (уникальная пара)."""
+    """Повторный confirm не создаёт второе правило: черновик дополняется."""
     await admin_client(client)
     await create_university(client, name='Университет ИТМО')
     olympiad = await create_olympiad(
@@ -175,16 +180,18 @@ async def test_confirm_is_idempotent(client):
     await processor.start_import(doc['id'])
     await processor.confirm_import(doc['id'])
 
+    import uuid as uuid_mod
+
     from sqlalchemy import func, select
 
     from app.database.database import AsyncSessionLocal
-    from app.models.bvi import UniversityBvi
+    from app.models.benefit_rules import BenefitRule
 
     async with AsyncSessionLocal() as session:
         count = (
             await session.execute(
-                select(func.count()).select_from(UniversityBvi).where(
-                    UniversityBvi.olympiad_id == olympiad['id']
+                select(func.count()).select_from(BenefitRule).where(
+                    BenefitRule.olympiad_id == uuid_mod.UUID(olympiad['id'])
                 )
             )
         ).scalar_one()
@@ -301,7 +308,7 @@ async def test_university_routes_full_cycle(client):
     assert confirmed.json()['result']['linked'] >= 1
 
     link = await _stored_links(university['id'], olympiad['id'])
-    assert link is not None and link['status'] == 'PENDING'
+    assert link is not None and link['status'] == 'draft'
 
 
 async def test_university_preview_rejects_rsosh_document(client):

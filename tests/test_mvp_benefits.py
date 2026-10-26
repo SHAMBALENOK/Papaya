@@ -9,32 +9,25 @@
 
 from tests.conftest import (
     admin_client,
+    create_benefit_rule,
     create_olympiad,
     create_university,
-    moderate_bvi,
     register_user,
     upload_document,
     university_rep_client,
 )
 
 
-async def _confirmed_link(client, university, olympiad, benefit_type=None):
-    rep = await university_rep_client(client, university['id'])
-    created = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
-    )
-    assert created.status_code == 201, created.text
+async def _published_rule(client, university, olympiad, **fields):
+    """Опубликованное правило от представителя; сессия остаётся у администратора."""
+    await university_rep_client(client, university['id'])
+    rule = await create_benefit_rule(client, university['id'], olympiad['id'], **fields)
     await admin_client(client)
-    confirmed = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
-    assert confirmed.status_code == 200, confirmed.text
-    if benefit_type:
-        updated = await client.put(
-            f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
-            json={'benefit_type': benefit_type},
-        )
-        assert updated.status_code == 200, updated.text
-    return rep
+    return rule
+
+
+def _rule_url(university, rule):
+    return f"/api/v1/universities/{university['id']}/benefit-rules/{rule['id']}"
 
 
 # --- §4.3 Вид льготы и §7.1 Проверка ---------------------------------------
@@ -43,7 +36,7 @@ async def _confirmed_link(client, university, olympiad, benefit_type=None):
 async def test_benefit_type_and_verification_default_to_bvi_unverified(client):
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    await _published_rule(client, university, olympiad)
 
     page = await client.get(f"/api/v1/universities/{university['id']}/benefit-rules")
     assert page.status_code == 200, page.text
@@ -56,63 +49,60 @@ async def test_benefit_type_and_verification_default_to_bvi_unverified(client):
 async def test_benefit_type_validation_rejects_unknown_value(client):
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    rule = await _published_rule(client, university, olympiad)
 
-    bad = await client.put(
-        f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
-        json={'benefit_type': 'NONSENSE'},
-    )
+    bad = await client.put(_rule_url(university, rule), json={'benefit_type': 'NONSENSE'})
     assert bad.status_code == 422, bad.text
 
 
 async def test_admin_can_set_benefit_type_and_verify(client):
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    rule = await _published_rule(client, university, olympiad)
+    doc = await upload_document(client, 'order.pdf', b'%PDF-1.4 order', doc_type='UNIVERSITY_ORDER')
 
     updated = await client.put(
-        f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
+        _rule_url(university, rule),
         json={
             'benefit_type': 'EGE_100',
             'result_requirement': 'winner',
             'subject': 'Математика',
+            'source_url': 'https://itmo.ru/order',
+            'source_doc_id': doc['id'],
             'verification_status': 'verified',
             'reason': 'Сверено с приказом вуза',
         },
     )
     assert updated.status_code == 200, updated.text
-    rule = updated.json()['rule']
-    assert rule['benefit_type'] == 'EGE_100'
-    assert rule['verification_status'] == 'verified'
-    assert rule['verified_by'] is not None
-    assert rule['verified_at'] is not None
+    body = updated.json()
+    assert body['benefit_type'] == 'EGE_100'
+    assert body['verification_status'] == 'verified'
+    assert body['verified_at'] is not None
+    assert body['document']['id'] == doc['id']
 
 
-async def test_unverified_link_is_still_listed_with_status(client):
-    """Непроверенная связь видна в каталоге — с отдельным статусом."""
+async def test_unverified_rule_is_still_listed_with_status(client):
+    """Непроверенное опубликованное правило видно в каталоге — с отдельным статусом."""
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    await _published_rule(client, university, olympiad)
 
-    page = await client.get(
-        f"/api/v1/universities/{university['id']}/olympiads"
-    )
+    page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
     olympiads = page.json()['olympiads']
     assert len(olympiads) == 1
-    assert olympiads[0]['verification_status'] == 'unverified'
-    assert olympiads[0]['benefit_type'] == 'BVI'
+    assert olympiads[0]['rules'][0]['verification_status'] == 'unverified'
+    assert olympiads[0]['rules'][0]['benefit_type'] == 'BVI'
 
 
 async def test_university_confirmation_is_separate_from_verification(client):
     """Подтверждение вузом ≠ проверка Papaya."""
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    rule = await _published_rule(client, university, olympiad)
 
     await university_rep_client(client, university['id'])
     confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/benefit-rules/"
-        f"{olympiad['id']}/university-confirmation",
+        _rule_url(university, rule) + '/university-confirmation',
         json={'confirmed': True},
     )
     assert confirmed.status_code == 200, confirmed.text
@@ -128,58 +118,44 @@ async def test_university_confirmation_is_separate_from_verification(client):
 async def test_benefit_rule_versions_recorded_and_rollback(client):
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    rule = await _published_rule(client, university, olympiad)
+    assert rule['version'] == 1
 
-    first = await client.put(
-        f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
-        json={'benefit_type': 'EGE_100'},
-    )
+    first = await client.put(_rule_url(university, rule), json={'benefit_type': 'EGE_100'})
     assert first.status_code == 200
-    assert first.json()['version'] == 1
+    assert first.json()['version'] == 2
 
     second = await client.put(
-        f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
+        _rule_url(university, rule),
         json={'benefit_type': 'DVI_100', 'reason': 'изменение приказа'},
     )
     assert second.status_code == 200
-    assert second.json()['version'] == 2
+    assert second.json()['version'] == 3
 
-    history = await client.get(
-        f"/api/v1/universities/{university['id']}/benefit-rules/"
-        f"{olympiad['id']}/versions"
-    )
+    history = await client.get(_rule_url(university, rule) + '/versions')
     assert history.status_code == 200
     versions = history.json()['versions']
-    assert [v['version'] for v in versions] == [1, 2]
+    assert [v['version'] for v in versions] == [1, 2, 3]
 
-    rollback = await client.post(
-        f"/api/v1/universities/{university['id']}/benefit-rules/"
-        f"{olympiad['id']}/rollback/1"
-    )
+    rollback = await client.post(_rule_url(university, rule) + '/rollback', json={'version': 2})
     assert rollback.status_code == 200, rollback.text
-    rule = rollback.json()['rule']
-    assert rule['benefit_type'] == 'EGE_100'
-    assert rollback.json()['version'] == 3
+    restored = rollback.json()
+    assert restored['benefit_type'] == 'EGE_100'
+    assert restored['version'] == 4
 
-    history2 = await client.get(
-        f"/api/v1/universities/{university['id']}/benefit-rules/"
-        f"{olympiad['id']}/versions"
-    )
+    history2 = await client.get(_rule_url(university, rule) + '/versions')
     versions2 = history2.json()['versions']
-    assert len(versions2) == 3
+    assert len(versions2) == 4
     assert versions2[-1]['is_rollback'] is True
 
 
-async def test_benefit_rule_update_requires_admin(client):
+async def test_benefit_rule_update_requires_rights(client):
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    rule = await _published_rule(client, university, olympiad)
     await register_user(client)
 
-    forbidden = await client.put(
-        f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
-        json={'benefit_type': 'EGE_100'},
-    )
+    forbidden = await client.put(_rule_url(university, rule), json={'benefit_type': 'EGE_100'})
     assert forbidden.status_code == 403
 
 
@@ -192,29 +168,23 @@ async def test_valid_until_survives_version_snapshot_and_rollback(client):
     """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    await _confirmed_link(client, university, olympiad)
+    rule = await _published_rule(client, university, olympiad)
 
     first = await client.put(
-        f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
+        _rule_url(university, rule),
         json={'valid_until': '2027-06-01', 'benefit_type': 'EGE_100'},
     )
     assert first.status_code == 200, first.text
-    assert first.json()['rule']['valid_until'].startswith('2027-06-01')
+    assert first.json()['valid_until'].startswith('2027-06-01')
 
-    second = await client.put(
-        f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
-        json={'benefit_type': 'DVI_100'},
-    )
+    second = await client.put(_rule_url(university, rule), json={'benefit_type': 'DVI_100'})
     assert second.status_code == 200, second.text
 
-    rollback = await client.post(
-        f"/api/v1/universities/{university['id']}/benefit-rules/"
-        f"{olympiad['id']}/rollback/1"
-    )
+    rollback = await client.post(_rule_url(university, rule) + '/rollback', json={'version': 2})
     assert rollback.status_code == 200, rollback.text
-    rule = rollback.json()['rule']
-    assert rule['benefit_type'] == 'EGE_100'
-    assert rule['valid_until'].startswith('2027-06-01')
+    restored = rollback.json()
+    assert restored['benefit_type'] == 'EGE_100'
+    assert restored['valid_until'].startswith('2027-06-01')
 
 
 # --- §4.5 Фильтры и §10.1 Пагинация ----------------------------------------
@@ -224,8 +194,8 @@ async def test_filters_by_benefit_type_and_subject(client):
     university = await create_university(client, 'Университет ИТМО')
     o1 = await create_olympiad(client, 'Олимпиада «Альфа»')
     o2 = await create_olympiad(client, 'Олимпиада «Бета»')
-    await _confirmed_link(client, university, o1, benefit_type='BVI')
-    await _confirmed_link(client, university, o2, benefit_type='EGE_100')
+    await _published_rule(client, university, o1, benefit_type='BVI')
+    await _published_rule(client, university, o2, benefit_type='EGE_100')
 
     filtered = await client.get(
         f"/api/v1/universities/{university['id']}/benefit-rules",
@@ -262,14 +232,8 @@ async def test_subject_filter_applies_before_pagination(client):
     university = await create_university(client, 'Университет ИТМО')
     physics = await create_olympiad(client, 'Олимпиада «Физика»')
     math = await create_olympiad(client, 'Олимпиада «Математика»')
-    await _confirmed_link(client, university, physics)
-    await _confirmed_link(client, university, math)
-
-    for olympiad, subject in ((physics, 'Физика'), (math, 'Математика')):
-        await client.put(
-            f"/api/v1/universities/{university['id']}/benefit-rules/{olympiad['id']}",
-            json={'subject': subject},
-        )
+    await _published_rule(client, university, physics, subject='Физика')
+    await _published_rule(client, university, math, subject='Математика')
 
     filtered = await client.get(
         f"/api/v1/universities/{university['id']}/benefit-rules",
@@ -387,10 +351,10 @@ async def test_application_flow_approve_grants_rep_role(client):
     assert decided.status_code == 200, decided.text
     assert decided.json()['status'] == 'APPROVED'
 
-    # Роль выдана: пользователь теперь может управлять связями своего вуза.
+    # Роль выдана: пользователь теперь может заводить правила своего вуза.
     await login_user(client, applicant['email'])
     request = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
+        f"/api/v1/universities/{university['id']}/benefit-rules",
         json={'olympiad_id': olympiad['id']},
     )
     assert request.status_code == 201, request.text

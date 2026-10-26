@@ -11,9 +11,9 @@
 
 from tests.conftest import (
     admin_client,
+    create_benefit_rule,
     create_olympiad,
     create_university,
-    moderate_bvi,
     university_rep_client,
 )
 
@@ -70,25 +70,16 @@ async def test_both_names_survive_in_catalog_and_search(client):
     )
 
 
-async def test_university_with_bvi_keeps_olympiad_names(client):
-    """Связь БВИ не теряет названия: оба у вуза, оба у олимпиады."""
+async def test_university_with_rule_keeps_olympiad_names(client):
+    """Правило льготы не теряет названия: оба у вуза, оба у олимпиады."""
     university = await create_university(
         client, 'МФТИ полное название', short_name='МФТИ'
     )
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
 
     await university_rep_client(client, university['id'])
-    created = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
-    )
-    assert created.status_code == 201
-
+    await create_benefit_rule(client, university['id'], olympiad['id'])
     await admin_client(client)
-    confirmed = await moderate_bvi(
-        client, university['id'], olympiad['id'], 'confirm'
-    )
-    assert confirmed.status_code == 200
 
     on_olympiad = await client.get(f"/api/v1/olympiads/{olympiad['id']}/universities")
     assert on_olympiad.status_code == 200

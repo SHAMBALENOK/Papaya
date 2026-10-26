@@ -64,6 +64,7 @@ def olympiad_to_dict(olympiad) -> dict:
         'name_norm': olympiad.name_norm,
         'description': olympiad.description,
         'official_url': olympiad.official_url,
+        'organizer': olympiad.organizer,
         'preview_image': olympiad.preview_image,
         'image': olympiad.image,
         'source_doc_id': str(olympiad.source_doc_id) if olympiad.source_doc_id else None,
@@ -74,38 +75,42 @@ def olympiad_to_dict(olympiad) -> dict:
     }
 
 
-def bvi_link_to_dict(link) -> dict:
-    """UniversityBvi (ORM) -> словарь правила льготы.
+def benefit_rule_to_dict(rule) -> dict:
+    """BenefitRule (ORM) -> словарь правила льготы (без связанных сущностей).
 
-    Связь — это правило льготы: кроме пары (университет, олимпиада) и статуса
-    заявки оно несёт вид льготы, требуемый результат, предмет, программы,
-    ссылку на источник, срок действия и независимый статус проверки. Поля
-    проверки и подтверждения вузом — разные характеристики, обе отдаются
-    вызывающему.
+    Правило — отдельная сущность: пара (университет, олимпиада), сезон и
+    профиль, вид льготы, требуемый результат, предмет, доп. требования,
+    документ и ссылка на источник, срок действия, публикационное состояние и
+    независимый статус проверки Papaya. Программы и названия связанных
+    сущностей подтягивает слой данных (``database.benefit_rules``).
     """
     return {
-        'id': str(link.id),
-        'university_id': str(link.university_id),
-        'olympiad_id': str(link.olympiad_id),
-        'status': link.status,
-        'createdBy': str(link.createdBy) if link.createdBy else None,
-        'confirmedBy': str(link.confirmedBy) if link.confirmedBy else None,
-        'source_doc_id': str(link.source_doc_id) if link.source_doc_id else None,
-        'source_meta': link.source_meta,
-        'benefit_type': link.benefit_type,
-        'result_requirement': link.result_requirement,
-        'subject': link.subject,
-        'programs': link.programs,
-        'extra_requirements': link.extra_requirements,
-        'source_url': link.source_url,
-        'valid_until': _iso(link.valid_until),
-        'verification_status': link.verification_status,
-        'verified_by': str(link.verified_by) if link.verified_by else None,
-        'verified_at': _iso(link.verified_at),
-        'university_confirmed': bool(link.university_confirmed),
-        'university_confirmed_at': _iso(link.university_confirmed_at),
-        'createdAt': _iso(link.createdAt),
-        'updatedAt': _iso(link.updatedAt),
+        'id': str(rule.id),
+        'university_id': str(rule.university_id),
+        'olympiad_id': str(rule.olympiad_id),
+        'season_id': str(rule.season_id) if rule.season_id else None,
+        'profile_id': str(rule.profile_id) if rule.profile_id else None,
+        'status': rule.status,
+        'createdBy': str(rule.createdBy) if rule.createdBy else None,
+        'published_by': str(rule.published_by) if rule.published_by else None,
+        'published_at': _iso(rule.published_at),
+        'source_doc_id': str(rule.source_doc_id) if rule.source_doc_id else None,
+        'source_meta': rule.source_meta,
+        'benefit_type': rule.benefit_type,
+        'result_requirement': rule.result_requirement,
+        'subject': rule.subject,
+        'extra_requirements': rule.extra_requirements,
+        'source_url': rule.source_url,
+        'valid_until': _iso(rule.valid_until),
+        'verification_status': rule.verification_status,
+        'verified_by': str(rule.verified_by) if rule.verified_by else None,
+        'verified_at': _iso(rule.verified_at),
+        'verification_note': rule.verification_note,
+        'university_confirmed': bool(rule.university_confirmed),
+        'university_confirmed_at': _iso(rule.university_confirmed_at),
+        'version': rule.version or 0,
+        'createdAt': _iso(rule.createdAt),
+        'updatedAt': _iso(rule.updatedAt),
     }
 
 
@@ -136,6 +141,7 @@ def season_to_dict(season) -> dict:
         'id': str(season.id),
         'olympiad_id': str(season.olympiad_id),
         'year': season.year,
+        'label': season.label or str(season.year),
         'rsoh_level': season.rsoh_level,
         'state': season.state,
         'dates': season.dates,
@@ -194,7 +200,7 @@ def benefit_version_to_dict(version) -> dict:
     """BenefitRuleVersion (ORM) -> словарь версии правила."""
     return {
         'id': str(version.id),
-        'link_id': str(version.link_id),
+        'rule_id': str(version.rule_id),
         'version': version.version,
         'snapshot': version.snapshot,
         'changed_by': str(version.changed_by) if version.changed_by else None,
@@ -204,4 +210,37 @@ def benefit_version_to_dict(version) -> dict:
         'source_doc_id': str(version.source_doc_id) if version.source_doc_id else None,
         'source_meta': version.source_meta,
         'is_rollback': bool(version.is_rollback),
+    }
+
+
+def audit_event_to_dict(event) -> dict:
+    """AuditEvent (ORM) -> словарь события аудита."""
+    return {
+        'id': str(event.id),
+        'action': event.action,
+        'actor_id': str(event.actor_id) if event.actor_id else None,
+        'target_type': event.target_type,
+        'target_id': event.target_id,
+        'details': event.details,
+        'ip': event.ip,
+        'request_id': event.request_id,
+        'createdAt': _iso(event.createdAt),
+    }
+
+
+def catalog_request_to_dict(request) -> dict:
+    """CatalogRequest (ORM) -> словарь запроса о пополнении каталога."""
+    return {
+        'id': str(request.id),
+        'university_id': str(request.university_id),
+        'user_id': str(request.user_id) if request.user_id else None,
+        'kind': request.kind,
+        'olympiad_id': str(request.olympiad_id) if request.olympiad_id else None,
+        'text': request.text,
+        'status': request.status,
+        'admin_note': request.admin_note,
+        'resolved_by': str(request.resolved_by) if request.resolved_by else None,
+        'resolved_at': _iso(request.resolved_at),
+        'createdAt': _iso(request.createdAt),
+        'updatedAt': _iso(request.updatedAt),
     }

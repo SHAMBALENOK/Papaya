@@ -29,6 +29,7 @@ class OlympiadBase(BaseModel):
     name_norm: Optional[str] = None
     description: Optional[str] = None
     official_url: Optional[ExternalUrl] = None
+    organizer: Optional[str] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'
@@ -64,6 +65,7 @@ class OlympiadCreate(BaseModel):
     name: str
     description: Optional[str] = None
     official_url: Optional[ExternalUrl] = None
+    organizer: Optional[str] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
 
@@ -88,6 +90,7 @@ class OlympiadUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     official_url: Optional[ExternalUrl] = None
+    organizer: Optional[str] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
 
@@ -113,6 +116,7 @@ class OlympiadListItem(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     official_url: Optional[ExternalUrl] = None
+    organizer: Optional[str] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'
@@ -163,6 +167,7 @@ class OlympiadPublicResponse(BaseModel):
     name: str
     description: Optional[str] = None
     official_url: Optional[ExternalUrl] = None
+    organizer: Optional[str] = None
     preview_image: Optional[ExternalUrl] = None
     image: Optional[ExternalUrl] = None
     status: str = 'PUBLISHED'

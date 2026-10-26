@@ -124,14 +124,23 @@
 
 ## GET /universities/{university_id}/olympiads
 
-**Query:** `include_pending` (требует входа и прав на этот вуз).
+Олимпиады, по которым у вуза есть **опубликованные** правила льгот, с самими
+правилами внутри каждой олимпиады. Публично.
+
+**Query:** `benefit_type`, `subject`, `program_id`, `season_id` — фильтры
+комбинируются (И); `limit`, `offset`; `include_drafts` (требует входа и прав на
+этот вуз — добавляет черновики и архив правил).
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Олимпиады с БВИ | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "status", "bvi_status": "CONFIRMED"｜"PENDING", "is_historical": bool}]}` |
-| 401 | `include_pending` без входа | `{"detail": "Access token required to view pending requests"}` |
-| 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
+| 200 | Олимпиады с правилами | `{"olympiads": [{"id", "name", "description", "official_url", "organizer", "preview_image", "image", "status", "is_historical": bool, "rules": [BenefitRuleItem]}], "total": int}` |
+| 401 | `include_drafts` без входа | `{"detail": "Access token required to view drafts"}` |
+| 403 | Чужие черновики | `{"detail": "Drafts are visible to own university only"}` |
 | 404 | Вуз не найден | `{"detail": "University not found"}` |
+| 422 | Недопустимое значение фильтра | `{"detail": "benefit_type must be one of ..."}` |
+
+Отклонённые проверкой Papaya правила (`verification_status: "rejected"`) в
+публичной выдаче не показываются даже в состоянии `published`.
 
 Публично видны только подтверждённые (`CONFIRMED`) связи.
 
@@ -167,99 +176,197 @@
 
 ---
 
-## POST /universities/{university_id}/bvi
+## Правило льготы (`BenefitRuleItem`)
 
-Заявка: «этот университет даёт БВИ за эту олимпиаду». Связь создаётся в
-статусе `PENDING`; повторная заявка возвращает существующую связь.
+Правило — отдельная сущность: «университет *U* по олимпиаде *O* (сезон *S*,
+профиль *P*) даёт льготу *T* при результате *R* по предмету *Subj* на
+программы *[…]*». У одной пары «вуз — олимпиада» правил может быть несколько.
 
-Заявка возможна только по актуальной олимпиаде: архивная запись сохраняет
-прежние связи, но новых не получает. Уже подтверждённые связи при архивации
-остаются на месте.
+Поля: `id`, `university_id`, `university_name`, `university_short_name`,
+`olympiad_id`, `olympiad_name`, `olympiad_status`, `is_historical`,
+`season_id`, `season: {id, year, label, state}`, `profile_id`,
+`profile: {id, name, subject}`, `status` (`draft`｜`published`｜`archived`),
+`benefit_type` (`BVI`｜`EGE_100`｜`DVI_100`｜`EXTRA_POINTS`),
+`result_requirement`, `subject`, `programs: [{id, name}]`, `program_ids`,
+`extra_requirements`, `source_url`, `document: {id, name, has_file,
+availability, source_url}`, `valid_until`, `verification_status`
+(`unverified`｜`verified`｜`rejected`), `verified_at`, `verification_note`,
+`university_confirmed`, `university_confirmed_at`, `version`,
+`published_at`, `createdBy`, `createdAt`, `updatedAt`.
 
-**Request body:** `{"olympiad_id": str}`
+Три независимых статуса: `status` — публикация (решает вуз), `verification_status`
+— проверка Papaya (решает администратор), `university_confirmed` — подтверждение
+вузом. `season.state` — состояние сезона олимпиады, на статус правила не влияет.
+
+---
+
+## GET /universities/{university_id}/benefit-rules
+
+Плоский список правил вуза. Публично — только `published` и не `rejected`.
+
+**Query:** `benefit_type`, `subject`, `program_id`, `season_id`, `olympiad_id`,
+`verification_status`, `limit`, `offset`; `include_drafts` — как выше.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 201 | Заявка создана или уже существует | `{"id", "university_id", "olympiad_id", "status": "PENDING"｜"CONFIRMED", "is_historical": bool}` |
+| 200 | Правила | `{"rules": [BenefitRuleItem], "total": int}` |
+| 401 / 403 / 404 / 422 | См. `GET /universities/{university_id}/olympiads` | |
+
+`GET /universities/{university_id}/benefit-rules/facets` — значения для
+фильтров по опубликованным правилам: `{"benefit_types": [{value, count}],
+"subjects": [{value, count}], "programs": [{id, name, count}],
+"seasons": [{id, year, label, state, count}]}`.
+
+---
+
+## POST /universities/{university_id}/benefit-rules
+
+Создать правило. **Представитель этого вуза или администратор.**
+
+**Request body:** `{"olympiad_id": str, "season_id"?: str, "profile_id"?: str,
+"benefit_type": "BVI", "result_requirement"?: str, "subject"?: str,
+"program_ids": [str], "extra_requirements"?: str, "source_url"?: str,
+"valid_until"?: "YYYY-MM-DD", "publish": false, "reason"?: str}`.
+Администратор дополнительно может передать `source_doc_id` и
+`verification_status`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 201 | Правило создано, записана версия 1 | `BenefitRuleItem` |
+| 400 | Профиль из другого сезона / чужая программа | `{"detail": "..."}` |
+| 401 | Нет токена | `{"detail": "..."}` |
 | 403 | Не администратор и не представитель этого вуза | `{"detail": "You can only manage your own university"}` |
-| 404 | Вуз или олимпиада не найдены | `{"detail": "University not found"}` / `{"detail": "Olympiad not found"}` |
-| 409 | Олимпиада архивирована | `{"detail": "Олимпиада архивирована: её нет в актуальном перечне РСОШ, новые заявки БВИ за неё не принимаются. Подтверждённые ранее связи сохраняются."}` |
+| 404 | Вуз, олимпиада, сезон или профиль не найдены | `{"detail": "Olympiad not found"}` |
+| 409 | Олимпиада архивирована или такое правило уже есть | `{"detail": "Олимпиада архивирована: её нет в актуальном перечне РСОШ, новые правила льгот по ней не заводятся. Уже записанные правила сохраняются как исторические."}` |
+| 422 | Недопустимый `benefit_type` и т. п. | `{"detail": [...]}` |
 
-Кто подтвердил заявку и когда она создана — служебные поля: представителю
-университета они не нужны, поэтому в ответ не отдаются. Полная карточка связи
-(`confirmedBy`, `createdAt`, `updatedAt`) доступна только администратору в
-очереди модерации `GET /admin/bvi`.
-
-Повторный запрос той же пары «вуз — олимпиада» не создаёт вторую связь:
-возвращается существующая заявка, поэтому 201 приходит в обоих случаях.
-Архивная олимпиада проверяется до этой проверки: для неё 409 даже при
-повторном запросе.
+Правило возможно только по актуальной олимпиаде: архивная запись сохраняет
+прежние правила (как исторические), но новых не получает. Дубликат
+определяется по сезону, профилю, виду льготы, результату, предмету и набору
+программ; архивные правила в проверке не участвуют.
 
 ---
 
-## GET /universities/{university_id}/olympiads, GET /olympiads/{olympiad_id}/universities
+## GET /universities/{university_id}/benefit-rules/{rule_id}, GET /benefit-rules/{rule_id}
 
-Публичные списки связей БВИ. Видны только подтверждённые связи.
+Карточка правила. Публично для `published` и не `rejected`; черновик, архив и
+отклонённые — представителю своего вуза и администратору (иначе 404: чужой
+черновик неотличим от несуществующего).
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список связей | `{"olympiads": [BviOlympiadItem]}` / `{"universities": [BviUniversityItem]}` |
-| 401 | Запрошены неподтверждённые заявки без входа | `{"detail": "Access token required to view pending requests"}` |
-| 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
-| 404 | Университет или олимпиада не найдены | `{"detail": "..."}` |
+| 200 | Правило | `BenefitRuleItem` |
+| 404 | Нет или недоступно | `{"detail": "Benefit rule not found"}` |
 
-`BviOlympiadItem`: `id`, `name`, `description`, `official_url`,
-`preview_image`, `image`, `status`, `bvi_status`,
-`is_historical`.
-
-`BviUniversityItem`: `id`, `name`, `short_name`, `description`, `website`,
-`preview_image`, `image`, `bvi_status`, `is_historical`.
-
-`is_historical` — подтверждённая связь с архивной олимпиадой. Такая связь
-сохранена (архив не отменяет историю), но интерфейс показывает
-«Архивная олимпиада» / «Историческая связь» вместо «БВИ».
+`GET …/benefit-rules/{rule_id}/document` — файл официального документа
+(те же правила видимости; 404, если документа нет).
 
 ---
 
-## POST /universities/{university_id}/bvi/remove
+## PUT /universities/{university_id}/benefit-rules/{rule_id}
 
-**Request body:** `{"olympiad_id": str}`
+Изменить правило. **Представитель этого вуза или администратор.** Каждая
+правка — новая версия.
+
+**Request body:** любые поля из `POST` (кроме `olympiad_id`), плюс
+`expected_version` (оптимистичная блокировка) и `reason`. Администратор может
+передать `verification_status` и `source_doc_id`.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Связь удалена | `{"status": "removed", "olympiad_id": str}` |
-| 401 | Нет токена | `{"detail": "..."}` |
-| 403 | Нет прав на этот вуз | `{"detail": "You can only manage your own university"}` |
-| 404 | Связи нет | `{"detail": "BVI link not found"}` |
-| 409 | Подтверждённую связь снимает только администратор | `{"detail": "Связь подтверждена администратором: снять подтверждение может только администратор"}` |
+| 200 | Обновлено, `version` увеличен | `BenefitRuleItem` |
+| 400 | Недопустимые связи (профиль/программа) | `{"detail": "..."}` |
+| 403 | Нет прав | `{"detail": "You can only manage your own university"}` |
+| 404 | Правило не найдено | `{"detail": "Benefit rule not found"}` |
+| 409 | `expected_version` устарел или дубликат | `{"detail": "Правило уже изменено (текущая версия N, вы правили версию M). Обновите страницу и повторите правку."}` |
+| 422 | Невалидные значения | `{"detail": [...]}` |
 
-Проверка статуса и удаление выполняются под одной блокировкой строки: между
-чтением «заявка ещё PENDING» и удалением нельзя подсунуть подтверждение,
-которое удаление перетёрло бы.
+Содержательная правка сбрасывает проверку Papaya в `unverified` (кроме
+случая, когда администратор в том же запросе явно задал
+`verification_status`). Подтверждение вузом не сбрасывается.
 
 ---
 
-## POST /universities/{university_id}/bvi/{olympiad_id}/moderation
+## POST /universities/{university_id}/benefit-rules/{rule_id}/status
 
-Административное действие над заявкой. Произвольной смены статуса нет.
+Публикация / снятие с публикации / архив. **Представитель своего вуза или
+администратор.**
 
-**Request body:** `{"action": "confirm"｜"reject"｜"revoke"}`
+**Request body:** `{"status": "draft"｜"published"｜"archived", "expected_version"?: int, "reason"?: str}`
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Подтверждена или удалена | `{"result": "CONFIRMED"｜"removed", "university_id", "olympiad_id", "status"}` |
-| 401 | Нет токена | `{"detail": "..."}` |
+| 200 | Состояние изменено (или уже такое) | `BenefitRuleItem` |
+| 409 | Версия устарела / олимпиада в архиве / дубликат при возврате из архива | `{"detail": "..."}` |
+| 422 | Неизвестное состояние | `{"detail": [...]}` |
+
+`DELETE /universities/{university_id}/benefit-rules/{rule_id}` — удалить
+**черновик** (204). Опубликованное правило не удаляется (409): его переводят в
+архив, чтобы сохранить историю.
+
+---
+
+## POST /universities/{university_id}/benefit-rules/{rule_id}/verification
+
+Проверка Papaya. **Только администратор.**
+
+**Request body:** `{"status": "verified"｜"rejected"｜"unverified", "note"?: str, "expected_version"?: int}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Решение записано как версия | `BenefitRuleItem` |
 | 403 | Не администратор | `{"detail": "Permission denied"}` |
-| 404 | Связи нет | `{"detail": "BVI link not found"}` |
-| 409 | Действие не применимо к текущему состоянию | `{"detail": "..."}` — например, отклонить уже подтверждённую связь |
-| 422 | Неизвестное действие | `{"detail": [...]}` |
+| 404 | Правило не найдено | `{"detail": "Benefit rule not found"}` |
+| 409 | `verified` без документа или ссылки на источник | `{"detail": "Нельзя отметить правило как проверенное: не хватает — официальный документ, ссылка на источник. ..."}` |
+| 422 | `rejected` без `note` / неизвестный статус | `{"detail": [...]}` |
 
-- `confirm` — `PENDING` → `CONFIRMED`; поле `confirmedBy` заполняется.
-- `reject` — заявка отклонена, связь удаляется.
-- `revoke` — подтверждение отозвано, связь удаляется.
+`POST …/university-confirmation` `{"confirmed": bool}` — подтверждение со
+стороны вуза (представитель или администратор); на `verification_status` не
+влияет.
 
-Перехода `CONFIRMED → PENDING` не существует: это не состояние заявки, а
-отзыв публичного факта.
+---
+
+## POST /universities/{university_id}/benefit-rules/{rule_id}/document
+
+Загрузить официальный документ правила (multipart `file`: PDF/XLSX/изображение,
+проверяется расширение, сигнатура и размер; имя файла санируется).
+**Представитель своего вуза или администратор.** Документ сохраняется как
+`UNIVERSITY_ORDER`, привязывается к правилу, проверка Papaya сбрасывается.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Документ привязан | `BenefitRuleItem` |
+| 400 | Неподдерживаемый формат / пустой файл / подделанное расширение | `{"detail": "Unsupported file format. Allowed: ..."}` |
+| 413 | Превышен размер | `{"detail": "..."}` |
+
+---
+
+## GET /universities/{university_id}/benefit-rules/{rule_id}/versions
+
+История версий. **Представитель своего вуза или администратор.**
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Версии по возрастанию | `{"versions": [{"id", "rule_id", "version", "snapshot", "changed_by", "changed_at", "reason", "verification_status", "source_doc_id", "is_rollback"}], "current_version": int}` |
+
+`POST …/rollback` `{"version": int, "expected_version"?: int, "reason"?: str}`
+— восстановить содержимое выбранной версии **новой** версией
+(`is_rollback: true`). Восстановленное правило всегда `unverified`; состояние
+публикации не меняется. 404, если версии нет; 409 при устаревшей
+`expected_version`.
+
+---
+
+## Заявки на пополнение каталога
+
+`POST /universities/{university_id}/catalog-requests`
+`{"kind": "olympiad"｜"season"｜"profile"｜"other", "olympiad_id"?: str, "text": str}`
+— представитель просит добавить в каталог олимпиаду/сезон/профиль (201,
+`CatalogRequestItem`). `GET …/catalog-requests` — свои заявки.
+
+`GET /admin/catalog-requests?status=open|resolved|rejected|all` и
+`POST /admin/catalog-requests/{request_id}/resolve`
+`{"status": "resolved"｜"rejected", "note"?: str}` — очередь администратора.
 
 ---
 
@@ -290,7 +397,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "status", "is_archived": bool}` |
+| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "organizer", "preview_image", "image", "status", "is_archived": bool}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
 Публичная модель минимальна: `name_norm`, `source_doc_id`, `createdAt`,
@@ -305,16 +412,21 @@
 
 ## GET /olympiads/{olympiad_id}/universities
 
-Вузы, дающие БВИ за олимпиаду (обратная сторона связи). Публично, только
-подтверждённые связи.
+Вузы, у которых есть опубликованные правила льгот по олимпиаде, с правилами
+внутри. Публично.
+
+**Query:** `benefit_type`, `subject`, `program_id`, `season_id`, `limit`,
+`offset`.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список вузов | `{"universities": [{"id", "name", "short_name", "description", "website", "preview_image", "image", "bvi_status": "CONFIRMED", "is_historical": bool}]}` |
+| 200 | Список вузов | `{"universities": [{"id", "name", "short_name", "description", "website", "preview_image", "image", "is_historical": bool, "rules": [BenefitRuleItem]}], "total": int}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+| 422 | Недопустимое значение фильтра | `{"detail": "..."}` |
 
 `is_historical` равен `true`, если олимпиада архивная: такие вузы показываются
-отдельным историческим блоком и не подписаны как «даёт БВИ».
+отдельным историческим блоком. `GET /olympiads/{olympiad_id}/benefit-facets` —
+значения фильтров (как у вуза).
 
 ---
 
@@ -636,10 +748,15 @@
 
 ---
 
-## GET /admin/users, /admin/olympiads, /admin/bvi
+## GET /admin/users, /admin/olympiads, /admin/benefit-rules, /admin/audit
 
 **Администратор.** Списки для панели: пользователи (с ролью и привязкой к
-вузу), полный каталог олимпиад включая архивные, очередь заявок БВИ.
+вузу), полный каталог олимпиад включая архивные, реестр правил льгот во всех
+состояниях (`status`, `verification_status`, `benefit_type`, `university_id`,
+`olympiad_id`, `search`, `order=recent|name`) и журнал критичных действий
+(`/admin/audit`: `action`, `actor_id`, `target_id`, `limit`, `offset` →
+`{"events": [{"id", "action", "actor_id", "actor_email", "target_type",
+"target_id", "details", "ip", "createdAt"}], "total"}`).
 
 `/admin/users` и `/admin/olympiads` поддерживают query-параметры `search`
 (подстрока по имени/фамилии/email для пользователей и по названию/описанию для

@@ -204,14 +204,15 @@ def test_promised_fields_are_present():
     assert not problems, '\n'.join(problems)
 
 
-def test_bvi_request_response_hides_moderation_fields():
-    """Ответ на заявку БВИ не содержит полей модерации."""
-    operation = PATHS['/api/v1/universities/{university_id}/bvi']['post']
+def test_benefit_rule_response_hides_internal_fields():
+    """Ответ с правилом не содержит служебных полей (ключ дедупликации, мета импорта)."""
+    operation = PATHS['/api/v1/universities/{university_id}/benefit-rules']['post']
     props = _fields(_json_body(operation, '201'))
-    assert props, 'у POST /bvi нет описанного ответа 201'
-    for field in ('createdBy', 'confirmedBy', 'createdAt', 'updatedAt'):
-        assert field not in props, f'{field} не должен отдаваться представителю'
-    assert 'is_historical' in props, 'признак исторической связи должен отдаваться'
+    assert props, 'у POST /benefit-rules нет описанного ответа 201'
+    for field in ('dedup_key', 'source_meta', 'verified_by', 'published_by'):
+        assert field not in props, f'{field} не должен отдаваться наружу'
+    for field in ('is_historical', 'verification_status', 'status', 'version'):
+        assert field in props, f'{field} должен отдаваться'
 
 
 def test_confirm_contract_matches_documentation():
@@ -269,13 +270,13 @@ def test_frontend_has_no_way_to_force_outdated():
         )
 
 
-def test_legacy_status_route_is_not_documented_or_present():
-    """Старый маршрут смены статуса БВИ не вернулся."""
-    assert not [p for p in PATHS if p.endswith('/status') and '/bvi' in p]
+def test_legacy_bvi_routes_are_not_documented_or_present():
+    """Старые маршруты заявок БВИ не вернулись: правило — отдельная сущность."""
+    assert not [p for p in PATHS if '/bvi' in p]
     text = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
-    assert '/bvi/{olympiad_id}/status' not in text
+    assert '/bvi' not in text
     english = (ROOT / 'English.md').read_text(encoding='utf-8')
-    assert 'bvi/<olympiad_id>/status' not in english
+    assert '/bvi' not in english
 
 
 def _section(md: str, start: str, end: str) -> str:
@@ -319,16 +320,17 @@ def test_docs_reject_uses_conflict_not_client_error():
     assert '| 400 |' not in reject, 'reject больше не отдаёт 400'
 
 
-def test_docs_bvi_remove_cover_admin_only_confirmed():
-    """Снятие подтверждённой связи — только администратором, и это описано."""
+def test_docs_verification_policy_is_described():
+    """Политика проверки описана: verified требует документ и ссылку, rejected — причину."""
     md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
     section = _section(
         md,
-        'POST /universities/{university_id}/bvi/remove',
-        'POST /universities/{university_id}/bvi/{olympiad_id}/moderation',
+        'POST /universities/{university_id}/benefit-rules/{rule_id}/verification',
+        'POST /universities/{university_id}/benefit-rules/{rule_id}/document',
     )
     assert '| 409 |' in section
-    assert 'только администратор' in section
+    assert 'Только администратор' in section
+    assert 'без документа' in section
 
 
 def test_docs_import_start_cover_conflict_and_auth():

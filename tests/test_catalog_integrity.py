@@ -36,37 +36,43 @@ def normalize_name(value: str) -> str:
     return normalize(value)
 
 
-# --------------------------- Гонка при создании связи ---------------------------
+# --------------------------- Гонка при создании правила ---------------------------
 
 
-async def test_parallel_requests_create_one_link(client):
-    """Два параллельных запроса на одну пару дают одну связь, а не 500.
+async def test_parallel_rule_creation_yields_one_rule(client):
+    """Два параллельных одинаковых правила дают одно правило, а не 500.
 
-    Уникальный индекс по паре — последняя линия защиты; второй запрос должен
-    получить уже созданную связь (тот же идемпотентный результат), а не
-    ``IntegrityError`` наружу.
+    Частичный уникальный индекс по ключу дедупликации — последняя линия защиты;
+    второй запрос должен получить осмысленный 409, а не ``IntegrityError``
+    наружу.
     """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада для гонки')
     await university_rep_client(client, university['id'])
 
-    async def request_link():
+    async def create():
         # Отдельная сессия на каждый запрос: иначе это один запрос, а не два.
-        from app.database import bvi as bvi_db
+        from app.database import benefit_rules as rules_db
 
-        return await bvi_db.request_bvi_link(
-            olympiad['id'], university['id'], requested_by=None
-        )
+        try:
+            return await rules_db.create_rule(
+                university['id'],
+                data={'olympiad_id': olympiad['id'], 'benefit_type': 'BVI'},
+                created_by=None,
+            )
+        except rules_db.BenefitRuleError as exc:
+            return exc
 
-    results = await asyncio.gather(request_link(), request_link())
-    ids = {result['id'] for result in results}
-    assert len(ids) == 1, f'ожидалась одна связь, получили {ids}'
-    assert all(result['status'] == 'PENDING' for result in results)
+    results = await asyncio.gather(create(), create())
+    created = [r for r in results if isinstance(r, dict)]
+    conflicts = [r for r in results if not isinstance(r, dict)]
+    assert len(created) == 1, results
+    assert len(conflicts) == 1 and conflicts[0].status_code == 409, results
 
     await admin_client(client)
-    queue = await client.get('/api/v1/admin/bvi')
+    queue = await client.get('/api/v1/admin/benefit-rules')
     assert queue.status_code == 200
-    assert len(queue.json()['links']) == 1
+    assert queue.json()['total'] == 1
 
 
 async def test_parallel_http_requests_do_not_fail(client):
@@ -89,24 +95,22 @@ async def test_parallel_http_requests_do_not_fail(client):
             base_url='http://test',
             cookies=dict(client.cookies),
         ) as raw:
-            # Сессия гостя: права проверяются как у представителя, но
-            # параллельность создаётся на уровне приложения и БД.
             response = await raw.post(
-                f"/api/v1/universities/{university['id']}/bvi",
+                f"/api/v1/universities/{university['id']}/benefit-rules",
                 json={'olympiad_id': olympiad['id']},
             )
             return response
 
     responses = await asyncio.gather(http_request(), http_request())
     codes = sorted(response.status_code for response in responses)
-    assert codes == [201, 201], codes
+    assert codes == [201, 409], codes
 
 
 async def test_database_backend_enforces_row_locks():
-    """Бэкенд действительно умеет блокировки, на которых держится BVI-инвариант.
+    """Бэкенд действительно умеет блокировки, на которых держится инвариант правил.
 
-    ``request_bvi_link`` полагается на ``SELECT ... FOR UPDATE``: олимпиада не
-    может уйти в архив между проверкой и вставкой связи. Проверять это
+    ``create_rule`` полагается на ``SELECT ... FOR UPDATE``: олимпиада не
+    может уйти в архив между проверкой и вставкой правила. Проверять это
     «по документации» нельзя — на SQLite ``FOR UPDATE`` молча игнорируется, и
     инвариант «архивная олимпиада не получает новых заявок» тихо перестал бы
     работать. Тест проверяет поведение на живой базе: вторая транзакция обязана
@@ -117,7 +121,7 @@ async def test_database_backend_enforces_row_locks():
     from app.database.database import AsyncSessionLocal, engine
 
     assert engine.dialect.name == 'postgresql', (
-        'BVI-инварианты опираются на блокировки строк, поддерживаемые '
+        'Инварианты правил опираются на блокировки строк, поддерживаемые '
         'PostgreSQL; на текущем бэкенде они не гарантированы'
     )
 
@@ -873,27 +877,22 @@ async def test_manual_archive_cannot_override_rsosh_absent(client):
     assert state['archive_reason'] == 'RSOSH_ABSENT'
 
 
-async def test_manual_archive_keeps_its_bvi_history(client):
-    """Историческая связь ручной архивной олимпиады сохраняется.
+async def test_manual_archive_keeps_its_rule_history(client):
+    """Историческое правило ручной архивной олимпиады сохраняется.
 
-    Архив не отменяет того, что университет действительно давал БВИ, и новые
-    заявки за такую олимпиаду по-прежнему невозможны.
+    Архив не отменяет того, что университет действительно давал льготу, и новые
+    правила по такой олимпиаде по-прежнему невозможны.
     """
     await admin_client(client)
     university = await create_university(client, 'Университет истории БВИ')
     olympiad = await create_olympiad(client, 'Олимпиада для истории БВИ')
     await university_rep_client(client, university['id'])
-    link = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
+    rule = await client.post(
+        f"/api/v1/universities/{university['id']}/benefit-rules",
+        json={'olympiad_id': olympiad['id'], 'publish': True},
     )
-    assert link.status_code == 201
+    assert rule.status_code == 201, rule.text
     await admin_client(client)
-    confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/moderation",
-        json={'action': 'confirm'},
-    )
-    assert confirmed.status_code == 200
 
     await client.post(
         f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
@@ -916,7 +915,7 @@ async def test_manual_archive_keeps_its_bvi_history(client):
     page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
     assert page.status_code == 200
     rows = [row for row in page.json()['olympiads'] if row['id'] == olympiad['id']]
-    assert len(rows) == 1, 'историческая связь должна была сохраниться'
+    assert len(rows) == 1, 'историческое правило должно было сохраниться'
     assert rows[0]['is_historical'] is True
 
 

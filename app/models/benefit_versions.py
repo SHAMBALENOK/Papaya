@@ -27,9 +27,9 @@ class BenefitRuleVersion(Base):
     состояния. Откат не удаляет промежуточные версии, а создаёт новую версию на
     основе выбранной старой (``is_rollback``).
 
-    ``snapshot`` хранит полный снимок полей правила на момент изменения: вид
-    льготы, результат, предмет, программы, доп. требования, источник, срок
-    действия и статус проверки. Полный снимок, а не дельта, выбран намеренно:
+    ``snapshot`` хранит полный снимок полей правила на момент изменения: сезон,
+    профиль, вид льготы, результат, предмет, программы (идентификаторы и
+    названия), доп. требования, источник, документ, срок действия, статусы. Полный снимок, а не дельта, выбран намеренно:
     восстановление версии не должно зависеть от того, какие поля менялись в
     промежуточных версиях.
     """
@@ -37,9 +37,9 @@ class BenefitRuleVersion(Base):
     __tablename__ = 'benefit_rule_versions'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    link_id = Column(
+    rule_id = Column(
         UUID(as_uuid=True),
-        ForeignKey('university_olympiads.id', ondelete='CASCADE'),
+        ForeignKey('benefit_rules.id', ondelete='CASCADE'),
         nullable=False,
         index=True,
     )
@@ -61,4 +61,4 @@ class BenefitRuleVersion(Base):
     #: Создана ли версия откатом (а не обычным сохранением).
     is_rollback = Column(Boolean, nullable=False, default=False)
 
-    link = relationship('UniversityBvi', back_populates='versions')
+    rule = relationship('BenefitRule', back_populates='versions')

@@ -11,11 +11,12 @@ import logging
 import uuid
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app import database, schemas
-from app.core import deps
+from app.core import audit, deps
+from app.models.benefit_rules import BENEFIT_TYPES
 from app.routers.docs import document_file_response, document_has_local_file
 
 olympiads_page = APIRouter(
@@ -75,6 +76,7 @@ def _serialize(olympiad: dict) -> dict:
         'name': olympiad.get('name'),
         'description': olympiad.get('description'),
         'official_url': olympiad.get('official_url'),
+        'organizer': olympiad.get('organizer'),
         'preview_image': olympiad.get('preview_image'),
         'image': olympiad.get('image'),
         'status': olympiad.get('status'),
@@ -232,10 +234,11 @@ async def olympiad_source_file(olympiad_id: uuid.UUID):
 
 @olympiads_page.get(
     '/{olympiad_id}/universities',
-    response_model=schemas.bvi.BviUniversitiesResponse,
+    response_model=schemas.benefit_rules.UniversitiesWithRulesResponse,
     responses={
-        200: {'description': 'Университеты, дающие БВИ за эту олимпиаду'},
+        200: {'description': 'Университеты с правилами льгот по этой олимпиаде'},
         404: {'description': 'Olympiad not found'},
+        422: {'description': 'Недопустимое значение фильтра'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -243,37 +246,69 @@ async def olympiad_universities(
     olympiad_id: uuid.UUID,
     benefit_type: str | None = Query(default=None, description='Фильтр по виду льготы'),
     subject: str | None = Query(default=None, description='Фильтр по предмету'),
+    season_id: uuid.UUID | None = Query(default=None, description='Фильтр по сезону'),
+    profile_id: uuid.UUID | None = Query(default=None, description='Фильтр по профилю'),
     limit: int | None = Query(default=None, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    """Университеты, дающие БВИ за олимпиаду (обратная сторона связи).
+    """Университеты, дающие льготы за олимпиаду, вместе с правилами.
 
-    Публично видны только подтверждённые связи: заявка, ещё не одобренная
-    администратором, публичным фактом не является.
+    Публично видны только опубликованные и не отклонённые правила; черновики
+    публичным фактом не являются. Правило без сезона относится к олимпиаде в
+    целом и при фильтре по сезону не показывается.
 
-    Если олимпиада архивная, связи остаются в списке, но помечаются
-    ``is_historical``: университеты действительно давали БВИ, пока олимпиада
-    была в перечне РСОШ. Удалять их из-за архива нельзя — это стёрло бы
-    историю, и страница олимпиады выглядела бы «пустой», хотя информация о
-    льготе была.
+    Если олимпиада архивная, правила остаются в списке с ``is_historical``:
+    университеты действительно давали льготу, пока олимпиада была в перечне
+    РСОШ. Удалять их из-за архива нельзя — это стёрло бы историю.
     """
     try:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)
         if not olympiad:
             raise HTTPException(status_code=404, detail='Olympiad not found')
-        universities = await database.bvi.list_universities_for_olympiad(
-            olympiad_id,
+        if benefit_type is not None and benefit_type not in BENEFIT_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail='benefit_type must be one of ' + ', '.join(BENEFIT_TYPES),
+            )
+        filters = dict(
             benefit_type=benefit_type,
             subject=subject,
-            limit=limit,
-            offset=offset,
+            season_id=season_id,
+            profile_id=profile_id,
+            public_only=True,
         )
-        total = await database.bvi.count_universities_for_olympiad(
-            olympiad_id,
-            benefit_type=benefit_type,
-            subject=subject,
+        universities = await database.benefit_rules.list_universities_for_olympiad(
+            olympiad_id, limit=limit, offset=offset, **filters
+        )
+        total = await database.benefit_rules.count_universities_for_olympiad(
+            olympiad_id, **filters
         )
         return {'universities': universities, 'total': total}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@olympiads_page.get(
+    '/{olympiad_id}/benefit-facets',
+    response_model=schemas.benefit_rules.BenefitRuleFacets,
+    responses={
+        200: {'description': 'Значения фильтров по правилам олимпиады'},
+        404: {'description': 'Olympiad not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def olympiad_benefit_facets(olympiad_id: uuid.UUID):
+    """Виды льгот, предметы и сезоны, по которым есть опубликованные правила."""
+    try:
+        olympiad = await database.olympiads.get_olympiad(olympiad_id)
+        if not olympiad:
+            raise HTTPException(status_code=404, detail='Olympiad not found')
+        return await database.benefit_rules.rule_facets(
+            olympiad_id=olympiad_id, public_only=True
+        )
     except HTTPException:
         raise
     except Exception:
@@ -359,6 +394,7 @@ async def upsert_season(
             season = await database.seasons.upsert_season(
                 olympiad_id,
                 year=year,
+                label=body.label,
                 rsoh_level=body.rsoh_level,
                 state=body.state,
                 dates=body.dates,
@@ -398,6 +434,12 @@ async def archive_season(
         season = await database.seasons.archive_season(season_id)
         if not season or str(season.get('olympiad_id')) != str(olympiad_id):
             raise HTTPException(status_code=404, detail='Season not found')
+        await audit.audit(
+            'season_archive',
+            actor_id=current_user.get('id'),
+            target_type='olympiad_season',
+            target_id=season_id,
+        )
         return season
     except HTTPException:
         raise
@@ -442,6 +484,86 @@ async def add_season_profile(
                 detail='Профиль с таким названием уже есть в этом сезоне',
             )
         return profile
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@olympiads_page.put(
+    '/{olympiad_id}/seasons/{season_id}/profiles/{profile_id}',
+    response_model=schemas.seasons.ProfileItem,
+    responses={
+        200: {'description': 'Профиль обновлён'},
+        400: {'description': 'Пустое название'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Season or profile not found'},
+        409: {'description': 'Профиль с таким названием уже есть'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def edit_season_profile(
+    olympiad_id: uuid.UUID,
+    season_id: uuid.UUID,
+    profile_id: uuid.UUID,
+    body: schemas.seasons.ProfileUpdate,
+    current_user: deps.AdminUser = None,
+):
+    """Изменить профиль сезона (администратор)."""
+    try:
+        season = await database.seasons.get_season(season_id)
+        if not season or str(season.get('olympiad_id')) != str(olympiad_id):
+            raise HTTPException(status_code=404, detail='Season not found')
+        try:
+            profile = await database.seasons.edit_profile(
+                season_id,
+                profile_id,
+                **body.model_dump(exclude_unset=True),
+            )
+        except database.seasons.SeasonError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        if profile is None:
+            raise HTTPException(status_code=404, detail='Profile not found')
+        return profile
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@olympiads_page.delete(
+    '/{olympiad_id}/seasons/{season_id}/profiles/{profile_id}',
+    status_code=204,
+    responses={
+        204: {'description': 'Профиль удалён'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Season or profile not found'},
+        409: {'description': 'Профиль используется в правилах льгот'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def delete_season_profile(
+    olympiad_id: uuid.UUID,
+    season_id: uuid.UUID,
+    profile_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Удалить профиль сезона, если на него не ссылаются правила льгот."""
+    try:
+        season = await database.seasons.get_season(season_id)
+        if not season or str(season.get('olympiad_id')) != str(olympiad_id):
+            raise HTTPException(status_code=404, detail='Season not found')
+        try:
+            removed = await database.seasons.remove_profile(season_id, profile_id)
+        except database.seasons.SeasonError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        if not removed:
+            raise HTTPException(status_code=404, detail='Profile not found')
+        return Response(status_code=204)
     except HTTPException:
         raise
     except Exception:

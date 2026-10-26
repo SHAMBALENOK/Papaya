@@ -3,8 +3,8 @@
 Проверяются правила, которые легко нарушить «по пути», потому что каждое из
 них выглядит мелочью, а ломает состояние данных:
 
-- архивная олимпиада не принимает новых заявок БВИ, но сохраняет старые;
-- ``confirmedBy`` живёт ровно вместе с ``CONFIRMED``;
+- архивная олимпиада не принимает новых правил льгот, но сохраняет старые;
+- ``verified_at`` живёт ровно вместе с ``verified``;
 - назначить представителя можно только ``POST /admin/role/{user_id}``;
 - ссылки каталога — только ``http``/``https``;
 - последнего активного администратора нельзя заблокировать или понизить.
@@ -16,36 +16,35 @@ from tests.conftest import (
     admin_client,
     create_olympiad,
     create_university,
-    moderate_bvi,
     register_user,
     set_user_role,
     university_rep_client,
 )
 
 
-# ------------------------- Архивная олимпиада и БВИ -------------------------
+# ------------------------- Архивная олимпиада и правила льгот -------------------------
 
 
-async def _link(client, university_id, olympiad_id):
+async def _rule(client, university_id, olympiad_id, **fields):
     return await client.post(
-        f'/api/v1/universities/{university_id}/bvi',
-        json={'olympiad_id': olympiad_id},
+        f'/api/v1/universities/{university_id}/benefit-rules',
+        json={'olympiad_id': olympiad_id, 'publish': True, **fields},
     )
 
 
-async def test_rep_cannot_request_link_to_archived_olympiad(client):
-    """Архивная олимпиада — историческая запись, новых связей не получает.
+async def test_rep_cannot_create_rule_for_archived_olympiad(client):
+    """Архивная олимпиада — историческая запись, новых правил не получает.
 
-    Заявка БВИ означает «университет принимает поступление по этой олимпиаде
+    Правило означает «университет принимает поступление по этой олимпиаде
     сейчас». Для олимпиады, которой нет в актуальном перечне РСОШ, это неверно,
-    поэтому заявка отклоняется, а связь не создаётся.
+    поэтому запрос отклоняется, а правило не создаётся.
     """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада вне перечня')
     await university_rep_client(client, university['id'])
 
-    response = await _link(client, university['id'], olympiad['id'])
-    assert response.status_code == 201, 'до архива заявка должна проходить'
+    response = await _rule(client, university['id'], olympiad['id'])
+    assert response.status_code == 201, 'до архива правило должно создаваться'
 
     # Архивирует администратор, представитель на это не влияет.
     await admin_client(client)
@@ -55,44 +54,40 @@ async def test_rep_cannot_request_link_to_archived_olympiad(client):
     assert archived.status_code == 200
     assert archived.json()['status'] == 'ARCHIVED'
 
-    # Второй вуз пытается заявить связь с той же архивной олимпиадой.
+    # Второй вуз пытается завести правило по той же архивной олимпиаде.
     other = await create_university(client, 'Университет МФТИ')
     rep = await university_rep_client(client, other['id'])
     assert rep['id']
 
-    denied = await _link(client, other['id'], olympiad['id'])
+    denied = await _rule(client, other['id'], olympiad['id'])
     assert denied.status_code == 409
     assert 'архив' in denied.json()['detail'].lower()
 
-    # Новая связь не создалась: в очереди осталась только та, что была до архива.
+    # Новое правило не создалось: в реестре осталось только то, что было до архива.
     await admin_client(client)
-    queue = await client.get('/api/v1/admin/bvi')
+    queue = await client.get('/api/v1/admin/benefit-rules')
     assert queue.status_code == 200
-    links = queue.json()['links']
-    assert [row['university_id'] for row in links] == [university['id']]
-    assert other['id'] not in [row['university_id'] for row in links]
+    rules = queue.json()['rules']
+    assert [row['university_id'] for row in rules] == [university['id']]
 
 
-async def test_archived_olympiad_keeps_confirmed_link(client):
-    """Архив не отменяет подтверждённые связи — он меняет только актуальность.
+async def test_archived_olympiad_keeps_published_rule(client):
+    """Архив не отменяет опубликованные правила — он меняет только актуальность.
 
-    Университет действительно давал БВИ, пока олимпиада была в перечне.
+    Университет действительно давал льготу, пока олимпиада была в перечне.
     """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада с историей')
     await university_rep_client(client, university['id'])
-    assert (await _link(client, university['id'], olympiad['id'])).status_code == 201
+    assert (await _rule(client, university['id'], olympiad['id'])).status_code == 201
 
     await admin_client(client)
-    confirmed = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
-    assert confirmed.status_code == 200
-
     archived = await client.post(
         f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
     )
     assert archived.status_code == 200
 
-    # Подтверждённая связь видна с обеих сторон и после архива.
+    # Правило видно с обеих сторон и после архива.
     on_university = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
     assert on_university.status_code == 200
     ids = [row['id'] for row in on_university.json()['olympiads']]
@@ -109,149 +104,90 @@ async def test_unknown_olympiad_is_404_not_409(client):
     university = await create_university(client, 'Университет ИТМО')
     await university_rep_client(client, university['id'])
 
-    response = await _link(client, university['id'], str(uuid.uuid4()))
+    response = await _rule(client, university['id'], str(uuid.uuid4()))
     assert response.status_code == 404
 
 
-# ------------------------- confirmedBy и модерация -------------------------
+# ------------------------- Проверка и её автор -------------------------
 
 
-async def test_confirmed_by_lives_only_with_confirmed(client):
-    """Подтверждение и его автор существуют только вместе.
+async def test_verified_at_lives_only_with_verified(client):
+    """Отметка проверки и её время существуют только вместе.
 
-    ``PENDING`` означает «ещё никто не подтвердил», поэтому ``confirmedBy``
-    обязан быть пустым: иначе по записи нельзя понять, кто сейчас отвечает за
-    связь. Отзыв подтверждения удаляет связь целиком, а не возвращает её в
-    ``PENDING``, поэтому такой записи в модели не появляется.
+    ``unverified`` означает «ещё никто не проверил», поэтому ``verified_at``
+    обязан быть пустым; после отклонения или содержательной правки время
+    предыдущей проверки тоже не остаётся.
     """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада для модерации')
     await university_rep_client(client, university['id'])
 
-    created = await _link(client, university['id'], olympiad['id'])
+    created = await _rule(client, university['id'], olympiad['id'], source_url='https://itmo.ru/a')
     assert created.status_code == 201
-    assert created.json()['status'] == 'PENDING'
-    # Автор подтверждения — служебное поле модерации, в ответе представителю его
-    # нет. Проверяется в очереди администратора (см. ниже).
-    assert 'confirmedBy' not in created.json()
-
-    admin = await admin_client(client)
-    confirmed = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
-    assert confirmed.status_code == 200
-
-    queue = await client.get('/api/v1/admin/bvi')
-    link = queue.json()['links'][0]
-    assert link['status'] == 'CONFIRMED'
-    assert link['confirmedBy'] == admin['id']
-
-    # У неподтверждённой заявки автора подтверждения нет: иначе по записи нельзя
-    # было бы понять, кто сейчас отвечает за связь.
-    other = await create_university(client, 'Второй университет')
-    await university_rep_client(client, other['id'])
-    await _link(client, other['id'], olympiad['id'])
-    # Сессия клиента теперь у представителя: возвращаем админские права.
-    await admin_client(client)
-    admin_queue = await client.get('/api/v1/admin/bvi')
-    assert admin_queue.status_code == 200
-    pending = [
-        row for row in admin_queue.json()['links'] if row['status'] == 'PENDING'
-    ]
-    assert pending, 'заявка должна быть в очереди'
-    assert all(row['confirmedBy'] is None for row in pending)
-
-
-async def test_revoke_removes_link_and_its_confirmation(client):
-    """Отзыв подтверждения удаляет связь: автора подтверждения не остаётся."""
-    university = await create_university(client, 'Университет ИТМО')
-    olympiad = await create_olympiad(client, 'Олимпиада для отзыва')
-    await university_rep_client(client, university['id'])
-    await _link(client, university['id'], olympiad['id'])
+    rule = created.json()
+    assert rule['verification_status'] == 'unverified'
+    assert rule['verified_at'] is None
 
     await admin_client(client)
-    await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
-    revoked = await moderate_bvi(client, university['id'], olympiad['id'], 'revoke')
-    assert revoked.status_code == 200
-    assert revoked.json()['result'] == 'removed'
+    url = f"/api/v1/universities/{university['id']}/benefit-rules/{rule['id']}"
+    uploaded = await client.post(
+        url + '/document',
+        files={'file': ('order.pdf', b'%PDF-1.4 order', 'application/pdf')},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    verified = await client.post(url + '/verification', json={'status': 'verified'})
+    assert verified.status_code == 200, verified.text
+    assert verified.json()['verified_at'] is not None
 
-    queue = await client.get('/api/v1/admin/bvi')
-    assert queue.json()['links'] == []
-
-
-async def test_reject_removes_pending_link(client):
-    """Отклонение заявки удаляет связь целиком."""
-    university = await create_university(client, 'Университет ИТМО')
-    olympiad = await create_olympiad(client, 'Олимпиада для отклонения')
-    await university_rep_client(client, university['id'])
-    await _link(client, university['id'], olympiad['id'])
-
-    await admin_client(client)
-    rejected = await moderate_bvi(client, university['id'], olympiad['id'], 'reject')
+    rejected = await client.post(
+        url + '/verification', json={'status': 'rejected', 'note': 'не тот приказ'}
+    )
     assert rejected.status_code == 200
-    assert rejected.json()['result'] == 'removed'
+    assert rejected.json()['verified_at'] is None
+    assert rejected.json()['verification_note'] == 'не тот приказ'
 
-    queue = await client.get('/api/v1/admin/bvi')
-    assert queue.json()['links'] == []
-
-
-async def test_repeated_confirmation_is_rejected(client):
-    """Подтверждённую связь нельзя подтвердить повторно: это 409, а не no-op."""
-    university = await create_university(client, 'Университет ИТМО')
-    olympiad = await create_olympiad(client, 'Олимпиада для повтора')
-    await university_rep_client(client, university['id'])
-    await _link(client, university['id'], olympiad['id'])
-
-    await admin_client(client)
-    first = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
-    assert first.status_code == 200
-
-    again = await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
-    assert again.status_code == 409
-
-    # Связь осталась подтверждённой, а не исчезла и не «переподтвердилась».
-    queue = await client.get('/api/v1/admin/bvi')
-    assert queue.json()['links'][0]['status'] == 'CONFIRMED'
+    reset = await client.post(url + '/verification', json={'status': 'unverified'})
+    assert reset.status_code == 200
+    assert reset.json()['verified_at'] is None
+    assert reset.json()['verification_note'] is None
 
 
-# ------------------------- Исторические связи -------------------------
+# ------------------------- Исторические правила -------------------------
 
 
-async def test_archived_link_is_marked_historical(client):
-    """Подтверждённая связь с архивной олимпиадой помечается исторической.
+async def test_archived_rule_is_marked_historical(client):
+    """Правило по архивной олимпиаде помечается историческим.
 
-    Университет давал БВИ, пока олимпиада была в перечне. Связь сохраняется,
-    но интерфейс должен показать, что это история, а не действующая льгота.
+    Университет давал льготу, пока олимпиада была в перечне. Правило
+    сохраняется, но интерфейс должен показать, что это история.
     """
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада вне перечня')
     await university_rep_client(client, university['id'])
-    await _link(client, university['id'], olympiad['id'])
+    await _rule(client, university['id'], olympiad['id'])
 
     await admin_client(client)
-    await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
     await client.post(f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true")
 
     client.cookies.clear()
     page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
     assert page.status_code == 200
     item = page.json()['olympiads'][0]
-    assert item['bvi_status'] == 'CONFIRMED'
     assert item['status'] == 'ARCHIVED'
     assert item['is_historical'] is True
+    assert item['rules'][0]['is_historical'] is True
 
     back = await client.get(f"/api/v1/olympiads/{olympiad['id']}/universities")
     assert back.status_code == 200
     assert back.json()['universities'][0]['is_historical'] is True
 
 
-async def test_current_link_is_not_historical(client):
-    """Актуальная олимпиада с подтверждённой связью — не историческая."""
+async def test_current_rule_is_not_historical(client):
+    """Актуальная олимпиада с опубликованным правилом — не историческая."""
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Актуальная олимпиада')
     await university_rep_client(client, university['id'])
-    await _link(client, university['id'], olympiad['id'])
-
-    await admin_client(client)
-    await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
+    await _rule(client, university['id'], olympiad['id'])
 
     client.cookies.clear()
     page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
@@ -274,8 +210,8 @@ async def test_public_olympiad_has_no_technical_fields(client):
                   'archive_reason', 'source_url'):
         assert field not in body, f'{field} не должен попадать в публичный ответ'
     assert set(body) == {
-        'id', 'name', 'description', 'official_url', 'preview_image', 'image',
-        'status', 'is_archived',
+        'id', 'name', 'description', 'official_url', 'organizer', 'preview_image',
+        'image', 'status', 'is_archived',
     }
     # Архив виден по статусу, а не по техническому enum-значению.
     assert body['status'] == 'ARCHIVED'

@@ -144,7 +144,8 @@ async def clean_state():
     async with AsyncSessionLocal() as session:
         await session.execute(
             text(
-                'TRUNCATE TABLE university_olympiads, universities, olympiads, '
+                'TRUNCATE TABLE benefit_rules, benefit_rule_programs, '
+                'audit_events, catalog_requests, universities, olympiads, '
                 'docs, users CASCADE'
             )
         )
@@ -306,21 +307,28 @@ async def set_user_role(
     )
 
 
-async def moderate_bvi(
+async def create_benefit_rule(
     test_client: AsyncClient,
     university_id: str,
     olympiad_id: str,
-    action: str,
-):
-    """Административное действие над заявкой БВИ.
+    *,
+    publish: bool = True,
+    **fields,
+) -> dict:
+    """Создать правило льготы от имени текущего авторизованного клиента.
 
-    ``action`` — ``confirm`` | ``reject`` | ``revoke``. Отдельного «снятия
-    подтверждения в PENDING» в модели нет: отзыв подтверждения удаляет связь.
+    По умолчанию правило сразу публикуется (``publish=True``) — так удобнее
+    проверять публичный каталог. Остальные поля (``benefit_type``, ``subject``,
+    ``season_id``, ``program_ids`` …) передаются как есть.
     """
-    return await test_client.post(
-        f'/api/v1/universities/{university_id}/bvi/{olympiad_id}/moderation',
-        json={'action': action},
+    payload = {'olympiad_id': olympiad_id, 'publish': publish, **fields}
+    payload.setdefault('benefit_type', 'BVI')
+    response = await test_client.post(
+        f'/api/v1/universities/{university_id}/benefit-rules',
+        json=payload,
     )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 async def upload_document(

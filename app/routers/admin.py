@@ -4,7 +4,9 @@
 
 - пользователи: блокировка, роли, привязка представителя к университету;
 - олимпиады: архивирование/возврат из архива, ручное создание и правка;
-- заявки БВИ: подтверждение и снятие связей университет ↔ олимпиада.
+- правила льгот: реестр всех правил, очередь проверки (сама проверка —
+  ``POST /universities/{id}/benefit-rules/{rule_id}/verification``);
+- журнал аудита и запросы представителей о пополнении каталога.
 
 Все маршруты требуют роль ``ADMIN``: проверка общая и живёт в
 ``app.core.deps.require_admin``.
@@ -76,35 +78,22 @@ class AdminOlympiadsResponse(BaseModel):
     total: int = 0
 
 
-class AdminBviListItem(BaseModel):
+class AuditEventItem(BaseModel):
     id: str | None = None
-    university_id: str | None = None
-    university_name: str | None = None
-    olympiad_id: str | None = None
-    olympiad_name: str | None = None
-    status: str | None = None
-    # Авторы решения: кто заявил и кто подтвердил. Без этого очередь модерации
-    # не отвечает на вопрос «это точно тот вуз? и кто это подтвердил?».
-    createdBy: str | None = None
-    confirmedBy: str | None = None
-    # Актуальна ли олимпиада: по архивной новая заявка невозможна, и
-    # администратор должен видеть это до нажатия кнопок.
-    olympiad_status: str | None = None
-    # Поля правила льготы и проверки: администратор видит вид льготы и статус
-    # проверки прямо в очереди, без открытия карточки.
-    benefit_type: str | None = None
-    subject: str | None = None
-    verification_status: str | None = None
-    university_confirmed: bool = False
-    verified_by: str | None = None
-    verified_at: str | None = None
+    action: str | None = None
+    actor_id: str | None = None
+    actor_email: str | None = None
+    actor_name: str | None = None
+    target_type: str | None = None
+    target_id: str | None = None
+    details: dict | None = None
+    ip: str | None = None
+    request_id: str | None = None
     createdAt: str | None = None
 
 
-class AdminBviResponse(BaseModel):
-    links: List[AdminBviListItem]
-    # Всего связей под фильтром — сколько бы ни вернула страница. Нужно панели,
-    # чтобы отличить «связей нет» от «показана только первая страница».
+class AuditEventsResponse(BaseModel):
+    events: List[AuditEventItem]
     total: int = 0
 
 
@@ -240,48 +229,171 @@ async def list_olympiads(
 
 
 @admin_page.get(
-    '/bvi',
-    response_model=AdminBviResponse,
+    '/benefit-rules',
+    response_model=schemas.benefit_rules.BenefitRulesResponse,
     responses={
-        200: {'description': 'Заявки и подтверждённые связи БВИ'},
+        200: {'description': 'Все правила льгот с фильтрами'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        422: {'description': 'Недопустимое значение фильтра'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def list_all_benefit_rules(
+    status: str | None = Query(default=None, description='draft, published или archived'),
+    verification_status: str | None = Query(default=None),
+    benefit_type: str | None = Query(default=None),
+    university_id: uuid.UUID | None = Query(default=None),
+    olympiad_id: uuid.UUID | None = Query(default=None),
+    search: str | None = Query(default=None, description='Поиск по вузу или олимпиаде'),
+    order: str = Query(default='recent', description='recent или name'),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    """Очередь модерации и реестр правил льгот (ТЗ §8.1, §9).
+
+    Администратор видит все правила во всех состояниях: черновики
+    представителей и импорта, опубликованные непроверенные (очередь проверки),
+    проверенные, отклонённые и архив. Страница ограничена ``limit``/``offset``,
+    названия вуза и олимпиады подтягиваются JOIN-ом.
+    """
+    try:
+        if status is not None and status not in schemas.benefit_rules.RULE_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail='status must be one of ' + ', '.join(schemas.benefit_rules.RULE_STATUSES),
+            )
+        if (
+            verification_status is not None
+            and verification_status not in schemas.benefit_rules.VERIFICATION_STATUSES
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail='verification_status must be one of '
+                + ', '.join(schemas.benefit_rules.VERIFICATION_STATUSES),
+            )
+        if benefit_type is not None and benefit_type not in schemas.benefit_rules.BENEFIT_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail='benefit_type must be one of '
+                + ', '.join(schemas.benefit_rules.BENEFIT_TYPES),
+            )
+        filters = dict(
+            statuses=[status] if status else None,
+            verification_status=verification_status,
+            benefit_type=benefit_type,
+            university_id=university_id,
+            olympiad_id=olympiad_id,
+            search=search,
+            public_only=False,
+        )
+        rules = await database.benefit_rules.list_rules(
+            limit=limit, offset=offset, order=order, **filters
+        )
+        total = await database.benefit_rules.count_rules(**filters)
+        return {'rules': rules, 'total': total}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.get(
+    '/audit',
+    response_model=AuditEventsResponse,
+    responses={
+        200: {'description': 'Журнал административных событий'},
         401: {'description': 'Access token missing'},
         403: {'description': 'Admin role required'},
         500: {'description': 'Internal server error'},
     },
 )
-async def list_bvi_links(
-    status: str | None = None,
-    verification_status: str | None = None,
-    benefit_type: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
+async def list_audit_events(
+    action: str | None = Query(default=None),
+    actor_id: uuid.UUID | None = Query(default=None),
+    target_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     current_user: deps.AdminUser = None,
 ):
-    """Очередь модерации: заявки университетов на связи БВИ.
-
-    Для каждой связи видно авторов решения (кто заявил, кто подтвердил) и
-    актуальность олимпиады: по архивной заявку уже нельзя подать, но
-    подтверждение администратора по ней может быть и историческим, и
-    осмысленным.
-
-    Страница ограничена ``limit``/``offset``, а названия вуза и олимпиады
-    подтягиваются одним JOIN-ом: очередь не должна замедляться линейно с ростом
-    каталога. ``total`` отвечает, сколько связей есть под фильтром всего.
-    """
+    """Персистентный аудит (ТЗ §10): кто, что и когда сделал."""
     try:
-        links = await database.bvi.list_links_enriched(
-            status=status,
-            verification_status=verification_status,
-            benefit_type=benefit_type,
-            limit=limit,
-            offset=offset,
+        events = await database.audit.list_events(
+            action=action, actor_id=actor_id, target_id=target_id, limit=limit, offset=offset
         )
-        total = await database.bvi.count_links(
-            status=status,
-            verification_status=verification_status,
-            benefit_type=benefit_type,
+        total = await database.audit.count_events(
+            action=action, actor_id=actor_id, target_id=target_id
         )
-        return {'links': links, 'total': total}
+        return {'events': events, 'total': total}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.get(
+    '/catalog-requests',
+    response_model=schemas.catalog_requests.CatalogRequestsResponse,
+    responses={
+        200: {'description': 'Запросы представителей о пополнении каталога'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def list_catalog_requests(
+    status: str | None = Query(default='open'),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    """Запросы «добавьте олимпиаду/сезон/профиль» — по умолчанию открытые."""
+    try:
+        effective = None if status in (None, '', 'all') else status
+        requests = await database.catalog_requests.list_requests(
+            status=effective, limit=limit, offset=offset
+        )
+        total = await database.catalog_requests.count_requests(status=effective)
+        return {'requests': requests, 'total': total}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.post(
+    '/catalog-requests/{request_id}/resolve',
+    response_model=schemas.catalog_requests.CatalogRequestItem,
+    responses={
+        200: {'description': 'Запрос закрыт или снова открыт'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Request not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def resolve_catalog_request(
+    request_id: uuid.UUID,
+    body: schemas.catalog_requests.CatalogRequestResolve,
+    current_user: deps.AdminUser = None,
+):
+    """Закрыть запрос (выполнен/отклонён) с комментарием для представителя."""
+    try:
+        resolved = await database.catalog_requests.resolve_request(
+            request_id, status=body.status, note=body.note, admin_id=current_user.get('id')
+        )
+        if resolved is None:
+            raise HTTPException(status_code=404, detail='Request not found')
+        await audit.audit(
+            'catalog_request_' + body.status,
+            actor_id=current_user.get('id'),
+            target_type='catalog_request',
+            target_id=request_id,
+            note=body.note,
+        )
+        return resolved
+    except HTTPException:
+        raise
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -339,9 +451,10 @@ async def ban(
             _raise_admin_guard_error(updated, 'заблокировать')
             raise HTTPException(status_code=404, detail='User not found')
         await safe_cache_write(cache_user_after_write(r, updated))
-        audit.log_admin_action(
+        await audit.audit(
             'ban',
             actor_id=current_user.get('id'),
+            target_type='user',
             target_id=user_id,
             ip=rate_limit.client_ip(request),
         )
@@ -377,9 +490,10 @@ async def unban(
             _raise_admin_guard_error(updated, 'разблокировать')
             raise HTTPException(status_code=404, detail='User not found')
         await safe_cache_write(cache_user_after_write(r, updated))
-        audit.log_admin_action(
+        await audit.audit(
             'unban',
             actor_id=current_user.get('id'),
+            target_type='user',
             target_id=user_id,
             ip=rate_limit.client_ip(request),
         )
@@ -462,7 +576,7 @@ async def _apply_role(
     if not updated:
         raise HTTPException(status_code=404, detail='User not found')
     await safe_cache_write(cache_user_after_write(r, updated))
-    audit.log_role_change(
+    await audit.audit_role_change(
         actor_id=actor_id,
         target_id=user_id,
         old_role=before.get('role'),
@@ -582,6 +696,12 @@ async def archive_olympiad(
 
         if not updated:
             raise HTTPException(status_code=404, detail='Olympiad not found')
+        await audit.audit(
+            'olympiad_archive' if archived else 'olympiad_restore',
+            actor_id=current_user.get('id'),
+            target_type='olympiad',
+            target_id=olympiad_id,
+        )
         return updated
     except HTTPException:
         raise

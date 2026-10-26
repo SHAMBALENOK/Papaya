@@ -15,7 +15,7 @@
     GET  /api/v1/imports/university            — список прогонов приказов
     GET  /api/v1/imports/university/{id}       — статус прогона
     GET  /api/v1/imports/university/{id}/preview  — строки и распознанный вуз
-    POST /api/v1/imports/university/{id}/confirm  — записать заявки БВИ
+    POST /api/v1/imports/university/{id}/confirm  — записать черновики правил
     POST /api/v1/imports/university/{id}/reject   — отклонить результаты
 
 Прогон импорта — это обработка конкретного документа, поэтому идентификатор
@@ -34,7 +34,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app import database
-from app.core import deps
+from app.core import audit, deps
 from app.rsosh import persist, processor, states
 from app.rsosh.types import RsoshConflictError, RsoshError
 from app.university import persist as university_persist
@@ -480,10 +480,10 @@ async def confirm_university_import(
     selection: UniversitySelectionRequest | None = None,
     current_user: deps.AdminUser = None,
 ):
-    """Применить импорт приказа: создать заявки БВИ (``PENDING``).
+    """Применить импорт приказа: создать черновики правил льгот.
 
-    Олимпиады каталога не создаются и не изменяются, связи не подтверждаются:
-    их подтверждает модератор отдельным действием. Тело запроса не задано —
+    Олимпиады каталога не создаются и не изменяются, правила не публикуются и
+    не проверяются: это делает человек отдельным действием. Тело запроса не задано —
     применяется сохранённый выбор администратора.
     """
     try:
@@ -501,6 +501,13 @@ async def confirm_university_import(
             import_id,
             selection=chosen.model_dump(),
             university_id=chosen.university_id,
+        )
+        await audit.audit(
+            'university_import_confirm',
+            actor_id=current_user.get('id'),
+            target_type='import',
+            target_id=import_id,
+            result=result['result'],
         )
         return {
             'import': _university_view(result['document']),
@@ -536,6 +543,12 @@ async def reject_university_import(
     try:
         await _university_doc(import_id)
         rejected = await university_persist.reject_import(import_id)
+        await audit.audit(
+            'university_import_reject',
+            actor_id=current_user.get('id'),
+            target_type='import',
+            target_id=import_id,
+        )
         return _university_view(rejected)
     except UniversityConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -731,6 +744,13 @@ async def confirm(
             archive_missing=chosen.archive_missing,
         )
         doc = result['document']
+        await audit.audit(
+            'rsosh_import_confirm',
+            actor_id=current_user.get('id'),
+            target_type='import',
+            target_id=import_id,
+            result=result['result'],
+        )
         return {
             'import': _import_view(doc),
             'result': result['result'],
@@ -780,6 +800,12 @@ async def reject(
     try:
         await _rsosh_doc(import_id)
         rejected = await persist.reject_confirmed_import(import_id)
+        await audit.audit(
+            'rsosh_import_reject',
+            actor_id=current_user.get('id'),
+            target_type='import',
+            target_id=import_id,
+        )
         return _import_view(rejected)
     except RsoshConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

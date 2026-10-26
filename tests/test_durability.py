@@ -78,26 +78,19 @@ async def test_archived_olympiad_is_not_in_public_catalog(client):
     assert olympiad['id'] in [row['id'] for row in with_archived.json()['olympiads']]
 
 
-async def test_import_keeps_confirmed_bvi_links(client):
-    """Импорт РСОШ не трогает связи БВИ: он меняет только актуальность.
+async def test_import_keeps_published_benefit_rules(client):
+    """Импорт РСОШ не трогает правила льгот: он меняет только актуальность.
 
-    Если бы импорт удалял или обнулял связи, подтверждённая льгота исчезла бы
+    Если бы импорт удалял или обнулял правила, опубликованная льгота исчезла бы
     из-за обновления перечня — а это неверно: университет никуда не делся.
     """
-    from tests.conftest import moderate_bvi, university_rep_client
+    from tests.conftest import create_benefit_rule, university_rep_client
 
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада с БВИ')
     await university_rep_client(client, university['id'])
-    created = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
-    )
-    assert created.status_code == 201
+    await create_benefit_rule(client, university['id'], olympiad['id'])
     await admin_client(client)
-    assert (
-        await moderate_bvi(client, university['id'], olympiad['id'], 'confirm')
-    ).status_code == 200
 
     # Повторный импорт другого документа РСОШ: олимпиады и связи на месте.
     from tests.conftest import run_import, upload_document
@@ -114,7 +107,7 @@ async def test_import_keeps_confirmed_bvi_links(client):
     page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
     assert page.status_code == 200
     ids = [row['id'] for row in page.json()['olympiads']]
-    assert olympiad['id'] in ids, 'импорт не должен убирать подтверждённые связи'
+    assert olympiad['id'] in ids, 'импорт не должен убирать опубликованные правила'
 
     detail = await client.get(f"/api/v1/universities/{university['id']}")
     assert detail.status_code == 200, 'импорт не должен удалять университет'
@@ -251,46 +244,43 @@ async def test_missing_user_is_not_reported_as_last_admin(client):
 # ------------------------- Повторная заявка и обходы -------------------------
 
 
-async def test_repeated_request_for_archived_olympiad_still_rejected(client):
-    """Повторная заявка не обходит запрет на архивную олимпиаду.
+async def test_repeated_rule_for_archived_olympiad_still_rejected(client):
+    """Повторный запрос не обходит запрет на архивную олимпиаду.
 
-    Заявка идемпотентна: для актуальной олимпиады повтор возвращает существующую
-    связь. Но для архивной проверка актуальности стоит до обращения к данным, и
-    повтор тоже отклоняется — иначе запрет обходился бы двумя кликами.
+    Для актуальной олимпиады повтор с теми же условиями — 409 «дубликат». Для
+    архивной проверка актуальности стоит до обращения к данным, и повтор тоже
+    отклоняется — иначе запрет обходился бы двумя кликами.
     """
-    from tests.conftest import moderate_bvi, university_rep_client
+    from tests.conftest import create_benefit_rule, university_rep_client
 
     university = await create_university(client, 'Университет ИТМО')
     olympiad = await create_olympiad(client, 'Олимпиада вне перечня')
     await university_rep_client(client, university['id'])
-    assert (
-        await client.post(
-            f"/api/v1/universities/{university['id']}/bvi",
-            json={'olympiad_id': olympiad['id']},
-        )
-    ).status_code == 201
+    await create_benefit_rule(client, university['id'], olympiad['id'])
 
     await admin_client(client)
     await client.post(f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true")
 
-    # Повтор тоже отказ, хотя связь уже есть: ответ «201 Created» означал бы,
-    # что заявку приняли, а олимпиада в архиве. Существующая связь при этом
-    # остаётся на месте — её видно в кабинете и в списках как историческая.
+    # Повтор тоже отказ, хотя правило уже есть: ответ «201 Created» означал бы,
+    # что правило приняли, а олимпиада в архиве. Существующее правило при этом
+    # остаётся на месте — его видно в кабинете и в списках как историческое.
+    await university_rep_client(client, university['id'])
     for _ in range(2):
         repeat = await client.post(
-            f"/api/v1/universities/{university['id']}/bvi",
-            json={'olympiad_id': olympiad['id']},
+            f"/api/v1/universities/{university['id']}/benefit-rules",
+            json={'olympiad_id': olympiad['id'], 'subject': 'Другой предмет'},
         )
         assert repeat.status_code == 409, repeat.text
 
-    admin_queue = await client.get('/api/v1/admin/bvi')
-    assert len(admin_queue.json()['links']) == 1, 'существующая связь не тронута'
+    await admin_client(client)
+    registry = await client.get('/api/v1/admin/benefit-rules')
+    assert registry.json()['total'] == 1, 'существующее правило не тронуто'
 
-    # И администратор не может завести новую связь с архивной олимпиадой:
+    # И администратор не может завести новое правило по архивной олимпиаде:
     # иначе запрет обходился бы ролью.
     admin_request = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
+        f"/api/v1/universities/{university['id']}/benefit-rules",
+        json={'olympiad_id': olympiad['id'], 'subject': 'Ещё один'},
     )
     assert admin_request.status_code == 409
 

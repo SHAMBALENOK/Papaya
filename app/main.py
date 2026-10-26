@@ -19,6 +19,7 @@ from app.routers import (
     admin,
     applications,
     auth,
+    benefit_rules,
     docs,
     health,
     imports,
@@ -51,6 +52,7 @@ app.include_router(user.user_page, prefix='/api/v1')
 app.include_router(auth.auth_page, prefix='/api/v1')
 app.include_router(universities.universities_page, prefix='/api/v1')
 app.include_router(olympiads.olympiads_page, prefix='/api/v1')
+app.include_router(benefit_rules.benefit_rules_page, prefix='/api/v1')
 app.include_router(docs.docs_page, prefix='/api/v1')
 app.include_router(imports.imports_page, prefix='/api/v1')
 app.include_router(search.search_page, prefix='/api/v1')

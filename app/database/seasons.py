@@ -100,6 +100,7 @@ async def upsert_season(
     olympiad_id,
     *,
     year: int,
+    label: str | None = None,
     rsoh_level: str | None = None,
     state: str = 'unknown',
     dates: dict | None = None,
@@ -132,6 +133,7 @@ async def upsert_season(
             season = OlympiadSeason(
                 olympiad_id=olympiad_uuid,
                 year=year,
+                label=(label or '').strip() or None,
                 rsoh_level=rsoh_level,
                 state=state,
                 dates=dates,
@@ -140,6 +142,8 @@ async def upsert_season(
             )
             session.add(season)
         else:
+            if label is not None:
+                season.label = label.strip() or None
             if rsoh_level is not None:
                 season.rsoh_level = rsoh_level
             season.state = state
@@ -219,7 +223,56 @@ async def add_profile(
         return profile_to_dict(profile)
 
 
+async def edit_profile(
+    season_id,
+    profile_id,
+    *,
+    name: str | None = None,
+    subject: str | None = None,
+    description: str | None = None,
+) -> dict | None:
+    """Изменить профиль сезона; дубликат названия внутри сезона → ``SeasonError``."""
+    async with AsyncSessionLocal() as session:
+        profile = (
+            await session.execute(
+                select(OlympiadProfile).where(
+                    OlympiadProfile.id == _as_uuid(profile_id),
+                    OlympiadProfile.season_id == _as_uuid(season_id),
+                )
+            )
+        ).scalar_one_or_none()
+        if profile is None:
+            return None
+        if name is not None:
+            cleaned = name.strip()
+            name_norm = normalize_name(cleaned)
+            if not name_norm:
+                raise SeasonError('Название профиля не может быть пустым', status_code=400)
+            profile.name = cleaned
+            profile.name_norm = name_norm
+        if subject is not None:
+            profile.subject = subject.strip() or None
+        if description is not None:
+            profile.description = description.strip() or None
+        profile.updatedAt = datetime.now(timezone.utc)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            raise SeasonError(
+                'Профиль с таким названием уже есть в этом сезоне', status_code=409
+            )
+        await session.refresh(profile)
+        return profile_to_dict(profile)
+
+
 async def remove_profile(season_id, profile_id) -> bool:
+    """Удалить профиль сезона.
+
+    Профиль, на который ссылаются правила льгот, удалить нельзя (внешний ключ
+    ``benefit_rules.profile_id``): сначала правила нужно перевести на другой
+    профиль. Иначе правило молча потеряло бы свою область действия.
+    """
     async with AsyncSessionLocal() as session:
         profile = (
             await session.execute(
@@ -232,5 +285,12 @@ async def remove_profile(season_id, profile_id) -> bool:
         if profile is None:
             return False
         await session.delete(profile)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            raise SeasonError(
+                'Профиль используется в правилах льгот: сначала уберите его из правил',
+                status_code=409,
+            )
         return True

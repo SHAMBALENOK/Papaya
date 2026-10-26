@@ -1,26 +1,29 @@
-"""Каталог университетов и управление связями БВИ.
+"""Каталог университетов, программы и правила льгот.
 
 Сценарий Papaya: школьник открывает каталог, находит свой университет и видит
-олимпиады, дающие БВИ. Поэтому чтение каталога публично (регистрация не
+олимпиады с условиями льгот. Поэтому чтение каталога публично (регистрация не
 нужна), а запись каталога — только у администратора. Университеты создаёт
 администратор: РСОШ — источник каталога **олимпиад**, а не университетов.
 
-Представитель университета (``EDITOR`` + ``university_id``) управляет связями
-**своего** университета: выбирает существующую олимпиаду из каталога и
-заявляет, что вуз даёт за неё БВИ. Новую олимпиаду он не создаёт, а
-подтверждённую связь не может убрать сам — это делает администратор.
+Представитель университета (``EDITOR`` + ``university_id``) ведёт правила
+льгот и программы **своего** университета: создаёт и правит правила,
+загружает документы, публикует, смотрит историю и восстанавливает версии.
+Новую олимпиаду, сезон или профиль он не создаёт (для этого есть запрос
+администратору), проверку Papaya не выставляет.
 """
 
 import logging
 import uuid
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from app import database, schemas
-from app.core import audit, deps
-from app.database.bvi import BENEFIT_TYPES, VERIFICATION_STATUSES
+from app.core import audit, deps, rate_limit
+from app.database.users import ROLE_ADMIN
+from app.models.benefit_rules import BENEFIT_TYPES, VERIFICATION_STATUSES
+from app.routers.docs import document_file_response, store_uploaded_document
 
 universities_page = APIRouter(
     prefix='/universities',
@@ -127,7 +130,8 @@ async def university_programs(university_id: uuid.UUID):
     """Образовательные программы университета (ТЗ §4.1).
 
     Список публичный: по нему видно, на какие направления вуз принимает и
-    в каких областях действуют его льготы.
+    в каких областях действуют его льготы. У каждой программы — число правил,
+    где она используется: такую программу нельзя удалить, не убрав из правил.
     """
     try:
         university = await database.universities.get_university(university_id)
@@ -150,6 +154,7 @@ async def university_programs(university_id: uuid.UUID):
         401: {'description': 'Access token missing'},
         403: {'description': 'You can only manage your own university'},
         404: {'description': 'University not found'},
+        409: {'description': 'Часть программ используется в правилах и не удалена'},
         500: {'description': 'Internal server error'},
     },
 )
@@ -161,15 +166,19 @@ async def update_university_programs(
     """Заменить набор образовательных программ (ТЗ §4.1).
 
     Набор задаётся целиком. Право есть у представителя своего вуза и у
-    администратора; чужие программы менять нельзя.
+    администратора; чужие программы менять нельзя. Программы, используемые в
+    правилах льгот, не удаляются — ответ 409 перечисляет их.
     """
     try:
         university = await database.universities.get_university(university_id)
         if not university:
             raise HTTPException(status_code=404, detail='University not found')
-        programs = await database.programs.replace_programs(
-            university_id, body.programs
-        )
+        try:
+            programs = await database.programs.replace_programs(
+                university_id, body.programs
+            )
+        except database.programs.ProgramError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         return {'programs': programs, 'total': len(programs)}
     except HTTPException:
         raise
@@ -178,72 +187,183 @@ async def update_university_programs(
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
+@universities_page.post(
+    '/{university_id}/programs',
+    response_model=schemas.programs.UniversityProgramItem,
+    status_code=201,
+    responses={
+        201: {'description': 'Программа добавлена'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        404: {'description': 'University not found'},
+        409: {'description': 'Программа с таким названием уже есть'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def add_university_program(
+    university_id: uuid.UUID,
+    body: schemas.programs.UniversityProgramCreate,
+    current_user: deps.ManageUniversity = None,
+):
+    """Добавить одну программу (из формы правила: «новая программа»)."""
+    try:
+        university = await database.universities.get_university(university_id)
+        if not university:
+            raise HTTPException(status_code=404, detail='University not found')
+        program = await database.programs.add_program(
+            university_id, body.name, body.description
+        )
+        if program is None:
+            raise HTTPException(
+                status_code=409, detail='Программа с таким названием уже есть'
+            )
+        return program
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.delete(
+    '/{university_id}/programs/{program_id}',
+    status_code=204,
+    responses={
+        204: {'description': 'Программа удалена'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        404: {'description': 'Программа не найдена'},
+        409: {'description': 'Программа используется в правилах льгот'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def delete_university_program(
+    university_id: uuid.UUID,
+    program_id: uuid.UUID,
+    current_user: deps.ManageUniversity = None,
+):
+    """Удалить программу, если на неё не ссылаются правила льгот."""
+    try:
+        try:
+            removed = await database.programs.remove_program(university_id, program_id)
+        except database.programs.ProgramError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        if not removed:
+            raise HTTPException(status_code=404, detail='Program not found')
+        return Response(status_code=204)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+# --- Видимость правил: публично — только опубликованные и не отклонённые -----
+
+
+def _rule_scope(current_user, university_id, include_drafts: bool) -> dict:
+    """Фильтры видимости для списков правил.
+
+    Гость и обычный пользователь видят опубликованные правила без отклонённых.
+    Черновики и архив (``include_drafts=true``) — представителю своего вуза и
+    администратору; чужому — 403, а не пустой список, чтобы не маскировать
+    ошибку прав.
+    """
+    if not include_drafts:
+        return {'public_only': True}
+    if not current_user:
+        raise HTTPException(
+            status_code=401, detail='Access token required to view drafts'
+        )
+    if not deps.can_manage_university(current_user, university_id):
+        raise HTTPException(
+            status_code=403,
+            detail='You can only view drafts of your own university',
+        )
+    return {'public_only': False}
+
+
+def _parse_statuses(raw: str | None) -> list[str] | None:
+    if not raw:
+        return None
+    values = [item.strip() for item in raw.split(',') if item.strip()]
+    for value in values:
+        if value not in schemas.benefit_rules.RULE_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail='status must be one of '
+                + ', '.join(schemas.benefit_rules.RULE_STATUSES),
+            )
+    return values or None
+
+
+def _validate_filters(benefit_type, verification_status) -> None:
+    if benefit_type is not None and benefit_type not in BENEFIT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail='benefit_type must be one of ' + ', '.join(BENEFIT_TYPES),
+        )
+    if verification_status is not None and verification_status not in VERIFICATION_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail='verification_status must be one of ' + ', '.join(VERIFICATION_STATUSES),
+        )
+
+
 @universities_page.get(
     '/{university_id}/olympiads',
-    response_model=schemas.bvi.BviOlympiadsResponse,
+    response_model=schemas.benefit_rules.OlympiadsWithRulesResponse,
     responses={
-        200: {'description': 'Олимпиады, дающие БВИ в университете'},
-        400: {'description': 'Access token required to view pending requests'},
-        403: {'description': 'Pending requests are visible to own university only'},
+        200: {'description': 'Олимпиады с правилами льгот в университете'},
+        401: {'description': 'Access token required to view drafts'},
+        403: {'description': 'Drafts are visible to own university only'},
         404: {'description': 'University not found'},
         500: {'description': 'Internal server error'},
     },
 )
 async def university_olympiads(
     university_id: uuid.UUID,
-    include_pending: bool = Query(
-        default=False,
-        description='Показать неподтверждённые заявки (своя организация/админ)',
+    include_drafts: bool = Query(
+        default=False, description='Показать черновики и архив (свой вуз/админ)'
     ),
     benefit_type: str | None = Query(default=None, description='Фильтр по виду льготы'),
     subject: str | None = Query(default=None, description='Фильтр по предмету'),
+    program_id: uuid.UUID | None = Query(default=None, description='Фильтр по программе'),
+    season_id: uuid.UUID | None = Query(default=None, description='Фильтр по сезону'),
+    verification_status: str | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     current_user: deps.OptionalUser = None,
 ):
-    """Олимпиады, дающие БВИ в этом университете.
+    """Олимпиады, по которым у вуза есть правила льгот, вместе с правилами.
 
-    Гость получает подтверждённые связи — этого достаточно основному
-    сценарию. Неподтверждённые заявки видны представителю своего университета
-    и администратору: это рабочий процесс модерации, а не публичный факт.
+    Фильтры по виду льготы, предмету, программе и сезону комбинируются и
+    применяются на сервере до постраничной выдачи. Страница считается по
+    олимпиадам: карточка каталога — олимпиада со списком её условий.
 
-    Архивные олимпиады в списке остаются, но помечаются ``is_historical``:
-    университет давал БВИ, пока олимпиада была в перечне РСОШ, и эта история
-    не должна выглядеть как «действующая льгота». Сама связь при этом не
-    удаляется.
+    Архивные олимпиады остаются в списке с ``is_historical``: университет давал
+    льготу, пока олимпиада была в перечне РСОШ, и эта история не должна
+    выглядеть как действующая льгота.
     """
     try:
         university = await database.universities.get_university(university_id)
         if not university:
             raise HTTPException(status_code=404, detail='University not found')
-
-        show_pending = False
-        if include_pending:
-            if not current_user:
-                raise HTTPException(
-                    status_code=401,
-                    detail='Access token required to view pending requests',
-                )
-            if not deps.can_manage_university(current_user, university_id):
-                raise HTTPException(
-                    status_code=403,
-                    detail='You can only view pending requests of your own university',
-                )
-            show_pending = True
-
-        olympiads = await database.bvi.list_olympiads_for_university(
-            university_id,
-            include_pending=show_pending,
+        _validate_filters(benefit_type, verification_status)
+        scope = _rule_scope(current_user, university_id, include_drafts)
+        filters = dict(
             benefit_type=benefit_type,
             subject=subject,
-            limit=limit,
-            offset=offset,
+            program_id=program_id,
+            season_id=season_id,
+            verification_status=verification_status,
+            **scope,
         )
-        total = await database.bvi.count_olympiads_for_university(
-            university_id,
-            include_pending=show_pending,
-            benefit_type=benefit_type,
-            subject=subject,
+        olympiads = await database.benefit_rules.list_olympiads_for_university(
+            university_id, limit=limit, offset=offset, **filters
+        )
+        total = await database.benefit_rules.count_olympiads_for_university(
+            university_id, **filters
         )
         return {'olympiads': olympiads, 'total': total}
     except HTTPException:
@@ -251,6 +371,7 @@ async def university_olympiads(
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
+
 
 
 @universities_page.post(
@@ -329,239 +450,63 @@ async def edit_university(
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
-@universities_page.post(
-    '/{university_id}/bvi',
-    response_model=schemas.bvi.BviLinkResponse,
-    status_code=201,
-    responses={
-        201: {'description': 'BVI request created or already exists'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'You can only manage your own university'},
-        404: {'description': 'University or olympiad not found'},
-        409: {'description': 'Olympiad is archived and accepts no new BVI requests'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def request_bvi(
-    university_id: uuid.UUID,
-    body: schemas.bvi.BviLinkRequest,
-    current_user: deps.ManageUniversity = None,
-):
-    """Заявить, что университет даёт БВИ за существующую олимпиаду.
-
-    Связь создаётся в статусе ``PENDING`` и становится публичной после
-    подтверждения администратором. Права проверяются для конкретного вуза:
-    представитель одного университета не может заявить связь за другой.
-
-    Бизнес-правила заявки живут в слое данных
-    (``database.bvi.request_bvi_link``): заявка возможна только по актуальной
-    олимпиаде, а конкурентные запросы не приводят к 500. Здесь эти правила
-    только переводятся в HTTP-коды — дублировать их в роутере значило бы
-    держать одно и то же условие в двух местах, и они рано или поздно
-    разошлись бы.
-    """
-    try:
-        university = await database.universities.get_university(university_id)
-        if not university:
-            raise HTTPException(status_code=404, detail='University not found')
-
-        try:
-            link = await database.bvi.request_bvi_link(
-                body.olympiad_id,
-                university_id,
-                requested_by=current_user.get('id'),
-            )
-        except database.bvi.BviRequestError as exc:
-            raise HTTPException(
-                status_code=exc.status_code, detail=exc.detail
-            ) from exc
-
-        # Актуальность олимпиады показываем явно: заявка по актуальной
-        # олимпиаде и повтор по уже подтверждённой связи архивной — это разные
-        # ситуации, и представителю полезно видеть, с чем он работает.
-        olympiad = await database.olympiads.get_olympiad(body.olympiad_id)
-        link['is_historical'] = bool(
-            olympiad and olympiad.get('status') != 'PUBLISHED'
-        )
-        return link
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(status_code=500, detail='Internal server error')
+# --- Правила льгот: список, создание, правка, публикация, проверка, версии ---
 
 
-@universities_page.post(
-    '/{university_id}/bvi/remove',
-    responses={
-        200: {'description': 'BVI request removed'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'You can only manage your own university'},
-        404: {'description': 'BVI link not found'},
-        409: {'description': 'Confirmed link can only be revoked by an administrator'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def remove_bvi(
-    university_id: uuid.UUID,
-    body: schemas.bvi.BviLinkRequest,
-    current_user: deps.ManageUniversity = None,
-):
-    """Убрать связь БВИ.
-
-    Бизнес-правило: подтверждённая администратором связь — это публичный
-    факт, поэтому представитель не может убрать её одним запросом. Он может
-    отозвать только собственную неподтверждённую заявку; снять подтверждение
-    (или удалить связь целиком) может администратор.
-    """
-    try:
-        # Правило «подтверждённую связь снимает только администратор» и само
-        # удаление выполняются в слое данных под одной блокировкой строки:
-        # отдельное чтение здесь оставило бы гонку «проверил PENDING →
-        # параллельный confirm → удалил CONFIRMED».
-        try:
-            removed = await database.bvi.remove_bvi_link(
-                body.olympiad_id,
-                university_id,
-                requested_by_role=current_user.get('role'),
-            )
-        except database.bvi.BviRemoveError as exc:
-            raise HTTPException(
-                status_code=exc.status_code, detail=exc.detail
-            ) from exc
-        if not removed:
-            raise HTTPException(status_code=404, detail='BVI link not found')
-        return {'status': 'removed', 'olympiad_id': str(body.olympiad_id)}
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(status_code=500, detail='Internal server error')
+async def _require_university(university_id) -> dict:
+    university = await database.universities.get_university(university_id)
+    if not university:
+        raise HTTPException(status_code=404, detail='University not found')
+    return university
 
 
-@universities_page.post(
-    '/{university_id}/bvi/{olympiad_id}/moderation',
-    response_model=schemas.bvi.BviModerationResult,
-    responses={
-        200: {'description': 'Link confirmed or removed'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
-        404: {'description': 'BVI link not found'},
-        409: {'description': 'Action does not apply to the current link state'},
-        422: {'description': 'Validation error'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def moderate_bvi(
-    university_id: uuid.UUID,
-    olympiad_id: uuid.UUID,
-    body: schemas.bvi.BviModerationRequest,
-    current_user: deps.AdminUser = None,
-):
-    """Модерация заявки БВИ: подтвердить, отклонить или отозвать.
-
-    Три действия, каждое со своим смыслом:
-
-    - ``confirm`` — заявка ``PENDING`` становится ``CONFIRMED``, и связь
-      появляется в публичном каталоге;
-    - ``reject`` — заявка отклонена, связь удаляется;
-    - ``revoke`` — подтверждение отозвано, связь удаляется.
-
-    Перевода ``CONFIRMED → PENDING`` нет: это не состояние заявки, а отзыв
-    публичного факта. После удаления связи университет может подать новую
-    заявку, и она попадёт в очередь как новая.
-    """
-    try:
-        try:
-            outcome = await database.bvi.moderate_bvi_link(
-                olympiad_id,
-                university_id,
-                body.action,
-                admin_id=current_user.get('id'),
-            )
-        except database.bvi.BviModerationError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-        if not outcome:
-            raise HTTPException(status_code=404, detail='BVI link not found')
-
-        return {
-            'result': outcome['result'],
-            'university_id': str(university_id),
-            'olympiad_id': str(olympiad_id),
-            'status': outcome['result'] if outcome['result'] == 'removed' else 'CONFIRMED',
-        }
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(status_code=500, detail='Internal server error')
-
-
-# --- Правила льгот: список с фильтрами, правка, проверка, версии ------------
+def _raise_rule_error(exc: database.benefit_rules.BenefitRuleError):
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @universities_page.get(
     '/{university_id}/benefit-rules',
-    response_model=schemas.bvi.BenefitRulesResponse,
+    response_model=schemas.benefit_rules.BenefitRulesResponse,
     responses={
         200: {'description': 'Правила льгот университета'},
+        401: {'description': 'Access token required to view drafts'},
+        403: {'description': 'Drafts are visible to own university only'},
         404: {'description': 'University not found'},
         500: {'description': 'Internal server error'},
     },
 )
 async def list_benefit_rules(
     university_id: uuid.UUID,
-    benefit_type: str | None = Query(default=None, description='Фильтр по виду льготы'),
-    subject: str | None = Query(default=None, description='Фильтр по предмету'),
-    verification_status: str | None = Query(
-        default=None, description='Фильтр по статусу проверки'
-    ),
-    include_pending: bool = Query(
-        default=False, description='Показать неподтверждённые заявки (свой вуз/админ)'
-    ),
+    include_drafts: bool = Query(default=False, description='Черновики и архив (свой вуз/админ)'),
+    status: str | None = Query(default=None, description='draft,published,archived (через запятую)'),
+    olympiad_id: uuid.UUID | None = Query(default=None),
+    season_id: uuid.UUID | None = Query(default=None),
+    program_id: uuid.UUID | None = Query(default=None),
+    benefit_type: str | None = Query(default=None),
+    subject: str | None = Query(default=None),
+    verification_status: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     current_user: deps.OptionalUser = None,
 ):
-    """Список правил льгот вуза с фильтрами и постраничной выдачей (ТЗ §4.5).
-
-    Публично видны только подтверждённые связи; неподтверждённые — представителю
-    своего вуза и администратору. ``benefit_type`` и ``subject`` фильтруют
-    список: раньше фильтр был только по вузу.
-    """
+    """Плоский список правил вуза с фильтрами и постраничной выдачей (ТЗ §4.5)."""
     try:
-        university = await database.universities.get_university(university_id)
-        if not university:
-            raise HTTPException(status_code=404, detail='University not found')
-
-        status = None
-        if not include_pending:
-            status = 'CONFIRMED'
-        elif not current_user or not deps.can_manage_university(
-            current_user, university_id
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail='You can only view pending requests of your own university',
-            )
-
-        rules = await database.bvi.list_links_enriched(
-            status=status,
-            verification_status=verification_status,
+        await _require_university(university_id)
+        _validate_filters(benefit_type, verification_status)
+        scope = _rule_scope(current_user, university_id, include_drafts)
+        filters = dict(
+            university_id=university_id,
+            olympiad_id=olympiad_id,
+            season_id=season_id,
+            program_id=program_id,
             benefit_type=benefit_type,
             subject=subject,
-            university_id=university_id,
-            limit=limit,
-            offset=offset,
-        )
-        total = await database.bvi.count_links(
-            status=status,
             verification_status=verification_status,
-            benefit_type=benefit_type,
-            subject=subject,
-            university_id=university_id,
+            statuses=_parse_statuses(status) if include_drafts else None,
+            **scope,
         )
+        rules = await database.benefit_rules.list_rules(limit=limit, offset=offset, **filters)
+        total = await database.benefit_rules.count_rules(**filters)
         return {'rules': rules, 'total': total}
     except HTTPException:
         raise
@@ -570,57 +515,420 @@ async def list_benefit_rules(
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
+@universities_page.get(
+    '/{university_id}/benefit-rules/facets',
+    response_model=schemas.benefit_rules.BenefitRuleFacets,
+    responses={
+        200: {'description': 'Значения фильтров по правилам вуза'},
+        404: {'description': 'University not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def benefit_rule_facets(
+    university_id: uuid.UUID,
+    include_drafts: bool = Query(default=False),
+    current_user: deps.OptionalUser = None,
+):
+    """Виды льгот, предметы, программы и сезоны для фильтров страницы вуза."""
+    try:
+        await _require_university(university_id)
+        scope = _rule_scope(current_user, university_id, include_drafts)
+        return await database.benefit_rules.rule_facets(
+            university_id=university_id, public_only=scope['public_only']
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.post(
+    '/{university_id}/benefit-rules',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
+    status_code=201,
+    responses={
+        201: {'description': 'Правило создано (версия 1)'},
+        400: {'description': 'Сезон/профиль/программа не относятся к этой олимпиаде или вузу'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        404: {'description': 'Университет, олимпиада, сезон или профиль не найдены'},
+        409: {'description': 'Олимпиада в архиве или такое правило уже есть'},
+        422: {'description': 'Validation error'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def create_benefit_rule(
+    university_id: uuid.UUID,
+    body: schemas.benefit_rules.BenefitRuleCreate,
+    request: Request,
+    current_user: deps.ManageUniversity = None,
+):
+    """Создать правило льготы (представитель своего вуза или администратор).
+
+    Правило ссылается на существующие олимпиаду, сезон, профиль и программы;
+    создать олимпиаду отсюда нельзя. ``publish=true`` публикует сразу — правило
+    появляется в каталоге с пометкой «Не проверено Papaya».
+    """
+    try:
+        await _require_university(university_id)
+        is_admin = current_user.get('role') == ROLE_ADMIN
+        data = body.model_dump(exclude_unset=True)
+        publish = bool(data.pop('publish', False))
+        reason = data.pop('reason', None)
+        try:
+            rule = await database.benefit_rules.create_rule(
+                university_id,
+                data=data,
+                created_by=current_user.get('id'),
+                admin=is_admin,
+                publish=publish,
+                reason=reason,
+            )
+        except database.benefit_rules.BenefitRuleError as exc:
+            _raise_rule_error(exc)
+        await audit.audit(
+            'benefit_rule_create',
+            actor_id=current_user.get('id'),
+            target_type='benefit_rule',
+            target_id=rule['id'],
+            ip=rate_limit.client_ip(request),
+            university_id=str(university_id),
+            olympiad_id=str(body.olympiad_id),
+            status=rule.get('status'),
+        )
+        return rule
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+async def _visible_rule(rule_id, university_id, current_user) -> dict:
+    """Правило по id с проверкой видимости.
+
+    Посетителю доступны только опубликованные и не отклонённые проверкой
+    правила; черновики, архив и отклонённые — представителю своего вуза и
+    администратору. Чужой черновик неотличим от несуществующего правила.
+    """
+    rule = await database.benefit_rules.get_rule(rule_id, university_id=university_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail='Benefit rule not found')
+    public = (
+        rule['status'] == 'published'
+        and rule['verification_status'] != 'rejected'
+    )
+    if not public and not deps.can_manage_university(current_user, university_id):
+        raise HTTPException(status_code=404, detail='Benefit rule not found')
+    return rule
+
+
+@universities_page.get(
+    '/{university_id}/benefit-rules/{rule_id}',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
+    responses={
+        200: {'description': 'Правило льготы'},
+        404: {'description': 'Benefit rule not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def get_benefit_rule(
+    university_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    current_user: deps.OptionalUser = None,
+):
+    """Карточка правила: опубликованные — публично, черновики — своим."""
+    try:
+        return await _visible_rule(rule_id, university_id, current_user)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
 @universities_page.put(
-    '/{university_id}/benefit-rules/{olympiad_id}',
-    response_model=schemas.bvi.BenefitRuleUpdateResponse,
+    '/{university_id}/benefit-rules/{rule_id}',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
     responses={
         200: {'description': 'Правило обновлено, создана версия'},
         400: {'description': 'Недопустимое значение поля'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
+        403: {'description': 'You can only manage your own university'},
         404: {'description': 'Правило не найдено'},
+        409: {'description': 'Версия устарела, дубликат или архивное правило'},
         500: {'description': 'Internal server error'},
     },
 )
 async def update_benefit_rule(
     university_id: uuid.UUID,
-    olympiad_id: uuid.UUID,
-    body: schemas.bvi.BenefitRuleUpdate,
-    current_user: deps.AdminUser = None,
+    rule_id: uuid.UUID,
+    body: schemas.benefit_rules.BenefitRuleUpdate,
+    request: Request,
+    current_user: deps.ManageUniversity = None,
 ):
-    """Изменить правило льготы и записать версию (ТЗ §4.3, §8).
+    """Изменить правило и записать версию (ТЗ §4.3, §8).
 
-    Только администратор: правка правил — изменение публичного факта. Каждое
-    изменение фиксируется отдельной версией, поэтому его можно откатить.
+    Представитель правит содержимое правил своего вуза; статус проверки и
+    привязку документа по id меняет только администратор. Любое содержательное
+    изменение сбрасывает проверку Papaya. ``expected_version`` защищает от
+    перезаписи параллельных правок (409).
     """
     try:
+        is_admin = current_user.get('role') == ROLE_ADMIN
         updates = body.model_dump(exclude_unset=True)
         reason = updates.pop('reason', None)
+        expected_version = updates.pop('expected_version', None)
         if not updates:
             raise HTTPException(status_code=400, detail='No fields to update')
         try:
-            rule = await database.bvi.update_benefit_rule(
-                olympiad_id,
-                university_id,
+            rule = await database.benefit_rules.update_rule(
+                rule_id,
+                university_id=university_id,
                 updates=updates,
                 changed_by=current_user.get('id'),
+                admin=is_admin,
                 reason=reason,
-                admin=True,
+                expected_version=expected_version,
             )
-        except database.bvi.BenefitRuleError as exc:
-            raise HTTPException(
-                status_code=exc.status_code, detail=exc.detail
-            ) from exc
+        except database.benefit_rules.BenefitRuleError as exc:
+            _raise_rule_error(exc)
         if rule is None:
             raise HTTPException(status_code=404, detail='Benefit rule not found')
-        audit.log_admin_action(
-            'benefit_rule_update',
+        if rule.get('changed'):
+            await audit.audit(
+                'benefit_rule_update',
+                actor_id=current_user.get('id'),
+                target_type='benefit_rule',
+                target_id=rule_id,
+                ip=rate_limit.client_ip(request),
+                version=rule.get('version'),
+                fields=sorted(updates),
+            )
+        return rule
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.post(
+    '/{university_id}/benefit-rules/{rule_id}/status',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
+    responses={
+        200: {'description': 'Состояние изменено'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        404: {'description': 'Правило не найдено'},
+        409: {'description': 'Версия устарела или олимпиада в архиве'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def set_benefit_rule_status(
+    university_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    body: schemas.benefit_rules.BenefitRuleStatusRequest,
+    request: Request,
+    current_user: deps.ManageUniversity = None,
+):
+    """Опубликовать, снять с публикации или архивировать правило.
+
+    Публикация делает правило видимым сразу — с пометкой «Не проверено Papaya»
+    до решения администратора. Архив сохраняет историю.
+    """
+    try:
+        try:
+            rule = await database.benefit_rules.set_rule_status(
+                rule_id,
+                university_id=university_id,
+                status=body.status,
+                changed_by=current_user.get('id'),
+                reason=body.reason,
+                expected_version=body.expected_version,
+            )
+        except database.benefit_rules.BenefitRuleError as exc:
+            _raise_rule_error(exc)
+        if rule is None:
+            raise HTTPException(status_code=404, detail='Benefit rule not found')
+        if rule.get('changed'):
+            await audit.audit(
+                'benefit_rule_' + body.status,
+                actor_id=current_user.get('id'),
+                target_type='benefit_rule',
+                target_id=rule_id,
+                ip=rate_limit.client_ip(request),
+                version=rule.get('version'),
+            )
+        return rule
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.delete(
+    '/{university_id}/benefit-rules/{rule_id}',
+    status_code=204,
+    responses={
+        204: {'description': 'Черновик удалён'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        404: {'description': 'Правило не найдено'},
+        409: {'description': 'Удалить можно только черновик'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def delete_benefit_rule(
+    university_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    request: Request,
+    current_user: deps.ManageUniversity = None,
+):
+    """Удалить черновик. Опубликованное правило переводится в архив."""
+    try:
+        try:
+            removed = await database.benefit_rules.delete_rule(
+                rule_id, university_id=university_id
+            )
+        except database.benefit_rules.BenefitRuleError as exc:
+            _raise_rule_error(exc)
+        if not removed:
+            raise HTTPException(status_code=404, detail='Benefit rule not found')
+        await audit.audit(
+            'benefit_rule_delete',
             actor_id=current_user.get('id'),
-            target_id=f'{university_id}:{olympiad_id}',
-            version=rule.get('version'),
-            fields=sorted(updates),
+            target_type='benefit_rule',
+            target_id=rule_id,
+            ip=rate_limit.client_ip(request),
         )
-        return {'rule': rule, 'version': rule.get('version'), 'changed': rule.get('changed')}
+        return Response(status_code=204)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.post(
+    '/{university_id}/benefit-rules/{rule_id}/verification',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
+    responses={
+        200: {'description': 'Решение проверки записано'},
+        400: {'description': 'Нет причины отклонения'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Правило не найдено'},
+        409: {'description': 'Для verified нужны документ и ссылка на источник'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def verify_benefit_rule(
+    university_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    body: schemas.benefit_rules.BenefitRuleVerificationRequest,
+    request: Request,
+    current_user: deps.AdminUser = None,
+):
+    """Проверка Papaya (ТЗ §9): ``verified`` / ``rejected`` / ``unverified``.
+
+    Только администратор. ``verified`` невозможен без официального документа и
+    ссылки на источник; ``rejected`` — без причины. Подтверждение вузом
+    (``university_confirmed``) на это решение не влияет.
+    """
+    try:
+        existing = await database.benefit_rules.get_rule(rule_id, university_id=university_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail='Benefit rule not found')
+        try:
+            rule = await database.benefit_rules.set_verification(
+                rule_id,
+                status=body.status,
+                note=body.note,
+                admin_id=current_user.get('id'),
+                expected_version=body.expected_version,
+            )
+        except database.benefit_rules.BenefitRuleError as exc:
+            _raise_rule_error(exc)
+        await audit.audit(
+            'benefit_rule_verification',
+            actor_id=current_user.get('id'),
+            target_type='benefit_rule',
+            target_id=rule_id,
+            ip=rate_limit.client_ip(request),
+            status=body.status,
+            note=body.note,
+            version=rule.get('version'),
+        )
+        return rule
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.post(
+    '/{university_id}/benefit-rules/{rule_id}/document',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
+    responses={
+        200: {'description': 'Документ загружен и привязан к правилу'},
+        400: {'description': 'Unsupported file format or empty file'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        404: {'description': 'Правило не найдено'},
+        413: {'description': 'File too large'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def upload_benefit_rule_document(
+    university_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    name: str | None = Form(default=None),
+    current_user: deps.ManageUniversity = None,
+):
+    """Загрузить официальный документ вуза (приказ/правила приёма) к правилу.
+
+    Файл проходит те же проверки, что и документы администратора (формат,
+    сигнатура, размер, безопасное имя). Привязка документа — новая версия
+    правила; проверка Papaya при этом снимается.
+    """
+    try:
+        rule = await database.benefit_rules.get_rule(rule_id, university_id=university_id)
+        if rule is None:
+            raise HTTPException(status_code=404, detail='Benefit rule not found')
+        doc = await store_uploaded_document(
+            file,
+            doc_type='UNIVERSITY_ORDER',
+            name=name,
+            metadata={
+                'kind': 'benefit_rule_document',
+                'university_id': str(university_id),
+                'benefit_rule_id': str(rule_id),
+                'uploaded_by': str(current_user.get('id')),
+            },
+        )
+        updated = await database.benefit_rules.attach_document(
+            rule_id,
+            university_id=university_id,
+            doc_id=doc['id'],
+            changed_by=current_user.get('id'),
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail='Benefit rule not found')
+        await audit.audit(
+            'benefit_rule_document',
+            actor_id=current_user.get('id'),
+            target_type='benefit_rule',
+            target_id=rule_id,
+            ip=rate_limit.client_ip(request),
+            doc_id=doc['id'],
+        )
+        return updated
     except HTTPException:
         raise
     except Exception:
@@ -629,28 +937,57 @@ async def update_benefit_rule(
 
 
 @universities_page.get(
-    '/{university_id}/benefit-rules/{olympiad_id}/versions',
-    response_model=schemas.bvi.BenefitRuleVersionsResponse,
+    '/{university_id}/benefit-rules/{rule_id}/document',
+    responses={
+        200: {'description': 'Файл официального документа'},
+        404: {'description': 'Правило или файл не найдены'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def download_benefit_rule_document(
+    university_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    current_user: deps.OptionalUser = None,
+):
+    """Скачать официальный документ правила (публично для опубликованных)."""
+    try:
+        rule = await _visible_rule(rule_id, university_id, current_user)
+        if not rule.get('source_doc_id'):
+            raise HTTPException(status_code=404, detail='Rule has no document')
+        doc = await database.docs.get_doc(rule['source_doc_id'])
+        if not doc:
+            raise HTTPException(status_code=404, detail='Document not found')
+        return document_file_response(doc)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.get(
+    '/{university_id}/benefit-rules/{rule_id}/versions',
+    response_model=schemas.benefit_rules.BenefitRuleVersionsResponse,
     responses={
         200: {'description': 'История версий правила'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
+        403: {'description': 'You can only manage your own university'},
         404: {'description': 'Правило не найдено'},
         500: {'description': 'Internal server error'},
     },
 )
 async def benefit_rule_versions(
     university_id: uuid.UUID,
-    olympiad_id: uuid.UUID,
-    current_user: deps.AdminUser = None,
+    rule_id: uuid.UUID,
+    current_user: deps.ManageUniversity = None,
 ):
-    """История версий правила льготы (ТЗ §8)."""
+    """История версий — представителю своего вуза и администратору (ТЗ §8)."""
     try:
-        link = await database.bvi.get_link(olympiad_id, university_id)
-        if not link:
+        rule = await database.benefit_rules.get_rule(rule_id, university_id=university_id)
+        if rule is None:
             raise HTTPException(status_code=404, detail='Benefit rule not found')
-        versions = await database.bvi.list_benefit_versions(link['id'])
-        return {'versions': versions}
+        versions = await database.benefit_rules.list_versions(rule_id)
+        return {'versions': versions, 'current_version': rule.get('version') or 0}
     except HTTPException:
         raise
     except Exception:
@@ -659,39 +996,54 @@ async def benefit_rule_versions(
 
 
 @universities_page.post(
-    '/{university_id}/benefit-rules/{olympiad_id}/rollback/{version}',
-    response_model=schemas.bvi.BenefitRuleUpdateResponse,
+    '/{university_id}/benefit-rules/{rule_id}/rollback',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
     responses={
-        200: {'description': 'Правило отката к версии'},
+        200: {'description': 'Правило откатано: создана новая версия'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
+        403: {'description': 'You can only manage your own university'},
         404: {'description': 'Правило или версия не найдены'},
+        409: {'description': 'Версия устарела или откат создаёт дубликат'},
         500: {'description': 'Internal server error'},
     },
 )
 async def rollback_benefit_rule(
     university_id: uuid.UUID,
-    olympiad_id: uuid.UUID,
-    version: int,
-    current_user: deps.AdminUser = None,
+    rule_id: uuid.UUID,
+    body: schemas.benefit_rules.BenefitRuleRollbackRequest,
+    request: Request,
+    current_user: deps.ManageUniversity = None,
 ):
-    """Откатить правило к выбранной версии, создав новую версию (ТЗ §8)."""
+    """Восстановить содержимое выбранной версии новой версией (ТЗ §8).
+
+    Промежуточные версии не удаляются. Восстановленное правило всегда
+    ``unverified``: проверка Papaya относится к конкретному содержимому и
+    автоматически не возвращается.
+    """
     try:
-        link = await database.bvi.get_link(olympiad_id, university_id)
-        if not link:
-            raise HTTPException(status_code=404, detail='Benefit rule not found')
-        rule = await database.bvi.rollback_benefit_rule(
-            link['id'], version, changed_by=current_user.get('id')
-        )
+        try:
+            rule = await database.benefit_rules.rollback_rule(
+                rule_id,
+                university_id=university_id,
+                version=body.version,
+                changed_by=current_user.get('id'),
+                reason=body.reason,
+                expected_version=body.expected_version,
+            )
+        except database.benefit_rules.BenefitRuleError as exc:
+            _raise_rule_error(exc)
         if rule is None:
-            raise HTTPException(status_code=404, detail='Version not found')
-        audit.log_admin_action(
+            raise HTTPException(status_code=404, detail='Benefit rule or version not found')
+        await audit.audit(
             'benefit_rule_rollback',
             actor_id=current_user.get('id'),
-            target_id=link['id'],
-            version=version,
+            target_type='benefit_rule',
+            target_id=rule_id,
+            ip=rate_limit.client_ip(request),
+            restored_version=body.version,
+            version=rule.get('version'),
         )
-        return {'rule': rule, 'version': rule.get('version'), 'changed': True}
+        return rule
     except HTTPException:
         raise
     except Exception:
@@ -700,8 +1052,8 @@ async def rollback_benefit_rule(
 
 
 @universities_page.post(
-    '/{university_id}/benefit-rules/{olympiad_id}/university-confirmation',
-    response_model=schemas.bvi.BenefitRuleListItem,
+    '/{university_id}/benefit-rules/{rule_id}/university-confirmation',
+    response_model=schemas.benefit_rules.BenefitRuleItem,
     responses={
         200: {'description': 'Отметка подтверждения вузом обновлена'},
         401: {'description': 'Access token missing'},
@@ -712,25 +1064,102 @@ async def rollback_benefit_rule(
 )
 async def confirm_benefit_rule_by_university(
     university_id: uuid.UUID,
-    olympiad_id: uuid.UUID,
-    body: schemas.bvi.UniversityConfirmationRequest,
+    rule_id: uuid.UUID,
+    body: schemas.benefit_rules.UniversityConfirmationRequest,
     current_user: deps.ManageUniversity = None,
 ):
-    """Подтвердить/снять подтверждение правила со стороны вуза (ТЗ §7.1).
+    """Подтвердить/снять подтверждение правила со стороны вуза (ТЗ §9).
 
     Подтверждение вуза — независимая характеристика, отдельная от проверки
-    администрацией Papaya. Доступно представителю своего вуза и администратору.
+    администрацией Papaya: оно не делает правило «проверенным».
     """
     try:
-        rule = await database.bvi.set_university_confirmation(
-            olympiad_id,
-            university_id,
-            body.confirmed,
+        rule = await database.benefit_rules.set_university_confirmation(
+            rule_id,
+            university_id=university_id,
+            confirmed=body.confirmed,
             changed_by=current_user.get('id'),
         )
         if rule is None:
             raise HTTPException(status_code=404, detail='Benefit rule not found')
         return rule
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+# --- Запросы о пополнении каталога --------------------------------------------
+
+
+@universities_page.post(
+    '/{university_id}/catalog-requests',
+    response_model=schemas.catalog_requests.CatalogRequestItem,
+    status_code=201,
+    responses={
+        201: {'description': 'Запрос отправлен администратору'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        404: {'description': 'University or olympiad not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def submit_catalog_request(
+    university_id: uuid.UUID,
+    body: schemas.catalog_requests.CatalogRequestCreate,
+    current_user: deps.ManageUniversity = None,
+):
+    """Представитель просит добавить олимпиаду/сезон/профиль в каталог.
+
+    Сам он записи каталога не создаёт (их ведёт администратор по перечню
+    РСОШ), но запрос фиксируется в системе и виден в панели администратора.
+    """
+    try:
+        await _require_university(university_id)
+        if body.olympiad_id is not None:
+            olympiad = await database.olympiads.get_olympiad(body.olympiad_id)
+            if not olympiad:
+                raise HTTPException(status_code=404, detail='Olympiad not found')
+        return await database.catalog_requests.submit_request(
+            university_id,
+            user_id=current_user.get('id'),
+            kind=body.kind,
+            text=body.text,
+            olympiad_id=body.olympiad_id,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@universities_page.get(
+    '/{university_id}/catalog-requests',
+    response_model=schemas.catalog_requests.CatalogRequestsResponse,
+    responses={
+        200: {'description': 'Запросы вуза о пополнении каталога'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'You can only manage your own university'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def list_university_catalog_requests(
+    university_id: uuid.UUID,
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.ManageUniversity = None,
+):
+    try:
+        requests = await database.catalog_requests.list_requests(
+            status=status, university_id=university_id, limit=limit, offset=offset
+        )
+        total = await database.catalog_requests.count_requests(
+            status=status, university_id=university_id
+        )
+        return {'requests': requests, 'total': total}
     except HTTPException:
         raise
     except Exception:

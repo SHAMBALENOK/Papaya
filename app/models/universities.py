@@ -17,7 +17,7 @@ class Universities(Base):
 
     Университет отвечает на вопрос школьника «какие олимпиады дают БВИ в
     нужном мне университете», поэтому кроме справочных данных хранит только
-    связи с олимпиадами каталога (см. ``app/models/bvi.py``).
+    связи с олимпиадами каталога (см. ``app/models/benefit_rules.py``).
 
     Отдельной сущности «организация» в проекте нет: ни организаторы олимпиад,
     ни школы Papaya сейчас не моделирует, а универсальная организация была бы
@@ -52,8 +52,8 @@ class Universities(Base):
         onupdate=_utcnow,
     )
 
-    bvi_links = relationship(
-        'UniversityBvi',
+    benefit_rules = relationship(
+        'BenefitRule',
         back_populates='university',
         cascade='all, delete-orphan',
         passive_deletes=True,
