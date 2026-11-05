@@ -73,9 +73,11 @@ async function renderUniversity(universityId) {
     if (!universityId) { renderNotFound(); return; }
     page.innerHTML = loadingHtml('Открываем университет…');
 
-    const [uniRes, olyRes] = await Promise.all([
+    const [uniRes, olyRes, benRes, progRes] = await Promise.all([
         api.getUniversity(universityId),
         api.getUniversityOlympiads(universityId),
+        api.listUniversityBenefits(universityId),
+        api.listPrograms(universityId),
     ]);
 
     if (!uniRes.ok || !uniRes.data) {
@@ -87,6 +89,8 @@ async function renderUniversity(universityId) {
 
     const university = uniRes.data;
     const all = (olyRes.ok && olyRes.data && olyRes.data.olympiads) || [];
+    const benefits = (benRes.ok && benRes.data && benRes.data.rules) || [];
+    const programs = (progRes.ok && progRes.data && progRes.data.programs) || [];
     const isAdmin = store.isAdmin();
 
     // Актуальные и исторические связи — разные ответы на разные вопросы.
@@ -180,6 +184,30 @@ async function renderUniversity(universityId) {
             </p>
             <div class="mt-12">${olympiadsHtml}</div>
             ${historicalHtml}
+        </section>
+
+        <section class="mt-20 md:mt-28" aria-labelledby="uni-benefits-title">
+            <p class="${UI.eyebrow}">Льготы</p>
+            <h2 id="uni-benefits-title" class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">
+                Правила предоставления льгот
+            </h2>
+            <div class="mt-8 space-y-4">
+                ${benefits.length ? benefits.map(b => `
+                    <article class="${UI.card}">
+                        <p class="font-semibold">${escHtml(b.benefit_type)} · ${escHtml(b.subject || '—')}</p>
+                        <p class="text-sm text-ink-soft mt-1">Статус: ${escHtml(b.verification_status)} · версия ${escHtml(b.version)}</p>
+                        ${b.required_result ? `<p class="text-sm mt-1">Результат: ${escHtml(b.required_result)}</p>` : ''}
+                        ${b.source_url ? `<p class="text-sm mt-1"><a href="${escAttr(b.source_url)}" target="_blank" rel="noopener" class="underline">Источник</a></p>` : ''}
+                    </article>`).join('') : emptyHtml('Правила льгот не опубликованы', 'Данные появятся после проверки администрацией Papaya.')}
+            </div>
+        </section>
+
+        <section class="mt-12" aria-labelledby="uni-programs-title">
+            <p class="${UI.eyebrow}">Программы</p>
+            <h2 id="uni-programs-title" class="mt-5 text-2xl font-extrabold tracking-tight">Образовательные программы</h2>
+            <div class="mt-6 flex flex-wrap gap-2">
+                ${programs.length ? programs.map(p => `<span class="${UI.tag}">${escHtml(p.name)}</span>`).join('') : '<span class="text-sm text-ink-soft">Не указаны</span>'}
+            </div>
         </section>
     </article>`;
 

@@ -14,6 +14,8 @@ const ADMIN_TABS = [
     { key: 'universities', label: 'Университеты', href: '#/admin/universities' },
     { key: 'bvi', label: 'Заявки БВИ', href: '#/admin/bvi' },
     { key: 'imports', label: 'Импорт РСОШ', href: '#/admin/imports' },
+    { key: 'repapps', label: 'Заявки представителей', href: '#/admin/repapps' },
+    { key: 'audit', label: 'Аудит', href: '#/admin/audit' },
 ];
 
 /** Размер страницы при выгрузке очереди БВИ: список качается постранично. */
@@ -98,6 +100,8 @@ async function loadAdminTab(tab) {
             return links;
         },
         imports: async () => (await api.listImports()).data.imports || [],
+        repapps: async () => (await api.listRepresentativeApplications()).data.applications || [],
+        audit: async () => (await api.listAudit({ limit: 50 })).data.logs || [],
     };
 
     let data;
@@ -121,6 +125,8 @@ async function loadAdminTab(tab) {
         universities: () => adminUniversitiesHtml(data),
         bvi: () => adminBviHtml(data),
         imports: () => adminImportsHtml(data),
+        repapps: () => adminRepAppsHtml(data),
+        audit: () => adminAuditHtml(data),
     };
     box.innerHTML = renderers[tab]();
 }
@@ -167,6 +173,8 @@ async function handleAdminClick(e) {
         searchUsers: () => searchUsers(),
         loadMoreOlympiads: () => loadMoreOlympiads(),
         searchOlympiads: () => searchOlympiads(),
+        approveRepApp: () => api.reviewRepresentativeApplication(id, { status: 'approved' }),
+        rejectRepApp: () => api.reviewRepresentativeApplication(id, { status: 'rejected', rejection_reason: 'Отклонено администратором' }),
     };
 
     const messages = {

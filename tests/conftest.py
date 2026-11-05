@@ -144,8 +144,10 @@ async def clean_state():
     async with AsyncSessionLocal() as session:
         await session.execute(
             text(
-                'TRUNCATE TABLE university_olympiads, universities, olympiads, '
-                'docs, users CASCADE'
+                'TRUNCATE TABLE benefit_rule_programs, benefit_rule_versions, benefit_status_history, '
+                'benefit_rules, university_programs, season_profiles, olympiad_seasons, '
+                'representative_applications, audit_logs, university_olympiads, universities, '
+                'olympiads, docs, users CASCADE'
             )
         )
         await session.commit()

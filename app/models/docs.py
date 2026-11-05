@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
     DateTime,
+    ForeignKey,
     String,
     Text,
 )
@@ -46,6 +47,12 @@ class Docs(Base):
     name = Column(String, nullable=False)
     type = Column(String, nullable=False, default='RSOSH_LIST', index=True)
     storage_key = Column(String, nullable=True)
+    university_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('universities.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
     mime_type = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
     checksum = Column(String, nullable=True)

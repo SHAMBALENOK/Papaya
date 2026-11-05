@@ -158,6 +158,50 @@ const api = {
     addOlympiad(d)       { return this.post('/olympiads/add_olympiad', d); },
     editOlympiad(id, d)  { return this.post(`/olympiads/edit_olympiad/${id}`, d); },
 
+    /* Сезоны и профили */
+    listSeasons(olympiadId) { return this.get(`/olympiads/${olympiadId}/seasons`, { skipAuthRedirect: true }); },
+    createSeason(olympiadId, d) { return this.post(`/olympiads/${olympiadId}/seasons`, d); },
+    getSeason(id) { return this.get(`/seasons/${id}`, { skipAuthRedirect: true }); },
+    updateSeason(id, d) { return this.put(`/seasons/${id}`, d); },
+    listProfiles(seasonId) { return this.get(`/seasons/${seasonId}/profiles`, { skipAuthRedirect: true }); },
+    createProfile(seasonId, d) { return this.post(`/seasons/${seasonId}/profiles`, d); },
+
+    /* Программы */
+    listPrograms(universityId) { return this.get(`/universities/${universityId}/programs`, { skipAuthRedirect: true }); },
+    createProgram(universityId, d) { return this.post(`/universities/${universityId}/programs`, d); },
+    getProgram(id) { return this.get(`/programs/${id}`, { skipAuthRedirect: true }); },
+    updateProgram(id, d) { return this.put(`/programs/${id}`, d); },
+
+    /* Правила льгот */
+    listBenefits(params) {
+        const q = new URLSearchParams(params || {}).toString();
+        return this.get(`/benefits${q ? `?${q}` : ''}`, { skipAuthRedirect: true });
+    },
+    listUniversityBenefits(id) { return this.get(`/universities/${id}/benefits`, { skipAuthRedirect: true }); },
+    createBenefit(universityId, d) { return this.post(`/universities/${universityId}/benefits`, d); },
+    getBenefit(id) { return this.get(`/benefits/${id}`, { skipAuthRedirect: true }); },
+    updateBenefit(id, d) { return this.put(`/benefits/${id}`, d); },
+    verifyBenefit(id) { return this.post(`/benefits/${id}/verify`); },
+    rejectBenefit(id, d) { return this.post(`/benefits/${id}/reject`, d || {}); },
+    benefitVersions(id) { return this.get(`/benefits/${id}/versions`, { skipAuthRedirect: true }); },
+    rollbackBenefit(id, version) { return this.post(`/benefits/${id}/rollback`, { version }); },
+    benefitStatusHistory(id) { return this.get(`/benefits/${id}/status-history`, { skipAuthRedirect: true }); },
+
+    /* Заявки представителей */
+    createRepresentativeApplication(d) { return this.post('/representative-applications', d); },
+    listRepresentativeApplications(status) {
+        const q = status ? `?status=${encodeURIComponent(status)}` : '';
+        return this.get(`/admin/representative-applications${q}`);
+    },
+    reviewRepresentativeApplication(id, d) { return this.post(`/admin/representative-applications/${id}/review`, d); },
+    listAudit(params) {
+        const q = new URLSearchParams(params || {}).toString();
+        return this.get(`/admin/audit${q ? `?${q}` : ''}`);
+    },
+
+    /* Импорт вузовских документов */
+    startUniversityImport(docId) { return this.post('/imports/university', { doc_id: docId }); },
+
     /* Поиск по обоим каталогам */
     search(q) { return this.get(`/search?q=${encodeURIComponent(q || '')}`, { skipAuthRedirect: true }); },
 
