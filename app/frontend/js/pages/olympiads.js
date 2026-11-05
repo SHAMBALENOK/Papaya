@@ -68,12 +68,11 @@ async function renderOlympiad(olympiadId) {
     if (!olympiadId) { renderNotFound(); return; }
     page.innerHTML = loadingHtml('Открываем олимпиаду…');
 
-    const [olyRes, uniRes, srcRes] = await Promise.all([
+    const [olyRes, uniRes, srcRes, seasonRes] = await Promise.all([
         api.getOlympiad(olympiadId),
         api.getOlympiadUniversities(olympiadId),
-        // Источник публичный и необязательный: его отсутствие — не ошибка
-        // страницы, поэтому гасим неудачу вместо того, чтобы ломать рендер.
         api.getOlympiadSource(olympiadId).catch(() => ({ ok: false })),
+        api.listSeasons(olympiadId).catch(() => ({ ok: false })),
     ]);
 
     if (!olyRes.ok || !olyRes.data) {
@@ -86,6 +85,7 @@ async function renderOlympiad(olympiadId) {
     const olympiad = olyRes.data;
     const universities = (uniRes.ok && uniRes.data && uniRes.data.universities) || [];
     const source = (srcRes.ok && srcRes.data) || null;
+    const seasons = (seasonRes.ok && seasonRes.data && seasonRes.data.seasons) || [];
     const isAdmin = store.isAdmin();
     const isArchived = olympiad.status === 'ARCHIVED';
 
@@ -186,6 +186,18 @@ async function renderOlympiad(olympiadId) {
             </p>
             <div class="mt-12">${universitiesHtml}</div>
             ${historicalHtml}
+        </section>
+
+        <section class="mt-12">
+            <h3 class="text-2xl font-extrabold tracking-tight">Сезоны</h3>
+            <div class="mt-6 space-y-3">
+                ${seasons.length ? seasons.map(s => `
+                    <div class="${UI.card}">
+                        <p class="font-semibold">${escHtml(s.season_label)}</p>
+                        <p class="text-sm text-ink-soft mt-1">Уровень РСОШ: ${escHtml(s.rsosh_level || '—')}</p>
+                        <p class="text-sm text-ink-soft mt-1">Даты: ${s.event_start ? escHtml(s.event_start) : 'Даты пока не опубликованы'}</p>
+                    </div>`).join('') : '<p class="text-sm text-ink-soft">Сезоны не указаны.</p>'}
+            </div>
         </section>
     </article>`;
 

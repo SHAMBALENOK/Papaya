@@ -18,11 +18,15 @@ from app.database.database import db_lifespan
 from app.routers import (
     admin,
     auth,
+    benefits,
     docs,
     health,
     imports,
     olympiads,
+    programs,
+    representative,
     search,
+    seasons,
     universities,
     user,
 )
@@ -55,6 +59,17 @@ app.include_router(imports.imports_page, prefix='/api/v1')
 app.include_router(search.search_page, prefix='/api/v1')
 app.include_router(admin.admin_page, prefix='/api/v1')
 app.include_router(health.health_page)
+app.include_router(seasons.seasons_page, prefix='/api/v1')
+app.include_router(seasons.olympiad_seasons_page, prefix='/api/v1')
+app.include_router(programs.programs_page, prefix='/api/v1')
+app.include_router(programs.university_programs_page, prefix='/api/v1')
+app.include_router(benefits.benefits_page, prefix='/api/v1')
+app.include_router(benefits.benefit_rules_page, prefix='/api/v1')
+app.include_router(benefits.university_benefits_page, prefix='/api/v1')
+app.include_router(benefits.olympiad_benefits_page, prefix='/api/v1')
+app.include_router(representative.rep_apps_page, prefix='/api/v1')
+app.include_router(representative.applications_page, prefix='/api/v1')
+app.include_router(representative.admin_rep_page, prefix='/api/v1')
 
 
 @app.get(

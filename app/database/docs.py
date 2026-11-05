@@ -66,6 +66,7 @@ async def add_doc(ins: dict) -> dict | None:
         'status': ins.get('status') or 'UPLOADED',
         'metadata': ins.get('metadata'),
         'note': ins.get('note'),
+        'university_id': _as_uuid(ins['university_id']) if ins.get('university_id') else None,
     }
     if ins.get('id'):
         values['id'] = _as_uuid(ins['id'])
@@ -80,7 +81,7 @@ async def add_doc(ins: dict) -> dict | None:
 
 
 _DOC_EDITABLE_FIELDS = frozenset({
-    'name', 'type', 'status', 'source_url', 'note', 'metadata',
+    'name', 'type', 'status', 'source_url', 'note', 'metadata', 'university_id',
 })
 
 # В API и в слое доступа раздел состояния импорта называется ``metadata``
@@ -102,7 +103,10 @@ async def edit_doc(doc_id, ins: dict) -> dict | None:
             return None
         for key, value in ins.items():
             if key in _DOC_EDITABLE_FIELDS:
-                setattr(doc, _DOC_FIELD_ATTRIBUTES.get(key, key), value)
+                attr = _DOC_FIELD_ATTRIBUTES.get(key, key)
+                if key == 'university_id' and value is not None:
+                    value = _as_uuid(value)
+                setattr(doc, attr, value)
         doc.updatedAt = datetime.now(timezone.utc)
         await session.commit()
         await session.refresh(doc)

@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from app import database
 from app.core import deps
-from app.rsosh import persist, processor, states
+from app.rsosh import persist, processor, states, university as university_import
 from app.rsosh.types import RsoshConflictError, RsoshError
 
 imports_page = APIRouter(
@@ -82,6 +82,27 @@ class ConfirmRequest(BaseModel):
     # {исходный name_norm: id существующей олимпиады} — принудительное
     # объединение с олимпиадой из каталога.
     merge: Dict[str, str] = Field(default_factory=dict)
+
+
+@imports_page.post(
+    '/university',
+    status_code=202,
+    responses={202: {'description': 'University document processed'}},
+)
+async def start_university_import(
+    payload: RsoshStartRequest,
+    current_user: deps.AdminUser = None,
+):
+    try:
+        doc = await university_import.run_university_import(payload.doc_id)
+        return {'id': doc['id'], 'status': doc['status'], 'metadata': doc.get('metadata')}
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 class ImportListItem(BaseModel):

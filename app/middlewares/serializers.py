@@ -97,6 +97,7 @@ def doc_to_dict(doc) -> dict:
         'storage_key': doc.storage_key,
         'mime_type': doc.mime_type,
         'source_url': doc.source_url,
+        'university_id': str(doc.university_id) if getattr(doc, 'university_id', None) else None,
         'checksum': doc.checksum,
         'status': doc.status,
         'processedAt': _iso(doc.processedAt),
