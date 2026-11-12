@@ -29,6 +29,15 @@ DEFAULT_LIMIT = 20
 MAX_LIMIT = 50
 
 
+class SearchProgramItem(BaseModel):
+    """Публичная строка образовательной программы."""
+
+    id: str | None = None
+    university_id: str | None = None
+    name: str | None = None
+    code: str | None = None
+
+
 class SearchResults(BaseModel):
     """Результат поиска по каталогам.
 
@@ -41,6 +50,7 @@ class SearchResults(BaseModel):
     query: str
     universities: List[schemas.universities.UniversityPublicResponse]
     olympiads: List[schemas.olympiads.OlympiadListItem]
+    programs: List[SearchProgramItem] = []
 
 
 @search_page.get(
@@ -65,7 +75,9 @@ async def search(
     try:
         query = (q or '').strip()
         if not query:
-            return {'query': '', 'universities': [], 'olympiads': []}
+            return {
+                'query': '', 'universities': [], 'olympiads': [], 'programs': [],
+            }
         universities = await database.universities.list_universities(
             search=query,
             limit=limit,
@@ -73,6 +85,11 @@ async def search(
         olympiads = await database.olympiads.list_olympiads(
             status='PUBLISHED',
             search=query,
+            limit=limit,
+        )
+        programs, _total = await database.programs.list_all_programs(
+            search=query,
+            include_archived=False,
             limit=limit,
         )
         # Валидация моделей ещё и отсекает лишнее: сырые словари слоя данных
@@ -95,6 +112,15 @@ async def search(
                     is_archived=item.get('status') != 'PUBLISHED',
                 )
                 for item in olympiads
+            ],
+            'programs': [
+                SearchProgramItem(
+                    id=item.get('id'),
+                    university_id=item.get('university_id'),
+                    name=item.get('name'),
+                    code=item.get('code'),
+                )
+                for item in programs
             ],
         }
     except Exception:

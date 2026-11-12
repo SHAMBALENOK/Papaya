@@ -27,6 +27,7 @@ from app.routers import (
     representative,
     search,
     seasons,
+    sources,
     universities,
     user,
 )
@@ -55,6 +56,7 @@ app.include_router(auth.auth_page, prefix='/api/v1')
 app.include_router(universities.universities_page, prefix='/api/v1')
 app.include_router(olympiads.olympiads_page, prefix='/api/v1')
 app.include_router(docs.docs_page, prefix='/api/v1')
+app.include_router(docs.university_docs_page, prefix='/api/v1')
 app.include_router(imports.imports_page, prefix='/api/v1')
 app.include_router(search.search_page, prefix='/api/v1')
 app.include_router(admin.admin_page, prefix='/api/v1')
@@ -67,6 +69,9 @@ app.include_router(benefits.benefits_page, prefix='/api/v1')
 app.include_router(benefits.benefit_rules_page, prefix='/api/v1')
 app.include_router(benefits.university_benefits_page, prefix='/api/v1')
 app.include_router(benefits.olympiad_benefits_page, prefix='/api/v1')
+app.include_router(benefits.admin_benefits_page, prefix='/api/v1')
+app.include_router(sources.admin_sources_page, prefix='/api/v1')
+app.include_router(sources.university_sources_page, prefix='/api/v1')
 app.include_router(representative.rep_apps_page, prefix='/api/v1')
 app.include_router(representative.applications_page, prefix='/api/v1')
 app.include_router(representative.admin_rep_page, prefix='/api/v1')

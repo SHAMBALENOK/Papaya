@@ -199,6 +199,33 @@ async def test_import_image_jpeg(client):
 # ----------------------------------------------------- дедупликация и повторы
 
 
+async def test_import_journal_keeps_run_and_records(client):
+    """Журнал прогона переживает применение: видно, чем закончился запуск."""
+    await admin_client(client)
+    doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())
+    await run_import(client, doc['id'])
+    await client.post(f"/api/v1/imports/{doc['id']}/confirm", json={})
+
+    jobs = await client.get('/api/v1/admin/imports', params={'doc_id': doc['id']})
+    assert jobs.status_code == 200, jobs.text
+    items = jobs.json()['imports']
+    assert items, 'запуск импорта должен попасть в журнал'
+    job = items[0]
+    assert job['status'] == 'APPLIED'
+    assert job['doc_id'] == doc['id']
+    assert job['finished_at']
+
+    detail = await client.get(f"/api/v1/admin/imports/{job['id']}")
+    assert detail.status_code == 200, detail.text
+    records = detail.json()['records']
+    assert records, 'построчные результаты прогона должны сохраняться'
+    assert {item['action'] for item in records}
+    assert all(item['job_id'] == job['id'] for item in records)
+
+    missing = await client.get(f'/api/v1/admin/imports/{uuid.uuid4()}')
+    assert missing.status_code == 404, missing.text
+
+
 async def test_repeated_import_of_same_document_creates_no_duplicates(client):
     await admin_client(client)
     doc = await upload_document(client, 'rsosh.xlsx', xlsx_bytes())

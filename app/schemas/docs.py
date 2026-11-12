@@ -85,6 +85,8 @@ class DocUpdate(BaseModel):
 class DocResponse(DocBase):
     storage_key: Optional[str] = None
     checksum: Optional[str] = None
+    university_id: Optional[UUID] = None
+    uploaded_by: Optional[UUID] = None
     processedAt: Optional[datetime] = None
     metadata: Optional[dict[str, Any]] = None
     createdAt: Optional[datetime] = None

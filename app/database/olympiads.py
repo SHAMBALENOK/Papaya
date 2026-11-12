@@ -122,6 +122,7 @@ async def add_olympiad(ins: dict) -> dict | None:
         official_url=ins.get('official_url'),
         preview_image=ins.get('preview_image'),
         image=ins.get('image'),
+        organizer=(ins.get('organizer') or '').strip() or None,
         source_doc_id=_as_uuid(ins['source_doc_id']) if ins.get('source_doc_id') else None,
         status=status,
     )
@@ -138,7 +139,7 @@ async def add_olympiad(ins: dict) -> dict | None:
 
 _OLYMPIAD_EDITABLE_FIELDS = frozenset({
     'name', 'description', 'official_url', 'preview_image', 'image',
-    'source_doc_id', 'status', 'archive_reason',
+    'organizer', 'source_doc_id', 'status', 'archive_reason',
 })
 
 
@@ -169,6 +170,9 @@ async def edit_olympiad(olympiad_id, ins: dict) -> dict | None:
                 continue
             if key == 'source_doc_id':
                 olympiad.source_doc_id = _as_uuid(value) if value else None
+                continue
+            if key == 'organizer':
+                olympiad.organizer = (value or '').strip() or None
                 continue
             setattr(olympiad, key, value)
 

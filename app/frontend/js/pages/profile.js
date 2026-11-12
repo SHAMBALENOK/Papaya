@@ -52,6 +52,7 @@ async function renderProfile() {
     page.innerHTML = userProfileHtml(res.data, { editable: true });
     const editBtn = document.getElementById('btn-edit-profile');
     if (editBtn) editBtn.addEventListener('click', () => openEditProfileModal(res.data));
+    if (res.data.role === 'USER') renderRepresentativeApplicationSection();
 }
 
 function userProfileHtml(u, { editable = false } = {}) {
@@ -108,6 +109,10 @@ function userProfileHtml(u, { editable = false } = {}) {
             <h2 id="profile-bio-title" class="${UI.eyebrow}">О себе</h2>
             <p class="mt-7 text-lg text-ink leading-[1.8]">${escHtml(u.bio || 'Нет информации.')}</p>
         </section>
+
+        ${editable && u.role === 'USER'
+            ? '<section id="rep-application-section" class="mt-16" aria-live="polite"></section>'
+            : ''}
 
         <p class="mt-14 mb-4 text-sm text-ink-faint">Зарегистрирован: ${formatDate(u.createdAt)}</p>
     </div>`;
@@ -173,6 +178,144 @@ function openEditProfileModal(u) {
             }
         } catch {
             showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
+        }
+        btn.disabled = false;
+    });
+}
+
+/* ------------------- Заявка на представительство ------------------- */
+
+/** Блок в профиле: подать заявку или увидеть её статус.
+ *
+ * Раньше заявку можно было создать только запросом к API: пользователь не
+ * видел ни формы, ни результата рассмотрения. Роль назначалась вручную.
+ */
+async function renderRepresentativeApplicationSection() {
+    const box = document.getElementById('rep-application-section');
+    if (!box) return;
+
+    box.innerHTML = loadingHtml('Проверяем заявки…');
+
+    const [appsRes, uniRes] = await Promise.all([
+        api.listMyRepresentativeApplications().catch(() => ({ ok: false, data: null })),
+        api.listUniversities().catch(() => ({ ok: false, data: null })),
+    ]);
+
+    if (!appsRes.ok) {
+        box.innerHTML = `
+            <p class="${UI.eyebrow}">Представительство</p>
+            <div class="mt-6">${alertHtml('Не удалось загрузить статус заявки', 'error')}</div>`;
+        return;
+    }
+
+    const applications = (appsRes.data && appsRes.data.applications) || [];
+    const universities = (uniRes.ok && uniRes.data && uniRes.data.universities) || [];
+    const latest = applications[0] || null;
+    const header = `
+        <p class="${UI.eyebrow}">Представительство</p>
+        <h2 class="mt-5 text-2xl font-extrabold tracking-tight">Стать представителем университета</h2>`;
+
+    if (latest && latest.status === 'pending') {
+        box.innerHTML = `${header}
+        <div class="${UI.card} px-8 py-6 mt-8">
+            <div class="flex flex-wrap items-center gap-3">
+                <span class="${UI.badge} ${UI.badgePending}">На рассмотрении</span>
+                <span class="text-sm text-ink-faint">от ${formatDate(latest.createdAt)}</span>
+            </div>
+            <p class="mt-4 text-ink">Университет: <span class="font-semibold">${escHtml(latest.university_name || 'не найден')}</span></p>
+            ${latest.justification ? `<p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(latest.justification)}</p>` : ''}
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">
+                Администратор Papaya рассмотрит заявку. После одобрения в меню появится
+                раздел «Мой университет», где можно вести правила льгот.
+            </p>
+        </div>`;
+        return;
+    }
+
+    if (latest && latest.status === 'approved') {
+        box.innerHTML = `${header}
+        <div class="${UI.card} px-8 py-6 mt-8">
+            <span class="${UI.badge} ${UI.badgeSuccess}">Заявка одобрена</span>
+            <p class="mt-4 text-ink">Университет: <span class="font-semibold">${escHtml(latest.university_name || 'не найден')}</span></p>
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">
+                Доступ к кабинету представителя уже открыт. Если раздел «Мой университет»
+                ещё не появился в меню, обновите страницу.
+            </p>
+        </div>`;
+        return;
+    }
+
+    if (!universities.length) {
+        box.innerHTML = `${header}
+        <p class="mt-5 text-lg text-ink-soft leading-relaxed">
+            Каталог университетов пока пуст. Заявку можно будет подать, когда
+            администратор добавит университет.
+        </p>`;
+        return;
+    }
+
+    const options = [{ value: '', label: 'Выберите университет' }]
+        .concat(universities.map(item => ({
+            value: item.id,
+            label: item.short_name || item.name,
+        })));
+
+    box.innerHTML = `${header}
+        <p class="mt-5 text-lg text-ink-soft leading-relaxed max-w-2xl">
+            Представитель ведёт правила льгот своего университета: выбирает олимпиады
+            из каталога и прикладывает документы-основания. Заявку рассматривает
+            администратор Papaya.
+        </p>
+        ${latest && latest.status === 'rejected'
+            ? `<div class="mt-8">${alertHtml(
+                'Предыдущая заявка отклонена'
+                + (latest.rejection_reason ? `: ${latest.rejection_reason}` : '')
+                + '. Можно подать новую.', 'error')}</div>`
+            : ''}
+        <form id="rep-application-form" class="mt-8 max-w-2xl">
+            <div id="rep-application-alert"></div>
+            ${selectField({
+                id: 'rep-application-university',
+                name: 'university_id',
+                label: 'Университет',
+                options,
+                value: '',
+            })}
+            ${textareaField({
+                id: 'rep-application-justification',
+                name: 'justification',
+                label: 'Почему вы представляете этот университет',
+                rows: 4,
+                placeholder: 'Должность, подразделение, ссылка на страницу сотрудника…',
+            })}
+            <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Отправить заявку</button>
+        </form>`;
+
+    const form = document.getElementById('rep-application-form');
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(form);
+        const universityId = fd.get('university_id') || '';
+        const alertBox = document.getElementById('rep-application-alert');
+        if (!universityId) {
+            alertBox.innerHTML = alertHtml('Выберите университет', 'error');
+            return;
+        }
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        try {
+            const res = await api.createRepresentativeApplication({
+                university_id: universityId,
+                justification: (fd.get('justification') || '').trim() || null,
+            });
+            if (res.ok) {
+                showToast('Заявка отправлена администратору', 'success');
+                await renderRepresentativeApplicationSection();
+                return;
+            }
+            alertBox.innerHTML = alertHtml(errorText(res), 'error');
+        } catch {
+            alertBox.innerHTML = alertHtml('Сетевая ошибка', 'error');
         }
         btn.disabled = false;
     });

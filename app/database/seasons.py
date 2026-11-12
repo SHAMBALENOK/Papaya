@@ -1,7 +1,7 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
@@ -26,6 +26,8 @@ def season_to_dict(s):
         'extra_params': s.extra_params,
         'availability': s.availability,
         'source_doc_id': str(s.source_doc_id) if s.source_doc_id else None,
+        'version': int(getattr(s, 'version', 1) or 1),
+        'is_archived': bool(getattr(s, 'is_archived', False)),
         'createdAt': _iso(s.createdAt),
         'updatedAt': _iso(s.updatedAt),
     }
@@ -39,16 +41,49 @@ def profile_to_dict(p):
         'profile_name': p.profile_name,
         'description': p.description,
         'extra_params': p.extra_params,
+        'version': int(getattr(p, 'version', 1) or 1),
         'createdAt': _iso(p.createdAt),
         'updatedAt': _iso(p.updatedAt),
     }
 
-async def list_seasons(olympiad_id):
+async def list_seasons(olympiad_id, *, include_archived=False):
     async with AsyncSessionLocal() as session:
+        stmt = select(OlympiadSeason).where(
+            OlympiadSeason.olympiad_id == _as_uuid(olympiad_id)
+        )
+        if not include_archived:
+            stmt = stmt.where(OlympiadSeason.is_archived.is_(False))
         result = await session.execute(
-            select(OlympiadSeason).where(OlympiadSeason.olympiad_id == _as_uuid(olympiad_id))
+            stmt.order_by(OlympiadSeason.season_label.desc(), OlympiadSeason.id)
         )
         return [season_to_dict(x) for x in result.scalars().all()]
+
+
+async def list_all_seasons(*, search=None, include_archived=True, limit=None, offset=0):
+    async with AsyncSessionLocal() as session:
+        stmt = select(OlympiadSeason)
+        count_stmt = select(func.count()).select_from(OlympiadSeason)
+        if search:
+            pattern = f'%{search.strip()}%'
+            stmt = stmt.where(OlympiadSeason.season_label.ilike(pattern))
+            count_stmt = count_stmt.where(
+                OlympiadSeason.season_label.ilike(pattern)
+            )
+        if not include_archived:
+            stmt = stmt.where(OlympiadSeason.is_archived.is_(False))
+            count_stmt = count_stmt.where(OlympiadSeason.is_archived.is_(False))
+        total = int((await session.execute(count_stmt)).scalar_one())
+        stmt = stmt.order_by(
+            OlympiadSeason.season_label.desc(), OlympiadSeason.id
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(max(0, int(offset or 0)))
+        result = await session.execute(stmt)
+        return [season_to_dict(x) for x in result.scalars().all()], total
+
+
+async def archive_season(season_id, archived: bool = True):
+    return await update_season(season_id, {'is_archived': bool(archived)})
 
 async def get_season(season_id):
     async with AsyncSessionLocal() as session:

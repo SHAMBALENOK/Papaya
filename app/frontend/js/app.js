@@ -128,6 +128,17 @@ function bviStatusBadge(status) {
     return `<span class="${UI.badge} ${UI.badgePending}">Ждёт подтверждения</span>`;
 }
 
+/** Статус правила льготы: черновик, проверено или отклонено. */
+function benefitStatusBadge(status) {
+    if (status === 'verified') {
+        return `<span class="${UI.badge} ${UI.badgeSuccess}">Проверено</span>`;
+    }
+    if (status === 'rejected') {
+        return `<span class="${UI.badge} ${UI.badgeDanger}">Отклонено</span>`;
+    }
+    return `<span class="${UI.badge} ${UI.badgePending}">Не проверено</span>`;
+}
+
 /* ---------- Поля форм ---------- */
 
 function inputField({ id, label, name, type = 'text', value = '', placeholder = '', required = false, autocomplete = '' }) {
@@ -318,6 +329,7 @@ function openOlympiadFormModal(olympiad, onDone) {
         <div id="modal-alert"></div>
         <form id="olympiad-form">
             ${inputField({ id: 'ol-name', name: 'name', label: 'Название олимпиады', required: true, value: (olympiad || {}).name || '' })}
+            ${inputField({ id: 'ol-organizer', name: 'organizer', label: 'Организатор', value: (olympiad || {}).organizer || '', placeholder: 'МФТИ, Минобрнауки России' })}
             ${inputField({ id: 'ol-site', name: 'official_url', label: 'Официальный сайт', type: 'url', value: (olympiad || {}).official_url || '', placeholder: 'https://…' })}
             ${inputField({ id: 'ol-preview', name: 'preview_image', label: 'Превью для карточек (URL)', type: 'url', value: (olympiad || {}).preview_image || '', placeholder: 'https://…' })}
             ${inputField({ id: 'ol-image', name: 'image', label: 'Большая картинка для страницы (URL)', type: 'url', value: (olympiad || {}).image || '', placeholder: 'https://…' })}
@@ -347,6 +359,7 @@ function openOlympiadFormModal(olympiad, onDone) {
             official_url: (fd.get('official_url') || '').trim() || null,
             preview_image: (fd.get('preview_image') || '').trim() || null,
             image: (fd.get('image') || '').trim() || null,
+            organizer: (fd.get('organizer') || '').trim() || null,
             description: (fd.get('description') || '').trim() || null,
         };
         const btn = e.target.querySelector('button[type="submit"]');
@@ -444,6 +457,7 @@ function navLinks() {
         { href: '#/', route: '/', label: 'Главная' },
         { href: '#/universities', route: '/universities', label: 'Университеты' },
         { href: '#/olympiads', route: '/olympiads', label: 'Олимпиады' },
+        { href: '#/benefits', route: '/benefits', label: 'Льготы' },
     ];
     if (store.user) {
         /* «Мой университет» — кабинет представителя: у администратора он не
@@ -502,6 +516,7 @@ function highlightNav(path) {
     let current = path || '/';
     if (current.startsWith('/universities')) current = '/universities';
     else if (current.startsWith('/olympiads')) current = '/olympiads';
+    else if (current.startsWith('/benefits')) current = '/benefits';
     else if (current.startsWith('/admin')) current = '/admin';
     else if (current === '/my-university') current = '/my-university';
     document.querySelectorAll('#nav a[data-route]').forEach(a => {

@@ -205,6 +205,13 @@ async def start_rsosh_import(
     """
     try:
         doc, mode = await processor.start_import(payload.doc_id)
+        await database.imports.start_job(
+            payload.doc_id, kind='RSOSH', user_id=current_user.get('id')
+        )
+        await database.audit.log_action(
+            'import', payload.doc_id, 'start',
+            user_id=current_user.get('id'), after={'execution': mode},
+        )
         view = _import_view(doc)
         view['execution'] = mode
         return view
@@ -363,6 +370,26 @@ async def confirm(
             archive_missing=chosen.archive_missing,
         )
         doc = result['document']
+        outcome = result['result']
+        records = []
+        for key, action, status in (
+            ('created', 'create', 'created'),
+            ('updated', 'merge', 'updated'),
+            ('archived', 'archive', 'archived'),
+            ('skipped', 'skip', 'skipped'),
+            ('errors', 'error', 'error'),
+        ):
+            for name in outcome.get(key) or []:
+                records.append(
+                    {'name': str(name), 'action': action, 'status': status}
+                )
+        await database.imports.finish_open_job(
+            import_id, status='APPLIED', summary=outcome, records=records,
+        )
+        await database.audit.log_action(
+            'import', import_id, 'confirm',
+            user_id=current_user.get('id'), after=result['result'],
+        )
         return {
             'import': _import_view(doc),
             'result': result['result'],
@@ -412,6 +439,13 @@ async def reject(
     try:
         await _rsosh_doc(import_id)
         rejected = await persist.reject_confirmed_import(import_id)
+        await database.imports.finish_open_job(
+            import_id, status='REJECTED', error='Rejected by administrator'
+        )
+        await database.audit.log_action(
+            'import', import_id, 'reject',
+            user_id=current_user.get('id'), after=rejected,
+        )
         return _import_view(rejected)
     except RsoshConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

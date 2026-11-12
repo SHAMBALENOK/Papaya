@@ -45,17 +45,28 @@ class BenefitRule(Base):
     )
     benefit_type = Column(String, nullable=False, default='BVI', index=True)
     required_result = Column(String, nullable=True)
-    subject = Column(String, nullable=True)
+    # Структурированная часть результата: тип (победитель/призёр/балл) и
+    # значение. Свободный текст сохранён для обратной совместимости и
+    # человекочитаемых уточнений.
+    required_result_type = Column(String, nullable=True)
+    required_result_value = Column(String, nullable=True)
+    subject = Column(String, nullable=True, index=True)
     additional_requirements = Column(Text, nullable=True)
     doc_id = Column(
         UUID(as_uuid=True),
         ForeignKey('docs.id', ondelete='SET NULL'),
         nullable=True,
     )
+    source_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('sources.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
     source_url = Column(String, nullable=True)
     verification_status = Column(String, nullable=False, default='unverified', index=True)
     rejection_reason = Column(Text, nullable=True)
-    is_published = Column('is_published', Boolean, nullable=False, default=True)
+    is_published = Column('is_published', Boolean, nullable=False, default=True, index=True)
     version = Column(Integer, nullable=False, default=1)
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     updated_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
@@ -67,6 +78,7 @@ class BenefitRule(Base):
     season = relationship('OlympiadSeason', backref='benefit_rules')
     profile = relationship('SeasonProfile', backref='benefit_rules')
     doc = relationship('Docs', backref='benefit_rules')
+    source = relationship('Source', backref='benefit_rules')
     programs = relationship(
         'UniversityProgram',
         secondary='benefit_rule_programs',
@@ -103,6 +115,12 @@ class BenefitRuleVersion(Base):
         index=True,
     )
     version_number = Column(Integer, nullable=False)
+    __table_args__ = (
+        UniqueConstraint(
+            'rule_id', 'version_number',
+            name='uq_benefit_rule_versions_rule_version',
+        ),
+    )
     snapshot = Column(JSONB, nullable=False)
     changed_fields = Column(JSONB, nullable=True)
     change_reason = Column(Text, nullable=True)

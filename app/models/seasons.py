@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -31,6 +32,7 @@ class OlympiadSeason(Base):
     extra_params = Column(JSONB, nullable=True)
     availability = Column(String, nullable=False, default='unknown')
     version = Column('version', Integer, nullable=False, default=1)
+    is_archived = Column(Boolean, nullable=False, default=False, index=True)
     source_doc_id = Column(
         UUID(as_uuid=True),
         ForeignKey('docs.id', ondelete='SET NULL'),

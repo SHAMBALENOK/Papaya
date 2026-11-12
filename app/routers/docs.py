@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -276,20 +277,29 @@ async def doc_details(
     responses={
         200: {'description': 'Document file'},
         401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
+        403: {'description': 'Permission denied'},
         404: {'description': 'Document or file not found'},
         500: {'description': 'Internal server error'},
     },
 )
 async def download_doc_file(
     doc_id: uuid.UUID,
-    current_user: deps.AdminUser = None,
+    current_user: dict = Depends(deps.get_current_user),
 ):
-    """Скачать файл документа (нужно для проверки, откуда взялись данные)."""
+    """Скачать файл документа (нужно для проверки, откуда взялись данные).
+
+    Администратор видит любой документ, представитель — только документы
+    своего университета. Общие источники (перечень РСОШ) остаются доступны
+    лишь администратору.
+    """
     try:
         doc = await database.docs.get_doc(doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail='Document not found')
+        if not deps.can_manage_university(
+            current_user, doc.get('university_id') or ''
+        ):
+            raise HTTPException(status_code=403, detail='Permission denied')
         return document_file_response(doc)
     except HTTPException:
         raise
@@ -320,9 +330,157 @@ async def edit_doc(
         update_data = update.model_dump(exclude_unset=True)
         if not update_data:
             raise HTTPException(status_code=400, detail='No fields to update')
+        before = await database.docs.get_doc(doc_id)
         updated = await database.docs.edit_doc(doc_id, update_data)
         if not updated:
             raise HTTPException(status_code=404, detail='Document not found')
+        await database.audit.log_action(
+            'doc', doc_id, 'edit',
+            user_id=current_user['id'], before=before, after=updated,
+        )
+        return updated
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+# ------------------------------------------------------- документы вуза
+
+university_docs_page = APIRouter(tags=['documents'])
+
+
+@university_docs_page.get('/universities/{university_id}/docs')
+async def list_university_docs(
+    university_id: uuid.UUID,
+    current_user: dict = Depends(deps.require_manage_university),
+):
+    """Документы университета: представитель видит только свои."""
+    try:
+        docs = await database.docs.list_docs(university_id=university_id)
+        return {'docs': docs}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@university_docs_page.post(
+    '/universities/{university_id}/docs',
+    response_model=schemas.docs.DocResponse,
+    status_code=201,
+    responses={
+        201: {'description': 'Document uploaded'},
+        400: {'description': 'Unsupported file format'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Permission denied'},
+        413: {'description': 'File exceeds the upload size limit'},
+        422: {'description': 'Validation error'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def upload_university_doc(
+    university_id: uuid.UUID,
+    file: UploadFile = File(...),
+    doc_type: str = Form(default='UNIVERSITY_ORDER', alias='type'),
+    name: str | None = Form(default=None),
+    current_user: dict = Depends(deps.require_manage_university),
+):
+    """Загрузить документ-основание своего университета.
+
+    Перечень РСОШ — общий источник каталога, его загружает только
+    администратор. Представитель прикладывает приказ/положение своего вуза,
+    поэтому документ всегда получает ``university_id`` и ``uploaded_by``.
+    """
+    try:
+        if doc_type not in ('UNIVERSITY_ORDER', 'OTHER'):
+            raise HTTPException(
+                status_code=422,
+                detail='Representative can upload only UNIVERSITY_ORDER or OTHER',
+            )
+
+        filename = secure_filename(file.filename or '')
+        extension = os.path.splitext(filename)[1].lower()
+        if not filename or extension not in ALLOWED_TABLE_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail='Unsupported file format. Allowed: '
+                + ', '.join(sorted(ALLOWED_TABLE_EXTENSIONS)),
+            )
+
+        doc_id = uuid.uuid4()
+        target = _storage_path(str(doc_id), extension)
+        os.makedirs(DOCS_DIR, exist_ok=True)
+        created = False
+        try:
+            try:
+                _size, checksum = _read_upload(file, target)
+            finally:
+                await file.close()
+
+            if not target.is_file() or target.stat().st_size == 0:
+                raise HTTPException(status_code=400, detail='Uploaded file is empty')
+
+            try:
+                kind = filetypes.detect(str(target))
+            except filetypes.RsoshError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            record = await database.docs.add_doc(
+                {
+                    'id': str(doc_id),
+                    'name': (name or filename).strip(),
+                    'type': doc_type,
+                    'storage_key': target.name,
+                    'mime_type': kind,
+                    'checksum': checksum,
+                    'status': 'UPLOADED',
+                    'university_id': str(university_id),
+                    'uploaded_by': current_user['id'],
+                }
+            )
+            created = record is not None
+            await database.audit.log_action(
+                'doc', record['id'], 'upload',
+                user_id=current_user['id'], after=record,
+            )
+            return record
+        finally:
+            if not created:
+                target.unlink(missing_ok=True)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@university_docs_page.patch('/universities/{university_id}/docs/{doc_id}')
+async def edit_university_doc(
+    university_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    update: schemas.docs.DocUpdate,
+    current_user: dict = Depends(deps.require_manage_university),
+):
+    """Изменить описание своего документа. Смена владельца запрещена."""
+    try:
+        doc = await database.docs.get_doc(doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail='Document not found')
+        if str(doc.get('university_id')) != str(university_id):
+            raise HTTPException(
+                status_code=403,
+                detail='Document belongs to another university',
+            )
+        update_data = update.model_dump(exclude_unset=True)
+        update_data.pop('university_id', None)
+        if not update_data:
+            raise HTTPException(status_code=400, detail='No fields to update')
+        updated = await database.docs.edit_doc(doc_id, update_data)
+        await database.audit.log_action(
+            'doc', doc_id, 'edit',
+            user_id=current_user['id'], before=doc, after=updated,
+        )
         return updated
     except HTTPException:
         raise

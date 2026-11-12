@@ -59,6 +59,7 @@ class Olympiads(Base):
     preview_image = Column(String, nullable=True)
     # Большая картинка для страницы олимпиады.
     image = Column(String, nullable=True)
+    organizer = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
     source_doc_id = Column(
         UUID(as_uuid=True),
