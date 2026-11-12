@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, String, Text
+from sqlalchemy import Boolean, Column, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -45,6 +45,7 @@ class Universities(Base):
     preview_image = Column(String, nullable=True)
     # Большая картинка для страницы университета.
     image = Column(String, nullable=True)
+    is_archived = Column(Boolean, nullable=False, default=False, index=True)
     createdAt = Column(DateTime(timezone=True), default=_utcnow, index=True)
     updatedAt = Column(
         DateTime(timezone=True),

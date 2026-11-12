@@ -11,7 +11,7 @@
 import uuid as uuid_mod
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.database.database import AsyncSessionLocal
@@ -49,6 +49,8 @@ async def list_universities(
     *,
     search: str | None = None,
     limit: int | None = None,
+    offset: int = 0,
+    include_archived: bool = False,
 ) -> list[dict]:
     """Список университетов с необязательным поиском.
 
@@ -66,13 +68,33 @@ async def list_universities(
             | _searchable(Universities.short_name).ilike(pattern, escape='\\')
             | _searchable(Universities.description).ilike(pattern, escape='\\')
         )
+    if not include_archived:
+        statement = statement.where(Universities.is_archived.is_(False))
     statement = statement.order_by(Universities.name_norm, Universities.id)
     if limit is not None:
-        statement = statement.limit(limit)
+        statement = statement.limit(limit).offset(max(0, int(offset or 0)))
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(statement)
         return [university_to_dict(item) for item in result.scalars().all()]
+
+
+async def count_universities(
+    *, search: str | None = None, include_archived: bool = False
+) -> int:
+    statement = select(func.count()).select_from(Universities)
+    query = (search or '').strip()
+    if query:
+        pattern = like_pattern(query)
+        statement = statement.where(
+            _searchable(Universities.name).ilike(pattern, escape='\\')
+            | _searchable(Universities.short_name).ilike(pattern, escape='\\')
+            | _searchable(Universities.description).ilike(pattern, escape='\\')
+        )
+    if not include_archived:
+        statement = statement.where(Universities.is_archived.is_(False))
+    async with AsyncSessionLocal() as session:
+        return int((await session.execute(statement)).scalar_one())
 
 
 async def add_university(ins: dict) -> dict | None:
@@ -109,6 +131,7 @@ async def add_university(ins: dict) -> dict | None:
 
 _UNIVERSITY_EDITABLE_FIELDS = frozenset({
     'name', 'short_name', 'description', 'website', 'preview_image', 'image',
+    'is_archived',
 })
 
 
@@ -149,3 +172,7 @@ async def edit_university(university_id, ins: dict) -> dict | None:
             return None
         await session.refresh(university)
         return university_to_dict(university)
+
+
+async def archive_university(university_id, archived: bool = True):
+    return await edit_university(university_id, {'is_archived': bool(archived)})

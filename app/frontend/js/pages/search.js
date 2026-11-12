@@ -47,9 +47,10 @@ async function renderSearch(query) {
 
     const universities = res.data.universities || [];
     const olympiads = res.data.olympiads || [];
+    const programs = res.data.programs || [];
 
-    if (!universities.length && !olympiads.length) {
-        box.innerHTML = emptyHtml('Ничего не нашлось', `По запросу «${query}» нет ни университетов, ни олимпиад.`);
+    if (!universities.length && !olympiads.length && !programs.length) {
+        box.innerHTML = emptyHtml('Ничего не нашлось', `По запросу «${query}» нет ни университетов, ни олимпиад, ни программ.`);
         return;
     }
 
@@ -60,8 +61,21 @@ async function renderSearch(query) {
         <div class="mt-8 grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${universities.map(universityCardHtml).join('')}</div>
     </div>` : ''}
     ${olympiads.length ? `
-    <div>
+    <div class="${programs.length ? 'mb-16' : ''}">
         <p class="${UI.eyebrow}">Олимпиады (${olympiads.length})</p>
         <div class="mt-8 grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${olympiads.map(olympiadCardHtml).join('')}</div>
+    </div>` : ''}
+    ${programs.length ? `
+    <div>
+        <p class="${UI.eyebrow}">Образовательные программы (${programs.length})</p>
+        <div class="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            ${programs.map(item => `
+                <a href="#/universities/${escAttr(item.university_id)}"
+                   class="block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+                    <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
+                    ${item.code ? `<p class="mt-2 text-sm text-ink-soft">Код: ${escHtml(item.code)}</p>` : ''}
+                    <p class="mt-4 text-sm font-semibold text-ink-soft">Открыть университет →</p>
+                </a>`).join('')}
+        </div>
     </div>` : ''}`;
 }

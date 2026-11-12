@@ -570,3 +570,240 @@ async def archive_olympiad(
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
+
+
+# ------------------------------------------------- панель: сводка и архивы
+
+
+class AdminUniversityListItem(BaseModel):
+    id: str | None = None
+    name: str | None = None
+    short_name: str | None = None
+    website: str | None = None
+    is_archived: bool | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class AdminProgramListItem(BaseModel):
+    id: str | None = None
+    university_id: str | None = None
+    name: str | None = None
+    code: str | None = None
+    is_archived: bool | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class AdminSeasonListItem(BaseModel):
+    id: str | None = None
+    olympiad_id: str | None = None
+    season_label: str | None = None
+    rsosh_level: str | None = None
+    is_archived: bool | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+@admin_page.get('/stats')
+async def admin_stats(current_user: deps.AdminUser = None):
+    """Сводка панели: сколько сущностей и что ждёт модерации."""
+    try:
+        return await database.stats.dashboard_stats()
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.get('/universities')
+async def admin_list_universities(
+    search: str | None = None,
+    include_archived: bool = True,
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    try:
+        universities = await database.universities.list_universities(
+            search=search,
+            limit=limit,
+            offset=offset,
+            include_archived=include_archived,
+        )
+        total = await database.universities.count_universities(
+            search=search, include_archived=include_archived
+        )
+        return {'universities': universities, 'total': total}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.post('/universities/{university_id}/archive')
+async def admin_archive_university(
+    university_id: uuid.UUID,
+    archived: bool = True,
+    current_user: deps.AdminUser = None,
+):
+    before = await database.universities.get_university(university_id)
+    if not before:
+        raise HTTPException(status_code=404, detail='University not found')
+    updated = await database.universities.archive_university(
+        university_id, archived
+    )
+    await database.audit.log_action(
+        'university', university_id,
+        'archive' if archived else 'restore',
+        user_id=current_user.get('id'), before=before, after=updated,
+    )
+    return updated
+
+
+@admin_page.get('/programs')
+async def admin_list_programs(
+    search: str | None = None,
+    include_archived: bool = True,
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    try:
+        programs, total = await database.programs.list_all_programs(
+            search=search,
+            include_archived=include_archived,
+            limit=limit,
+            offset=offset,
+        )
+        return {'programs': programs, 'total': total}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.post('/programs/{program_id}/archive')
+async def admin_archive_program(
+    program_id: uuid.UUID,
+    archived: bool = True,
+    current_user: deps.AdminUser = None,
+):
+    before = await database.programs.get_program(program_id)
+    if not before:
+        raise HTTPException(status_code=404, detail='Program not found')
+    updated = await database.programs.archive_program(program_id, archived)
+    await database.audit.log_action(
+        'program', program_id,
+        'archive' if archived else 'restore',
+        user_id=current_user.get('id'), before=before, after=updated,
+    )
+    return updated
+
+
+@admin_page.get('/seasons')
+async def admin_list_seasons(
+    search: str | None = None,
+    include_archived: bool = True,
+    limit: int | None = Query(default=None, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    try:
+        seasons, total = await database.seasons.list_all_seasons(
+            search=search,
+            include_archived=include_archived,
+            limit=limit,
+            offset=offset,
+        )
+        return {'seasons': seasons, 'total': total}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.post('/seasons/{season_id}/archive')
+async def admin_archive_season(
+    season_id: uuid.UUID,
+    archived: bool = True,
+    current_user: deps.AdminUser = None,
+):
+    before = await database.seasons.get_season(season_id)
+    if not before:
+        raise HTTPException(status_code=404, detail='Season not found')
+    updated = await database.seasons.archive_season(season_id, archived)
+    await database.audit.log_action(
+        'olympiad_season', season_id,
+        'archive' if archived else 'restore',
+        user_id=current_user.get('id'), before=before, after=updated,
+    )
+    return updated
+
+
+@admin_page.get('/docs')
+async def admin_list_docs(
+    university_id: uuid.UUID | None = None,
+    doc_type: str | None = Query(default=None, alias='type'),
+    status: str | None = None,
+    search: str | None = None,
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    try:
+        docs = await database.docs.list_docs(
+            doc_type=doc_type,
+            status=status,
+            university_id=university_id,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        total = await database.docs.count_docs(
+            doc_type=doc_type,
+            status=status,
+            university_id=university_id,
+            search=search,
+        )
+        return {'docs': docs, 'total': total}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.get('/imports')
+async def admin_list_import_jobs(
+    doc_id: uuid.UUID | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    current_user: deps.AdminUser = None,
+):
+    try:
+        return {
+            'imports': await database.imports.list_jobs(
+                doc_id=doc_id, limit=limit, offset=offset
+            )
+        }
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@admin_page.get('/imports/{job_id}')
+async def admin_get_import_job(
+    job_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """Один прогон импорта вместе с построчными результатами.
+
+    Журнал ``GET /admin/imports`` отвечает на вопрос «что и когда
+    запускали», а этот маршрут — «что именно получилось»: какие олимпиады
+    были добавлены, объединены или оставлены без изменений.
+    """
+    try:
+        job = await database.imports.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail='Import job not found')
+        return job
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')

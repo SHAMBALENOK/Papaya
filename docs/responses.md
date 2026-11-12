@@ -272,7 +272,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "status", "is_archived"}]}` |
+| 200 | Список олимпиад | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "organizer", "status", "is_archived"}]}` |
 
 `status`: `PUBLISHED` — в актуальном перечне РСОШ, `ARCHIVED` — больше нет
 в перечне (запись сохранена исторически).
@@ -290,7 +290,7 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "status", "is_archived": bool}` |
+| 200 | Карточка олимпиады | `{"id", "name", "description", "official_url", "preview_image", "image", "organizer", "status", "is_archived": bool}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
 Публичная модель минимальна: `name_norm`, `source_doc_id`, `createdAt`,
@@ -300,6 +300,9 @@
 
 `is_archived` — производное от `status` поле для интерфейса: карточка не
 разбирает статус сама. Значение всегда согласовано со `status`.
+
+`organizer` — организатор олимпиады (вуз, министерство или иная организация).
+Поле свободное: в перечне РСОШ формулировки разные, поэтому справочника нет.
 
 ---
 
@@ -345,7 +348,7 @@
 
 Ручное создание олимпиады (резервный путь; основной — импорт РСОШ).
 
-**Request body:** `{"name": str, "description"?, "official_url"?, "preview_image"?, "image"?}`
+**Request body:** `{"name": str, "description"?, "official_url"?, "preview_image"?, "image"?, "organizer"?}`
 
 | Code | Description | Body |
 |------|-------------|------|
@@ -357,7 +360,7 @@
 
 ## POST /olympiads/edit_olympiad/{olympiad_id}
 
-**Request body:** любое подмножество `{"name", "description", "official_url", "preview_image", "image", "status"}`.
+**Request body:** любое подмножество `{"name", "description", "official_url", "preview_image", "image", "organizer", "status"}`.
 
 | Code | Description | Body |
 |------|-------------|------|
@@ -377,10 +380,11 @@
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Найденные сущности | `{"query": str, "universities": [...], "olympiads": [...]}` |
-| 200 (пустой `q`) | Ничего не искали | `{"query": "", "universities": [], "olympiads": []}` |
+| 200 | Найденные сущности | `{"query": str, "universities": [...], "olympiads": [...], "programs": [{"id", "university_id", "name", "code"}]}` |
+| 200 (пустой `q`) | Ничего не искали | `{"query": "", "universities": [], "olympiads": [], "programs": []}` |
 
-Олимпиады в поиске не содержат `source_url`.
+Олимпиады в поиске не содержат `source_url`. Программы ищутся только по
+актуальным (неархивным) записям.
 
 ---
 
@@ -409,6 +413,30 @@
 | 403 | Не администратор | `{"detail": "Permission denied"}` |
 | 413 | Файл больше лимита | `{"detail": "File exceeds the 30 MB limit"}` |
 | 422 | Неверный тип документа | `{"detail": "Invalid document type. Allowed: ..."}` |
+
+---
+
+## GET/POST /universities/{university_id}/docs, PATCH /universities/{university_id}/docs/{doc_id}
+
+Документы-основания своего университета. **Представитель этого вуза или
+администратор.**
+
+- `GET` возвращает `{"docs": [...]}` — только документы указанного вуза.
+- `POST` принимает form data `file`, `type` (`UNIVERSITY_ORDER` | `OTHER`),
+  `name?`; документ получает `university_id` и `uploaded_by`.
+- `PATCH` меняет `name`, `type`, `note`; сменить владельца нельзя.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200/201 | Список или изменённый документ | `DocResponse` |
+| 400 | Пустое тело, формат файла или пустой файл | `{"detail": "..."}` |
+| 403 | Чужой университет или чужой документ | `{"detail": "Document belongs to another university"}` |
+| 404 | Документ не найден | `{"detail": "Document not found"}` |
+| 413 | Файл больше лимита | `{"detail": "File exceeds the ... limit"}` |
+
+`GET /docs/{doc_id}/file` доступен администратору и представителю университета,
+которому принадлежит документ. Общие документы (например, перечень РСОШ)
+скачивает только администратор.
 
 ---
 
@@ -649,6 +677,151 @@
 
 ---
 
+## Правила льгот
+
+**Публичная выдача:** `GET /benefits`, `GET /benefits/{id}`,
+`GET /benefits/{id}/versions`, `GET /benefits/{id}/status-history`,
+`GET /universities/{university_id}/benefits`,
+`GET /olympiads/{olympiad_id}/benefits`.
+
+Публично отдаются только правила с `verification_status: "verified"` и
+`is_published: true`. Черновики и отклонённые записи не видны даже по прямому
+id. Список поддерживает `university_id`, `olympiad_id`, `season_id`,
+`program_id`, `benefit_type`, `subject`, `search`, `limit` и `offset`; в
+ответе есть `total`.
+
+```json
+{"rules": [...], "total": 12, "limit": 50, "offset": 0}
+```
+
+**Кабинет представителя** (только свой вуз):
+
+- `GET /universities/{university_id}/benefit-rules/manage` — черновики,
+  отклонённые и проверенные правила с фильтрами `verification_status`,
+  `search`, `limit`, `offset` и `total`;
+- `GET /benefits/{id}/manage` — правило до проверки;
+- `GET /benefits/{id}/versions/manage`,
+  `GET /benefits/{id}/status-history/manage` — история;
+- `POST /universities/{university_id}/benefits`,
+  `PUT|PATCH /benefits/{id}`, `POST /benefits/{id}/rollback`.
+
+Созданное правило всегда `unverified`: `verification_status` из клиента
+игнорируется. Любая содержательная правка проверенного правила (включая смену
+набора программ) снова делает его `unverified`. Параллельная правка со старой
+`version` возвращает `409 {"detail": "Version conflict"}`.
+
+`is_published` — не содержание правила: представитель может скрыть проверенную
+льготу из каталога и вернуть её, не теряя `verified`. Версия при этом растёт,
+поэтому переключение тоже передаёт актуальную `version`.
+
+**Проверка — только администратор:** `POST /benefits/{id}/verify` требует
+непустые `doc_id` и `source_url`; `POST /benefits/{id}/reject` принимает
+`{"reason"}`. Администратору доступны
+`GET /admin/benefits`, `GET /admin/benefits/{id}` и
+`GET /admin/benefits/{id}/versions`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200/201 | Успех | правило или `{"rules", "total", "limit", "offset"}` |
+| 400 | Ссылки не принадлежат вузу/олимпиаде, нет сезона или источника | `{"detail": "..."}` |
+| 403 | Чужой вуз, попытка подтвердить правило или изменить статус проверки | `{"detail": "..."}` |
+| 404 | Правило не найдено или не опубликовано | `{"detail": "Benefit rule not found"}` |
+| 409 | Конфликт версий | `{"detail": "Version conflict"}` |
+
+---
+
+## GET /admin/stats, /admin/universities, /admin/programs, /admin/seasons, /admin/docs, /admin/imports
+
+**Администратор.** Сводка и полные списки для панели: `total` есть у
+университетов, программ и сезонов; `include_archived` по умолчанию `true`.
+Архивирование и восстановление:
+
+- `POST /admin/universities/{id}/archive?archived=true|false`
+- `POST /admin/programs/{id}/archive?archived=true|false`
+- `POST /admin/seasons/{id}/archive?archived=true|false`
+
+Архив не удаляет данные: правила, история и связи сохраняются, публичный
+каталог просто перестаёт показывать запись. `/admin/imports` отдаёт журнал
+прогонов РСОШ (кто и когда запустил, статус, итог).
+
+`/admin/docs` поддерживает `search` (подстрока по названию), `type`
+(`RSOSH_LIST`｜`UNIVERSITY_ORDER`｜`OTHER`), `status` (`UPLOADED`｜`PROCESSING`｜
+`PROCESSED`｜`NEEDS_REVIEW`｜`FAILED`｜`REJECTED`), `limit` и `offset`; в ответе
+есть `total`.
+
+`/admin/imports` принимает `doc_id`, `limit` и `offset`.
+
+---
+
+## GET /admin/imports/{job_id}
+
+**Администратор.** Один прогон импорта вместе с построчными результатами.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Прогон найден | `{"id", "doc_id", "kind", "status", "started_by", "started_at", "finished_at", "summary", "error", "records": [{"id", "job_id", "name", "action", "status", "payload", "createdAt"}]}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Прогон не найден | `{"detail": "Import job not found"}` |
+
+`status` прогона: `PROCESSING`, `APPLIED` или `REJECTED`. `records` — что именно
+произошло с каждой олимпиадой (`action`/`status`); `payload` хранит исходную
+строку импорта.
+
+---
+
+## GET /admin/sources, POST /admin/sources, DELETE /admin/sources/{source_id}
+
+**Администратор.** Справочник источников: смысловых ссылок на документ или
+страницу, откуда взято правило льготы. Один источник можно использовать в
+нескольких правилах.
+
+| `GET` | `/api/v1/admin/sources` | Query: `university_id`, `kind`, `limit`, `offset`; ответ `{"sources": [...], "total"}` |
+| `POST` | `/api/v1/admin/sources` | **Request body:** `{"name": str, "url"?, "kind"?: "RSOSH_LIST"｜"UNIVERSITY_ORDER"｜"WEBSITE"｜"OTHER", "university_id"?, "doc_id"?, "note"?}`; ответ 201 — источник |
+| `DELETE` | `/api/v1/admin/sources/{source_id}` | Ответ `{"deleted": true, "id": str}` |
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200/201 | Успех | источник или `{"sources", "total"}` |
+| 400 | Университет или документ не найден, пустое имя, неизвестный `kind` | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Источник не найден | `{"detail": "Source not found"}` |
+
+Удаление источника не удаляет правила: внешний ключ `benefit_rules.source_id`
+обнуляется (`ON DELETE SET NULL`), а документ-основание и `source_url` правила
+остаются.
+
+---
+
+## GET /universities/{university_id}/sources
+
+**Представитель своего вуза или администратор.** Источники, доступные в форме
+правила льготы: общие (`university_id: null`) и источники этого университета.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Список источников | `{"sources": [{"id", "name", "url", "kind", "university_id", "doc_id", "note"}]}` |
+| 403 | Чужой вуз или нет прав | `{"detail": "You can only manage your own university"}` |
+
+---
+
+## GET /admin/audit
+
+**Администратор.** Журнал действий с фильтрами.
+
+**Query:** `entity_type`, `entity_id`, `action`, `limit` (по умолчанию 100), `offset`.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Записи журнала | `{"logs": [{"id", "entity_type", "entity_id", "action", "user_id", "before", "after", "request_id", "createdAt"}], "total"}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+
+Типовые `entity_type`: `benefit_rule`, `university`, `olympiad_season`,
+`program`, `source`, `doc`, `import`, `representative_application`. Типовые
+`action`: `create`, `update`, `delete`, `verify`, `reject`, `status_change`,
+`rollback`, `archive`, `restore`, `upload`, `start`, `confirm`, `review`.
+
+---
+
 ## POST /admin/role/{user_id}
 
 Единственный способ изменить роль и привязку к университету. **Администратор.**
@@ -713,6 +886,30 @@
 `archived=true` ставит причину `MANUAL` (исключил администратор — вернуть
 можно). Олимпиада, исчезнувшая из перечня РСОШ, помечена `RSOSH_ABSENT` и
 возвращается только подтверждением импорта, где она снова встретилась.
+
+---
+
+## POST /representative-applications, GET /applications/my
+
+**Пользователь.** Заявка на роль представителя университета. Пока заявка
+`pending`, повторная отправка на тот же вуз возвращает существующую запись, а не
+создаёт дубль. `GET /applications/my` отдаёт свои заявки с названием вуза и
+датой — по ним профиль показывает статус рассмотрения.
+
+**Request body:** `{"university_id": "...", "justification": "..."}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200/201 | Заявка создана или уже существует | заявка |
+| 401 | Нет авторизации | `{"detail": "..."}` |
+| 404 | Университет не найден | `{"detail": "University not found"}` |
+
+Администратор рассматривает заявки через
+`GET /admin/representative-applications?status=` (в ответе есть `user_name`,
+`user_email`, `university_name`) и
+`POST /admin/representative-applications/{id}/review` с телом
+`{"status": "approved"｜"rejected", "rejection_reason": "..."}`. Одобрение
+назначает роль `EDITOR` и привязку к вузу; отклонение сохраняет причину.
 
 ---
 

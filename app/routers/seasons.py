@@ -2,6 +2,7 @@ import uuid
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from app import database
 from app.core import deps
@@ -37,7 +38,9 @@ def _parse_dt(v):
     if not v:
         return None
     from datetime import datetime
-    return datetime.fromisoformat(v)
+    # Клиент присылает ISO из toISOString(): с суффиксом Z. fromisoformat
+    # понимает его не во всех поддерживаемых версиях Python.
+    return datetime.fromisoformat(str(v).replace('Z', '+00:00'))
 
 
 @olympiad_seasons_page.get('/olympiads/{olympiad_id}/seasons')
@@ -53,6 +56,12 @@ async def list_olympiad_seasons(olympiad_id: uuid.UUID):
 @olympiad_seasons_page.post('/olympiads/{olympiad_id}/seasons')
 async def create_olympiad_season(olympiad_id: uuid.UUID, body: SeasonCreate, current_user: dict = Depends(deps.require_admin)):
     try:
+        # Проверяем олимпиаду заранее: иначе нарушение внешнего ключа
+        # неотличимо от дубля сезона и клиент получал бы 409 «сезон уже есть»
+        # вместо честного 404.
+        olympiad = await database.olympiads.get_olympiad(olympiad_id)
+        if not olympiad:
+            raise HTTPException(status_code=404, detail='Olympiad not found')
         data = body.model_dump()
         data['olympiad_id'] = str(olympiad_id)
         for f in ('registration_start', 'registration_end', 'event_start', 'event_end'):
@@ -60,6 +69,15 @@ async def create_olympiad_season(olympiad_id: uuid.UUID, body: SeasonCreate, cur
         season = await database.seasons.create_season(data)
         await database.audit.log_action('olympiad_season', season['id'], 'create', user_id=current_user['id'], after=season)
         return season
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail='Season with this label already exists for the olympiad',
+        ) from exc
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -99,6 +117,13 @@ async def update_season(season_id: uuid.UUID, body: SeasonCreate, current_user: 
         return season
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail='Season with this label already exists for the olympiad',
+        ) from exc
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')

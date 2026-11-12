@@ -2,6 +2,7 @@ import uuid
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from app import database
 from app.core import deps
@@ -38,11 +39,21 @@ async def list_university_programs(university_id: uuid.UUID):
 @university_programs_page.post('/universities/{university_id}/programs')
 async def create_university_program(university_id: uuid.UUID, body: ProgramCreate, current_user: dict = Depends(deps.require_admin)):
     try:
+        university = await database.universities.get_university(university_id)
+        if not university:
+            raise HTTPException(status_code=404, detail='University not found')
         data = body.model_dump()
         data['university_id'] = str(university_id)
         program = await database.programs.create_program(data)
         await database.audit.log_action('university_program', program['id'], 'create', user_id=current_user['id'], after=program)
         return program
+    except HTTPException:
+        raise
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail='Program with this name already exists for the university',
+        ) from exc
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -79,6 +90,11 @@ async def update_program(program_id: uuid.UUID, body: ProgramUpdate, current_use
         return program
     except HTTPException:
         raise
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail='Program with this name already exists for the university',
+        ) from exc
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')

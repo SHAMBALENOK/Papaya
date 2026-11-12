@@ -68,11 +68,13 @@ async function renderOlympiad(olympiadId) {
     if (!olympiadId) { renderNotFound(); return; }
     page.innerHTML = loadingHtml('Открываем олимпиаду…');
 
-    const [olyRes, uniRes, srcRes, seasonRes] = await Promise.all([
+    const [olyRes, uniRes, srcRes, seasonRes, benRes, allUniRes] = await Promise.all([
         api.getOlympiad(olympiadId),
         api.getOlympiadUniversities(olympiadId),
         api.getOlympiadSource(olympiadId).catch(() => ({ ok: false })),
         api.listSeasons(olympiadId).catch(() => ({ ok: false })),
+        api.listOlympiadBenefits(olympiadId).catch(() => ({ ok: false })),
+        api.listUniversities().catch(() => ({ ok: false })),
     ]);
 
     if (!olyRes.ok || !olyRes.data) {
@@ -86,6 +88,11 @@ async function renderOlympiad(olympiadId) {
     const universities = (uniRes.ok && uniRes.data && uniRes.data.universities) || [];
     const source = (srcRes.ok && srcRes.data) || null;
     const seasons = (seasonRes.ok && seasonRes.data && seasonRes.data.seasons) || [];
+    const benefits = (benRes.ok && benRes.data && benRes.data.rules) || [];
+    const allUniversities = (allUniRes.ok && allUniRes.data && allUniRes.data.universities) || [];
+    const universityNames = new Map(
+        allUniversities.map(item => [String(item.id), item])
+    );
     const isAdmin = store.isAdmin();
     const isArchived = olympiad.status === 'ARCHIVED';
 
@@ -135,6 +142,8 @@ async function renderOlympiad(olympiadId) {
            </div>`
         : '';
 
+    const benefitsHtml = olympiadBenefitsHtml(benefits, universityNames);
+
     page.innerHTML = `
     <article class="max-w-narrow mx-auto pb-16 md:pb-24">
         <a href="#/olympiads" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
@@ -151,6 +160,9 @@ async function renderOlympiad(olympiadId) {
         <header class="mt-14">
             ${olympiadStatusBadge(olympiad.status)}
             <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(olympiad.name)}</h1>
+            ${olympiad.organizer
+                ? `<p class="mt-4 text-lg text-ink-soft leading-relaxed">Организатор: ${escHtml(olympiad.organizer)}</p>`
+                : ''}
         </header>
 
         <section class="mt-8">
@@ -170,6 +182,8 @@ async function renderOlympiad(olympiadId) {
         </section>` : ''}
 
         ${sourceBlockHtml(source, olympiadId)}
+
+        ${benefitsHtml}
 
         ${isAdmin ? `
         <section class="mt-12">
@@ -244,5 +258,73 @@ function sourceBlockHtml(source, olympiadId) {
             <h2 class="${UI.eyebrow}">Откуда взялась информация</h2>
             <p class="mt-4 text-base font-semibold">${escHtml(title || 'Источник не указан')}</p>
             ${downloadHtml}
+        </section>`;
+}
+
+/** Льготы, которые университеты дают за эту олимпиаду.
+ *
+ * Публичный список отдаёт только проверенные опубликованные правила.
+ * Группировка по вузу отвечает на главный вопрос страницы: «что именно даёт
+ * этот университет за диплом этой олимпиады».
+ */
+function olympiadBenefitsHtml(rules, universityNames) {
+    if (!rules || !rules.length) return '';
+
+    const groups = new Map();
+    rules.forEach(rule => {
+        const key = String(rule.university_id);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(rule);
+    });
+
+    const cards = [...groups.entries()].map(([universityId, items]) => {
+        const university = universityNames.get(universityId);
+        const universityName = university
+            ? (university.short_name || university.name)
+            : 'Университет';
+        const universityHtml = university
+            ? `<a href="#/universities/${escAttr(university.id)}"
+                   class="underline decoration-mist hover:decoration-ink">${escHtml(universityName)}</a>`
+            : escHtml(universityName);
+
+        const rows = items.map(rule => {
+            const typeLabel = (typeof BENEFIT_TYPE_LABELS !== 'undefined'
+                ? BENEFIT_TYPE_LABELS[rule.benefit_type] : null)
+                || rule.benefit_type || 'Льгота';
+            const result = (typeof publicBenefitResultText === 'function'
+                ? publicBenefitResultText(rule)
+                : (rule.required_result || ''));
+            return `
+            <li class="border-t border-mist pt-4 first:border-0 first:pt-0">
+                <p class="font-semibold text-ink leading-snug">
+                    ${escHtml(typeLabel)}${rule.subject ? ` · ${escHtml(rule.subject)}` : ''}
+                </p>
+                ${result ? `<p class="mt-2 text-sm text-ink-soft">Условие: ${escHtml(result)}</p>` : ''}
+                ${rule.additional_requirements
+                    ? `<p class="mt-2 text-sm text-ink-soft">Дополнительно: ${escHtml(rule.additional_requirements)}</p>`
+                    : ''}
+                ${rule.source_url
+                    ? `<p class="mt-2 text-sm"><a href="${escAttr(rule.source_url)}" target="_blank"
+                           rel="noopener noreferrer" class="underline">Источник</a></p>`
+                    : ''}
+            </li>`;
+        }).join('');
+
+        return `
+        <div class="${UI.card} px-8 py-7">
+            <p class="font-bold text-ink">${universityHtml}</p>
+            <ul class="mt-4 space-y-4">${rows}</ul>
+        </div>`;
+    }).join('');
+
+    return `
+        <section class="mt-20 md:mt-28">
+            <h2 class="${UI.eyebrow}">Льготы</h2>
+            <h3 class="mt-5 text-3xl font-extrabold tracking-tight leading-[1.1]">Что даёт олимпиада при поступлении</h3>
+            <p class="mt-6 text-lg text-ink-soft leading-relaxed">
+                Проверенные правила льгот из кабинетов университетов.
+                В других вузах условия устанавливает сам вуз.
+            </p>
+            <div class="mt-12 space-y-5">${cards}</div>
         </section>`;
 }

@@ -7,6 +7,7 @@
  *   #/universities/{id}     университет и его БВИ-олимпиады
  *   #/olympiads             каталог олимпиад
  *   #/olympiads/{id}        олимпиада, её сайты и вузы с БВИ
+ *   #/benefits              каталог проверенных льгот
  *   #/search?q=…            результаты поиска
  *   #/auth                  вход и регистрация
  *
@@ -17,7 +18,7 @@
  *   #/admin/imports/{id}    просмотр и подтверждение результатов импорта
  * ========================================================================== */
 
-const PUBLIC_PREFIXES = ['/universities', '/olympiads', '/search'];
+const PUBLIC_PREFIXES = ['/universities', '/olympiads', '/benefits', '/search'];
 
 function navigate(hash) {
     if (window.location.hash === hash) {
@@ -79,6 +80,8 @@ function router() {
             renderOlympiads();
         } else if (path.startsWith('/olympiads/')) {
             renderOlympiad(path.split('/olympiads/')[1]);
+        } else if (path === '/benefits') {
+            renderBenefits();
         } else if (path === '/search') {
             renderSearch(new URLSearchParams(currentQuery()).get('q') || '');
         } else if (path === '/profile') {

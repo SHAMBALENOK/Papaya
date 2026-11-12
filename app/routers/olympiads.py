@@ -74,6 +74,7 @@ def _serialize(olympiad: dict) -> dict:
         'official_url': olympiad.get('official_url'),
         'preview_image': olympiad.get('preview_image'),
         'image': olympiad.get('image'),
+        'organizer': olympiad.get('organizer'),
         'status': olympiad.get('status'),
         'is_archived': olympiad.get('status') != 'PUBLISHED',
     }

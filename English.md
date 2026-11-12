@@ -33,7 +33,7 @@ The whole product is described by one chain:
 University → olympiads that grant BVI → olympiad details → official website
 ```
 
-Anything that does not support this chain is intentionally absent: no olympiad calendar, no stage schedule, no deadlines, no organizers, no recommendation algorithms. Papaya is an aggregator and a catalog, not an admissions system.
+Anything that does not support this chain is intentionally absent: no olympiad calendar, no stage schedule, no deadlines, no recommendation algorithms. Papaya is an aggregator and a catalog, not an admissions system.
 
 ## User flow
 
@@ -81,9 +81,10 @@ Key decisions:
 - **A skipped row is not a missing one.** If an administrator removed a row in the preview, it does not count as missing from the list: a single recognition error must not archive a real olympiad.
 - **Two images per entity.** `preview_image` is used in catalog cards, `image` on the entity page; if one is missing, the interface falls back to the other.
 - **Documents are data sources.** Each olympiad stores `source_doc_id`, so it is always clear where the information came from: the olympiad page shows the source via `GET /api/v1/olympiads/<id>/source`, publicly and without exposing the uploaded file itself. The internal `source_doc_id` is not part of public responses, and the source endpoint always answers `200` — a manual entry has a source too ("created by a Papaya administrator").
-- **The public model is minimal.** An olympiad response carries only user-facing fields (`id`, `name`, `description`, `official_url`, `preview_image`, `image`, `source_url`, `status`). Internal `name_norm`, `source_doc_id`, `createdAt`, `updatedAt` and `archive_reason` never reach a visitor: they matter for imports and for the admin panel, and explain nothing to a reader.
+- **The public model is minimal.** An olympiad response carries only user-facing fields (`id`, `name`, `description`, `official_url`, `preview_image`, `image`, `organizer`, `status`). Internal `name_norm`, `source_doc_id`, `createdAt`, `updatedAt` and `archive_reason` never reach a visitor: they matter for imports and for the admin panel, and explain nothing to a reader.
 - **The short name comes first.** Cards, catalogs and page headings show the short name (`MIPT`) first and the full name underneath. The full name is never hidden.
-- **There is no generic "organization" entity.** Papaya models neither olympiad organizers nor schools: that would be an extra abstraction level for a single participant type.
+- **Organizers are a free-text field, not an entity.** An olympiad has an optional `organizer` string (a university, a ministry, another organization). RSOSH lists phrase it differently, so normalizing it into a directory would lose data; no organizer catalog or "organization" abstraction exists.
+- **Sources are references, not organizations.** A `Source` is a semantic link to a document or page a benefit rule was taken from (an RSOSH list, a university order, a website). It is a directory maintained by the administrator, reusable across rules, and deliberately not an organization record.
 
 ## Roles and permissions
 
@@ -250,6 +251,11 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `POST` | `/api/v1/olympiads/add_olympiad` | Create an olympiad manually | `ADMIN` |
 | `POST` | `/api/v1/olympiads/edit_olympiad/<id>` | Update an olympiad | `ADMIN` |
 | `GET` | `/api/v1/search?q=` | Search both catalogs | Public |
+| `GET` | `/api/v1/benefits` | Verified and published benefit rules (`search`, `benefit_type`, `university_id`, `limit`, `offset`) | Public |
+| `GET` | `/api/v1/benefits/<id>` | One published benefit rule | Public |
+| `GET` | `/api/v1/olympiads/<id>/benefits` | Published benefit rules for an olympiad | Public |
+| `GET` | `/api/v1/universities/<id>/benefits` | Published benefit rules of a university | Public |
+| `GET` | `/api/v1/universities/<id>/sources` | Sources available to the representative: global ones and the university's own | `EDITOR` (own university) or `ADMIN` |
 | `POST` | `/api/v1/docs/upload` | Upload a source document (RSOSH list, order, other) | `ADMIN` |
 | `POST` | `/api/v1/imports/rsosh` | Start an RSOSH import | `ADMIN` |
 | `GET` | `/api/v1/imports` | List of import runs | `ADMIN` |
@@ -263,6 +269,15 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `POST` | `/api/v1/admin/archive_olympiad/<id>` | Archive or restore an olympiad (409 when restoring one absent in the RSOSH list) | `ADMIN` |
 | `GET` | `/api/v1/admin/users` | Manage users and roles | `ADMIN` |
 | `GET` | `/api/v1/admin/bvi` | BVI request moderation queue | `ADMIN` |
+| `GET` | `/api/v1/admin/docs` | Document list (`search`, `type`, `status`, `limit`, `offset`, `total`) | `ADMIN` |
+| `GET` | `/api/v1/admin/imports` | Import run journal | `ADMIN` |
+| `GET` | `/api/v1/admin/imports/<id>` | One import run with per-row records | `ADMIN` |
+| `GET` | `/api/v1/admin/sources` | Source directory (`university_id`, `kind`, `limit`, `offset`, `total`) | `ADMIN` |
+| `POST` | `/api/v1/admin/sources` | Create a source | `ADMIN` |
+| `DELETE` | `/api/v1/admin/sources/<id>` | Delete a source (rules keep their document and URL) | `ADMIN` |
+| `GET` | `/api/v1/admin/audit` | Audit log (`entity_type`, `entity_id`, `action`, `limit`, `offset`, `total`) | `ADMIN` |
+| `POST` | `/api/v1/representative-applications` | Apply to represent a university | Authenticated |
+| `GET` | `/api/v1/applications/my` | Own representative applications | Authenticated |
 | `POST` | `/api/v1/auth/register` | Register a user | Public |
 | `POST` | `/api/v1/auth/login` | Log in and set JWT cookies | Public |
 | `POST` | `/api/v1/auth/logout` | Log out and remove JWT cookies | Authenticated |

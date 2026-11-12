@@ -1,6 +1,6 @@
 import uuid
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
 from app import database
@@ -26,8 +26,13 @@ class ReviewRequest(BaseModel):
 @rep_apps_page.post('')
 async def create_application(body: ApplicationCreate, current_user: dict = Depends(deps.get_current_user)):
     try:
+        university = await database.universities.get_university(body.university_id)
+        if not university:
+            raise HTTPException(status_code=404, detail='University not found')
         app = await database.representative.create_application(current_user['id'], body.university_id, body.justification)
         return app
+    except HTTPException:
+        raise
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -36,6 +41,17 @@ async def create_application(body: ApplicationCreate, current_user: dict = Depen
 @applications_page.post('')
 async def create_application_alias(body: ApplicationCreate, current_user: dict = Depends(deps.get_current_user)):
     return await create_application(body, current_user)
+
+
+@applications_page.get('/my')
+async def list_my_applications(current_user: dict = Depends(deps.get_current_user)):
+    """Свои заявки представителя: профиль показывает статус рассмотрения."""
+    try:
+        apps = await database.representative.list_applications(user_id=current_user['id'])
+        return {'applications': apps}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 @admin_rep_page.get('/admin/representative-applications')
@@ -49,10 +65,21 @@ async def list_applications(status: str | None = None, current_user: dict = Depe
 
 
 @admin_rep_page.get('/admin/audit')
-async def list_audit(entity_type: str | None = None, entity_id: str | None = None, limit: int = 100, current_user: dict = Depends(deps.require_admin)):
+async def list_audit(
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    action: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    current_user: dict = Depends(deps.require_admin),
+):
+    """Журнал действий с фильтрами по сущности, id и действию."""
     try:
-        logs = await database.audit.list_audit(entity_type, entity_id, limit)
-        return {'logs': logs}
+        logs = await database.audit.list_audit(
+            entity_type, entity_id, action, limit=limit, offset=offset
+        )
+        total = await database.audit.count_audit(entity_type, entity_id, action)
+        return {'logs': logs, 'total': total}
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -61,6 +88,8 @@ async def list_audit(entity_type: str | None = None, entity_id: str | None = Non
 @admin_rep_page.post('/admin/representative-applications/{app_id}/review')
 async def review_application(app_id: uuid.UUID, body: ReviewRequest, current_user: dict = Depends(deps.require_admin)):
     try:
+        if body.status not in ('approved', 'rejected'):
+            raise HTTPException(status_code=400, detail='status must be approved or rejected')
         app = await database.representative.review_application(app_id, body.status, current_user['id'], body.rejection_reason)
         if not app:
             raise HTTPException(status_code=404, detail='Application not found')

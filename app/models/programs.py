@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -30,6 +31,7 @@ class UniversityProgram(Base):
     code = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     version = Column('version', Integer, nullable=False, default=1)
+    is_archived = Column(Boolean, nullable=False, default=False, index=True)
     createdAt = Column(DateTime(timezone=True), default=_utcnow, index=True)
     updatedAt = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 

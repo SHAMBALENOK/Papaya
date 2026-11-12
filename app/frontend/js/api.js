@@ -19,6 +19,18 @@ function adminQuery(opts) {
     return query ? `?${query}` : '';
 }
 
+/* Только заполненные параметры: undefined/null/'' не должны попадать в query
+   (URLSearchParams превращает undefined в строку "undefined"). */
+function cleanQuery(params) {
+    const clean = {};
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+            clean[key] = value;
+        }
+    });
+    return new URLSearchParams(clean).toString();
+}
+
 function isJwtAuthError(status, data) {
     if (status !== 401 && status !== 403) return false;
     const detail = data && typeof data.detail === 'string' ? data.detail.toLowerCase() : '';
@@ -153,6 +165,10 @@ const api = {
     getOlympiad(id)      { return this.get(`/olympiads/${id}`, { skipAuthRedirect: true }); },
     getOlympiadUniversities(id) { return this.get(`/olympiads/${id}/universities`, { skipAuthRedirect: true }); },
     getOlympiadSource(id) { return this.get(`/olympiads/${id}/source`, { skipAuthRedirect: true }); },
+    listOlympiadBenefits(id, params) {
+        const clean = cleanQuery(params);
+        return this.get(`/olympiads/${id}/benefits${clean ? `?${clean}` : ''}`, { skipAuthRedirect: true });
+    },
     /* Публичная ссылка на файл документа-источника олимпиады (если есть). */
     olympiadSourceFileUrl(id) { return `${API_BASE}/olympiads/${id}/source/file`; },
     addOlympiad(d)       { return this.post('/olympiads/add_olympiad', d); },
@@ -174,28 +190,54 @@ const api = {
 
     /* Правила льгот */
     listBenefits(params) {
-        const q = new URLSearchParams(params || {}).toString();
+        const q = cleanQuery(params);
         return this.get(`/benefits${q ? `?${q}` : ''}`, { skipAuthRedirect: true });
     },
-    listUniversityBenefits(id) { return this.get(`/universities/${id}/benefits`, { skipAuthRedirect: true }); },
+    listUniversityBenefits(id, params) {
+        const q = cleanQuery(params);
+        return this.get(`/universities/${id}/benefits${q ? `?${q}` : ''}`, { skipAuthRedirect: true });
+    },
+    listUniversityBenefitRulesManage(id, params) {
+        const q = cleanQuery(params);
+        return this.get(`/universities/${id}/benefit-rules/manage${q ? `?${q}` : ''}`);
+    },
     createBenefit(universityId, d) { return this.post(`/universities/${universityId}/benefits`, d); },
     getBenefit(id) { return this.get(`/benefits/${id}`, { skipAuthRedirect: true }); },
+    getBenefitManage(id) { return this.get(`/benefits/${id}/manage`); },
     updateBenefit(id, d) { return this.put(`/benefits/${id}`, d); },
+    patchBenefit(id, d) { return this.request('PATCH', `/benefits/${id}`, d); },
     verifyBenefit(id) { return this.post(`/benefits/${id}/verify`); },
     rejectBenefit(id, d) { return this.post(`/benefits/${id}/reject`, d || {}); },
     benefitVersions(id) { return this.get(`/benefits/${id}/versions`, { skipAuthRedirect: true }); },
+    benefitVersionsManage(id) { return this.get(`/benefits/${id}/versions/manage`); },
     rollbackBenefit(id, version) { return this.post(`/benefits/${id}/rollback`, { version }); },
     benefitStatusHistory(id) { return this.get(`/benefits/${id}/status-history`, { skipAuthRedirect: true }); },
+    benefitStatusHistoryManage(id) { return this.get(`/benefits/${id}/status-history/manage`); },
+
+    /* Документы своего университета (представитель) */
+    listUniversityDocs(universityId) {
+        return this.get(`/universities/${universityId}/docs`);
+    },
+    uploadUniversityDoc(universityId, formData) {
+        return this.postForm(`/universities/${universityId}/docs`, formData);
+    },
+    updateUniversityDoc(universityId, docId, d) {
+        return this.request('PATCH', `/universities/${universityId}/docs/${docId}`, d);
+    },
+    listUniversitySources(universityId) {
+        return this.get(`/universities/${universityId}/sources`);
+    },
 
     /* Заявки представителей */
     createRepresentativeApplication(d) { return this.post('/representative-applications', d); },
+    listMyRepresentativeApplications() { return this.get('/applications/my'); },
     listRepresentativeApplications(status) {
         const q = status ? `?status=${encodeURIComponent(status)}` : '';
         return this.get(`/admin/representative-applications${q}`);
     },
     reviewRepresentativeApplication(id, d) { return this.post(`/admin/representative-applications/${id}/review`, d); },
     listAudit(params) {
-        const q = new URLSearchParams(params || {}).toString();
+        const q = cleanQuery(params);
         return this.get(`/admin/audit${q ? `?${q}` : ''}`);
     },
 
@@ -263,5 +305,68 @@ const api = {
     },
     archiveOlympiad(id, archived) {
         return this.post(`/admin/archive_olympiad/${id}?archived=${archived === false ? 'false' : 'true'}`);
+    },
+
+    /* Панель администратора: сводка и архивы */
+    adminStats() { return this.get('/admin/stats'); },
+    adminUniversities(opts) {
+        const params = new URLSearchParams();
+        if (opts && opts.search) params.set('search', opts.search);
+        if (opts && opts.include_archived != null) params.set('include_archived', opts.include_archived);
+        if (opts && opts.limit != null) params.set('limit', opts.limit);
+        if (opts && opts.offset != null) params.set('offset', opts.offset);
+        const q = params.toString();
+        return this.get(`/admin/universities${q ? `?${q}` : ''}`);
+    },
+    adminPrograms(opts) {
+        const params = new URLSearchParams();
+        if (opts && opts.search) params.set('search', opts.search);
+        if (opts && opts.include_archived != null) params.set('include_archived', opts.include_archived);
+        if (opts && opts.limit != null) params.set('limit', opts.limit);
+        if (opts && opts.offset != null) params.set('offset', opts.offset);
+        const q = params.toString();
+        return this.get(`/admin/programs${q ? `?${q}` : ''}`);
+    },
+    adminSeasons(opts) {
+        const params = new URLSearchParams();
+        if (opts && opts.search) params.set('search', opts.search);
+        if (opts && opts.include_archived != null) params.set('include_archived', opts.include_archived);
+        if (opts && opts.limit != null) params.set('limit', opts.limit);
+        if (opts && opts.offset != null) params.set('offset', opts.offset);
+        const q = params.toString();
+        return this.get(`/admin/seasons${q ? `?${q}` : ''}`);
+    },
+    adminDocs(params) {
+        const q = cleanQuery(params);
+        return this.get(`/admin/docs${q ? `?${q}` : ''}`);
+    },
+    adminImportJobs(params) {
+        const q = cleanQuery(params);
+        return this.get(`/admin/imports${q ? `?${q}` : ''}`);
+    },
+    adminImportJob(id) {
+        return this.get(`/admin/imports/${id}`);
+    },
+    adminSources(params) {
+        const q = cleanQuery(params);
+        return this.get(`/admin/sources${q ? `?${q}` : ''}`);
+    },
+    createSource(d) { return this.post('/admin/sources', d); },
+    deleteSource(id) { return this.request('DELETE', `/admin/sources/${id}`); },
+    adminBenefits(params) {
+        /* undefined/null/пустые значения не должны попадать в query:
+           URLSearchParams превращает undefined в строку "undefined", и фильтр
+           начинал бы искать по слову «undefined». */
+        const q = cleanQuery(params);
+        return this.get(`/admin/benefits${q ? `?${q}` : ''}`);
+    },
+    archiveUniversity(id, archived) {
+        return this.post(`/admin/universities/${id}/archive?archived=${archived === false ? 'false' : 'true'}`);
+    },
+    archiveProgram(id, archived) {
+        return this.post(`/admin/programs/${id}/archive?archived=${archived === false ? 'false' : 'true'}`);
+    },
+    archiveSeason(id, archived) {
+        return this.post(`/admin/seasons/${id}/archive?archived=${archived === false ? 'false' : 'true'}`);
     },
 };

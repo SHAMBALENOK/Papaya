@@ -47,6 +47,12 @@ class Docs(Base):
     name = Column(String, nullable=False)
     type = Column(String, nullable=False, default='RSOSH_LIST', index=True)
     storage_key = Column(String, nullable=True)
+    uploaded_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey('users.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
     university_id = Column(
         UUID(as_uuid=True),
         ForeignKey('universities.id', ondelete='SET NULL'),

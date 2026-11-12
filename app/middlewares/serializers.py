@@ -51,6 +51,7 @@ def university_to_dict(university) -> dict:
         'website': university.website,
         'preview_image': university.preview_image,
         'image': university.image,
+        'is_archived': bool(getattr(university, 'is_archived', False)),
         'createdAt': _iso(university.createdAt),
         'updatedAt': _iso(university.updatedAt),
     }
@@ -66,6 +67,7 @@ def olympiad_to_dict(olympiad) -> dict:
         'official_url': olympiad.official_url,
         'preview_image': olympiad.preview_image,
         'image': olympiad.image,
+        'organizer': getattr(olympiad, 'organizer', None),
         'source_doc_id': str(olympiad.source_doc_id) if olympiad.source_doc_id else None,
         'status': olympiad.status,
         'archive_reason': olympiad.archive_reason,
@@ -98,6 +100,7 @@ def doc_to_dict(doc) -> dict:
         'mime_type': doc.mime_type,
         'source_url': doc.source_url,
         'university_id': str(doc.university_id) if getattr(doc, 'university_id', None) else None,
+        'uploaded_by': str(doc.uploaded_by) if getattr(doc, 'uploaded_by', None) else None,
         'checksum': doc.checksum,
         'status': doc.status,
         'processedAt': _iso(doc.processedAt),

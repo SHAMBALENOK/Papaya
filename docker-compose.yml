@@ -204,6 +204,8 @@ services:
       - ./migrations:/app/migrations
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+      - ./docs:/app/docs
+      - ./English.md:/app/English.md
       - ./pytest.ini:/app/pytest.ini
       - ./alembic.ini:/app/alembic.ini
       - ./requirements-dev.txt:/app/requirements-dev.txt

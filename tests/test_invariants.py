@@ -275,7 +275,9 @@ async def test_public_olympiad_has_no_technical_fields(client):
         assert field not in body, f'{field} не должен попадать в публичный ответ'
     assert set(body) == {
         'id', 'name', 'description', 'official_url', 'preview_image', 'image',
-        'status', 'is_archived',
+        # `organizer` документирован как публичное поле: читатель должен
+        # видеть, кто проводит олимпиаду, ещё до перехода на сайт.
+        'organizer', 'status', 'is_archived',
     }
     # Архив виден по статусу, а не по техническому enum-значению.
     assert body['status'] == 'ARCHIVED'
@@ -308,7 +310,15 @@ async def test_legacy_university_assignment_endpoint_is_gone(client):
     schema = await client.get('/openapi.json')
     assert schema.status_code == 200
     paths = schema.json()['paths']
-    assert not [path for path in paths if 'university' in path and 'admin' in path], (
+    # Архивирование вуза — управление каталогом, а не выдача роли
+    # представителя, поэтому такие маршруты инвариант не нарушают.
+    assign_paths = [
+        path
+        for path in paths
+        if 'university' in path and 'admin' in path
+        and not path.endswith('/archive')
+    ]
+    assert not assign_paths, (
         'в API не должно быть маршрутов назначения университета админом'
     )
 
