@@ -53,9 +53,9 @@ function renderAdmin(initialTab) {
     const tab = ADMIN_TABS.some(item => item.key === initialTab) ? initialTab : 'users';
 
     page.innerHTML = `
-    <section class="pt-4 pb-12 md:pb-16">
+    <section class="pt-2 pb-10 md:pb-12">
         <p class="${UI.eyebrow}">Администрирование</p>
-        <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Панель администратора</h1>
+        <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">Панель администратора</h1>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Каталог олимпиад и университетов, модерация связей БВИ и импорт документов РСОШ.
         </p>
@@ -64,8 +64,8 @@ function renderAdmin(initialTab) {
     <div class="flex flex-wrap gap-2 bg-mist rounded p-2 mb-12" role="tablist" aria-label="Разделы администрирования">
         ${ADMIN_TABS.map(item => `
         <a href="${item.href}" data-admin-tab="${item.key}" role="tab" aria-selected="${item.key === tab}"
-           class="admin-tab flex-1 sm:flex-none sm:min-w-[11rem] text-center px-6 py-3 rounded text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60 ${
-               item.key === tab ? 'bg-ink text-white shadow-elev-1' : 'text-ink-soft hover:text-ink'
+           class="admin-tab flex-1 sm:flex-none sm:min-w-[10rem] text-center px-5 py-2.5 rounded text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 ${
+               item.key === tab ? 'bg-brand text-white shadow-elev-1' : 'text-ink-soft hover:text-ink hover:bg-white'
            }">${item.label}</a>`).join('')}
     </div>
 
@@ -559,7 +559,7 @@ function adminUsersHtml() {
             return `
             <div class="${UI.card} px-8 py-7 flex flex-col xl:flex-row xl:items-center gap-6">
                 <div class="flex items-center gap-5 flex-1 min-w-[16rem]">
-                    <div class="w-12 h-12 rounded bg-ember text-ink font-bold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(userInitials(u))}</div>
+                    <div class="w-12 h-12 rounded bg-brand-soft text-brand-strong font-bold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(userInitials(u))}</div>
                     <div class="min-w-0">
                         <p class="font-bold text-ink truncate">${escHtml(u.name)} ${escHtml(u.surname)}${isSelf ? ' <span class="text-ink-faint font-medium">(вы)</span>' : ''}</p>
                         <p class="text-sm text-ink-soft truncate">${escHtml(u.email)}</p>
@@ -940,7 +940,7 @@ function adminImportsHtml(data) {
                         ${state === 'processing' && stage ? ` · этап: ${escHtml(stage)}` : ''}
                         ${summary.total ? ` · найдено: ${summary.total} (новых: ${summary.new || 0}, объединений: ${summary.merge || 0}, на проверку: ${summary.review || 0})` : ''}
                     </p>
-                    ${item.error ? `<p class="mt-3 text-sm text-crimson">${escHtml(item.error)}</p>` : ''}
+                    ${item.error ? `<p class="mt-3 text-sm text-danger">${escHtml(item.error)}</p>` : ''}
                 </div>
                 <div class="flex flex-wrap gap-3 shrink-0">
                     ${state === 'rejected' ? '' : `<button data-act="runImport" data-id="${escAttr(item.id)}" ${state === 'paused' || state === 'processing' ? 'disabled' : ''} class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Запустить импорт</button>`}
@@ -988,7 +988,7 @@ function importJobsHtml(jobs) {
                         ${summary.total != null
                             ? `<p class="mt-1 text-sm text-ink-soft">Записей: ${summary.total}, новых: ${summary.new || 0}, объединений: ${summary.merge || 0}, на проверку: ${summary.review || 0}</p>`
                             : ''}
-                        ${job.error ? `<p class="mt-1 text-sm text-crimson">${escHtml(job.error)}</p>` : ''}
+                        ${job.error ? `<p class="mt-1 text-sm text-danger">${escHtml(job.error)}</p>` : ''}
                     </div>
                     <button type="button" data-act="importJobRecords" data-id="${escAttr(job.id)}"
                             class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} shrink-0">Показать записи</button>
@@ -1008,7 +1008,7 @@ async function openImportJobModal(jobId) {
         <div class="space-y-4">
             <p class="text-sm text-ink-soft">
                 Прогон от ${escHtml(formatDate(job.started_at))} · ${escHtml(job.status || '—')}
-                ${job.error ? ` · <span class="text-crimson">${escHtml(job.error)}</span>` : ''}
+                ${job.error ? ` · <span class="text-danger">${escHtml(job.error)}</span>` : ''}
             </p>
             ${records.length
                 ? `<div class="space-y-2">${records.map(item => `
@@ -1033,9 +1033,9 @@ function openUploadModal() {
         <div id="modal-alert"></div>
         <form id="upload-form">
             <div class="${UI.field}">
-                <label for="upload-file" class="${UI.label}">Файл документа РСОШ <span class="text-crimson" aria-hidden="true">*</span></label>
+                <label for="upload-file" class="${UI.label}">Файл документа РСОШ <span class="text-danger" aria-hidden="true">*</span></label>
                 <input id="upload-file" name="file" type="file" accept=".pdf,.xlsx,.png,.jpg,.jpeg" required
-                       class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-ink file:text-white hover:file:bg-ink-deep">
+                       class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-brand-strong">
                 <p class="mt-2 text-sm text-ink-soft leading-relaxed">
                     Поддерживаются PDF, XLSX и изображения PNG/JPG/JPEG. Сканы и повёрнутые
                     страницы распознаются через OCR.
@@ -1143,12 +1143,12 @@ function showOutdatedImportNotice(reason) {
 function importNoticesHtml(warnings) {
     if (!warnings || !warnings.length) return '';
     return `
-    <div class="mb-8 rounded bg-sand/50 px-6 py-4 text-sm leading-relaxed" role="status">
+    <div class="mb-8 rounded bg-mist px-6 py-4 text-sm leading-relaxed" role="status">
         <p class="font-semibold text-ink mb-2">Замечания при чтении документа</p>
         <ul class="space-y-1.5 text-ink-soft">
             ${warnings.map(w => `
             <li class="flex items-start gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-ember shrink-0 mt-1.5" aria-hidden="true"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-brand shrink-0 mt-1.5" aria-hidden="true"></span>
                 <span>${escHtml(w)}</span>
             </li>`).join('')}
         </ul>
@@ -1161,7 +1161,7 @@ function importNoticesHtml(warnings) {
 function importFabHtml(state) {
     if (!['processing', 'paused', 'review'].includes(state)) return '';
     return `<button type="button" data-ri="addManualCandidate"
-        class="fixed bottom-8 right-8 z-40 inline-flex items-center gap-2 rounded bg-ink text-white px-6 py-4 text-sm font-semibold shadow-elev-2 hover:bg-ink-deep transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        class="fixed bottom-8 right-8 z-40 inline-flex items-center gap-2 rounded bg-brand text-white px-6 py-4 text-sm font-semibold shadow-elev-2 hover:bg-brand-strong transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
         <span aria-hidden="true" class="text-lg leading-none">+</span> Добавить олимпиаду
     </button>`;
 }
@@ -1237,7 +1237,7 @@ async function renderImportReview(importId) {
             page.innerHTML = `
             <div class="max-w-content mx-auto pt-4 pb-12">
                 <a href="#/admin/imports" class="text-sm text-ink-soft hover:text-ink">← К списку импортов</a>
-                <div class="rounded bg-sand/50 px-6 py-4 mt-6 mb-8 text-sm leading-relaxed" role="status">
+                <div class="rounded bg-mist px-6 py-4 mt-6 mb-8 text-sm leading-relaxed" role="status">
                     <p class="font-semibold text-ink mb-1">Импорт ещё обрабатывается</p>
                     <p class="text-ink-soft">Результаты появятся, когда обработка завершится. Обновите страницу позже.</p>
                 </div>
@@ -1387,7 +1387,7 @@ async function renderImportReview(importId) {
         const page = c.page ? `стр. ${c.page}` : '—';
         const ord = ordinal.get(key);
         return `
-            <div class="${UI.card} px-6 py-5 ${confirmed ? 'border-2 border-sage' : ''}">
+            <div class="${UI.card} px-6 py-5 ${confirmed ? 'ring-1 ring-brand/25' : ''}">
                 <div class="flex flex-wrap items-start justify-between gap-4">
                     <div class="flex-1 min-w-0">
                         <div class="flex flex-wrap items-center gap-2.5">
@@ -1514,7 +1514,7 @@ async function renderImportReview(importId) {
             const created = (cr.created || []).length;
             const updated = (cr.updated || []).length;
             const archived = (cr.archived || []).length;
-            return `<div class="rounded bg-sage/30 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
+            return `<div class="rounded bg-success-soft px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
                 <p class="font-semibold text-ink mb-1">Импорт уже применён</p>
                 <p class="text-ink-soft">Создано: ${created}, обновлено: ${updated}, в архив: ${archived}.
                    Изменить исполнение можно только через загрузку актуального перечня.</p>
@@ -1527,19 +1527,19 @@ async function renderImportReview(importId) {
             </div>`;
         }
         if (state === 'failed') {
-            return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
+            return `<div class="rounded bg-mist px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
                 <p class="font-semibold text-ink mb-1">Импорт завершился ошибкой</p>
                 <p class="text-ink-soft">Каталог не изменён. Запустите импорт заново — обработка начинается с начала.</p>
             </div>`;
         }
         if (state === 'paused') {
             const stage = IMPORT_PROGRESS_LABELS[(imp.progress || {}).stage] || '';
-            return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
+            return `<div class="rounded bg-mist px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
                 <p class="font-semibold text-ink mb-1">Импорт приостановлен</p>
                 <p class="text-ink-soft">Обработка остановлена${stage ? ` на этапе «${escHtml(stage)}»` : ''}. Возобновить её можно кнопкой «Возобновить» в списке импортов: если документ уже распознан, повторного чтения не будет.</p>
             </div>`;
         }
-        return `<div class="rounded bg-sand/50 px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
+        return `<div class="rounded bg-mist px-6 py-4 mb-8 text-sm leading-relaxed" role="status">
             <p class="font-semibold text-ink mb-1">Импорт ещё обрабатывается</p>
             <p class="text-ink-soft">Результаты появятся, когда обработка завершится. Обновите страницу позже.</p>
         </div>`;
@@ -1642,7 +1642,7 @@ async function renderImportReview(importId) {
             .map(c => candidateCardHtml(c, true));
         const count = cands.length;
         return `
-        <div class="rounded bg-sage/25 border border-sage px-6 py-6">
+        <div class="rounded bg-success-soft border border-line px-6 py-6">
             <div class="flex items-center justify-between gap-3">
                 <p class="${UI.eyebrow} mb-0">Подтверждённые (${count})</p>
             </div>
@@ -1919,10 +1919,10 @@ function adminBenefitsHtml() {
                 <p class="mt-3 text-xs text-ink-faint flex flex-wrap items-center gap-x-4 gap-y-2">
                     ${item.doc_id
                         ? `<a href="${api.docFileUrl(item.doc_id)}" target="_blank" rel="noopener" class="underline">Документ-основание</a>`
-                        : '<span class="text-crimson">Документ-основание не приложен</span>'}
+                        : '<span class="text-danger">Документ-основание не приложен</span>'}
                     ${item.source_url
                         ? `<a href="${escAttr(item.source_url)}" target="_blank" rel="noopener noreferrer" class="underline">Ссылка на источник</a>`
-                        : '<span class="text-crimson">Ссылка на источник не указана</span>'}
+                        : '<span class="text-danger">Ссылка на источник не указана</span>'}
                 </p>
                 ${item.rejection_reason ? `<p class="mt-2 text-xs text-ink-faint">Причина отклонения: ${escHtml(item.rejection_reason)}</p>` : ''}
             </div>

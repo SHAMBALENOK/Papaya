@@ -28,23 +28,23 @@ let benefitCatalogNames = { universities: new Map(), olympiads: new Map() };
 async function renderBenefits() {
     const page = document.getElementById('page');
     page.innerHTML = `
-    <section class="pt-4 pb-12 md:pb-16">
+    <section class="pt-2 pb-10 md:pb-12">
         <p class="${UI.eyebrow}">Каталог</p>
-        <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Льготы</h1>
-        <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
+        <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">Льготы</h1>
+        <p class="mt-4 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Проверенные правила: какие олимпиады и результаты университеты
             засчитывают для БВИ, 100 баллов или другой льготы при поступлении.
         </p>
-        <form id="benefits-filter" class="mt-10" role="search">
+        <form id="benefits-filter" class="mt-8 rounded-xl bg-mist p-4 md:p-5" role="search">
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_16rem_16rem_auto]">
                 <div>
                     <label for="benefits-search" class="sr-only">Поиск по льготам</label>
                     <input id="benefits-search" name="search" type="search" autocomplete="off"
-                           class="${UI.input}" placeholder="Предмет, условие, олимпиада">
+                           class="${UI.input} bg-white" placeholder="Предмет, условие, олимпиада…">
                 </div>
                 <div>
                     <label for="benefits-type" class="sr-only">Тип льготы</label>
-                    <select id="benefits-type" name="benefit_type" class="${UI.input}">
+                    <select id="benefits-type" name="benefit_type" class="${UI.input} bg-white">
                         <option value="">Все типы льгот</option>
                         <option value="BVI">БВИ</option>
                         <option value="EGE_100">100 баллов ЕГЭ</option>
@@ -54,14 +54,14 @@ async function renderBenefits() {
                 </div>
                 <div>
                     <label for="benefits-university" class="sr-only">Университет</label>
-                    <select id="benefits-university" name="university_id" class="${UI.input}">
+                    <select id="benefits-university" name="university_id" class="${UI.input} bg-white">
                         <option value="">Все университеты</option>
                     </select>
                 </div>
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary} shrink-0">Показать</button>
             </div>
         </form>
-        <p id="benefits-count" class="mt-5 text-sm text-ink-faint"></p>
+        <p id="benefits-count" class="mt-4 text-sm text-ink-faint"></p>
     </section>
     <section id="benefits-list" aria-live="polite">${loadingHtml()}</section>
     <div class="mt-10" id="benefits-more"></div>`;
@@ -184,27 +184,27 @@ function benefitCatalogCardHtml(rule) {
         ? publicBenefitResultText(rule) : rule.required_result || '');
 
     const universityHtml = university
-        ? `<a href="#/universities/${escAttr(university.id)}" class="underline decoration-mist hover:decoration-ink">${escHtml(universityLabel)}</a>`
+        ? `<a href="#/universities/${escAttr(university.id)}" class="underline decoration-line hover:decoration-brand">${escHtml(universityLabel)}</a>`
         : escHtml(universityLabel);
     const olympiadHtml = olympiad
-        ? `<a href="#/olympiads/${escAttr(olympiad.id)}" class="underline decoration-mist hover:decoration-ink">${escHtml(olympiadLabel)}</a>`
+        ? `<a href="#/olympiads/${escAttr(olympiad.id)}" class="underline decoration-line hover:decoration-brand">${escHtml(olympiadLabel)}</a>`
         : escHtml(olympiadLabel);
 
     return `
-    <article class="${UI.card} px-8 py-6">
-        <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
+    <article class="rounded-lg bg-white border border-line px-5 py-5 md:px-6">
+        <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
             <div class="min-w-0 flex-1">
                 <p class="font-bold text-ink leading-snug">
                     ${escHtml(typeLabel)}${rule.subject ? ` · ${escHtml(rule.subject)}` : ''}
                 </p>
-                <p class="mt-2 text-sm text-ink-soft">${universityHtml} · ${olympiadHtml}</p>
-                ${result ? `<p class="mt-3 text-sm text-ink-soft">Условие: ${escHtml(result)}</p>` : ''}
+                <p class="mt-1.5 text-sm text-ink-soft">${universityHtml} · ${olympiadHtml}</p>
+                ${result ? `<p class="mt-2.5 text-sm text-ink-soft">Условие: ${escHtml(result)}</p>` : ''}
                 ${rule.additional_requirements
                     ? `<p class="mt-2 text-sm text-ink-soft">Дополнительно: ${escHtml(rule.additional_requirements)}</p>`
                     : ''}
                 ${rule.source_url
-                    ? `<p class="mt-3 text-sm"><a href="${escAttr(rule.source_url)}" target="_blank"
-                           rel="noopener noreferrer" class="underline">Источник</a></p>`
+                    ? `<p class="mt-2.5 text-sm"><a href="${escAttr(rule.source_url)}" target="_blank"
+                           rel="noopener noreferrer" class="underline decoration-line hover:decoration-brand">Источник</a></p>`
                     : ''}
             </div>
             <div class="shrink-0">${benefitStatusBadge(rule.verification_status)}</div>

@@ -65,9 +65,9 @@ async function renderMyUniversity() {
     const sources = (srcRes.ok && srcRes.data && srcRes.data.sources) || [];
 
     page.innerHTML = `
-    <section class="pt-4 pb-12 md:pb-16">
+    <section class="pt-2 pb-10 md:pb-12">
         <p class="${UI.eyebrow}">Представитель университета</p>
-        <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">
+        <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">
             ${escHtml(university.short_name || university.name)}
         </h1>
         ${university.short_name && university.short_name !== university.name
@@ -312,7 +312,7 @@ function drawMyBenefitsList(rules, universityId, docs, sources) {
                     </div>
                     ${result ? `<p class="mt-4 text-sm text-ink-soft">Условие: ${escHtml(result)}</p>` : ''}
                     ${item.additional_requirements ? `<p class="mt-2 text-sm text-ink-soft">Дополнительно: ${escHtml(item.additional_requirements)}</p>` : ''}
-                    ${item.rejection_reason ? `<p class="mt-3 text-sm text-crimson">Причина отказа: ${escHtml(item.rejection_reason)}</p>` : ''}
+                    ${item.rejection_reason ? `<p class="mt-3 text-sm text-danger">Причина отказа: ${escHtml(item.rejection_reason)}</p>` : ''}
                     ${sourceName ? `<p class="mt-3 text-sm text-ink-soft">Источник: ${escHtml(sourceName)}</p>` : ''}
                     ${item.source_url ? `<p class="mt-3 text-sm"><a href="${escAttr(item.source_url)}" target="_blank" rel="noopener noreferrer" class="underline">Источник правила</a></p>` : ''}
                     ${docName ? `<p class="mt-2 text-sm text-ink-faint">Документ: ${escHtml(docName)}</p>` : ''}
@@ -691,9 +691,9 @@ function openDocUploadModal(universityId, onDone) {
         <div id="modal-alert"></div>
         <form id="doc-upload-form">
             <div class="${UI.field}">
-                <label for="doc-file" class="${UI.label}">Файл <span class="text-crimson" aria-hidden="true">*</span></label>
+                <label for="doc-file" class="${UI.label}">Файл <span class="text-danger" aria-hidden="true">*</span></label>
                 <input id="doc-file" name="file" type="file" required accept=".pdf,.xlsx,.png,.jpg,.jpeg"
-                       class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-ink file:text-white hover:file:bg-ink-deep">
+                       class="block w-full cursor-pointer text-sm text-ink-soft file:mr-4 file:rounded file:px-5 file:py-2.5 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-brand-strong">
                 <p class="mt-2 text-sm text-ink-soft">Поддерживаются PDF, XLSX и изображения PNG/JPG/JPEG.</p>
             </div>
             ${inputField({ id: 'doc-name', name: 'name', label: 'Название документа', placeholder: 'Приказ о льготах 2026' })}
