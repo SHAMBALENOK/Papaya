@@ -59,7 +59,7 @@ function userProfileHtml(u, { editable = false } = {}) {
     const initials = (((u.name || '?')[0] || '?') + ((u.surname || '')[0] || '')).toUpperCase();
     const genderText = u.gender === 'male' ? 'Мужской' : u.gender === 'female' ? 'Женский' : 'Не указан';
     const accBadge = u.isActive
-        ? `<span class="${UI.badge} ${UI.badgeSuccess}"><span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>Активен</span>`
+        ? `<span class="${UI.badge} ${UI.badgeSuccess}"><span class="w-2 h-2 rounded-full bg-success/70" aria-hidden="true"></span>Активен</span>`
         : `<span class="${UI.badge} ${UI.badgeDanger}">Заблокирован</span>`;
 
     const fields = [
@@ -77,13 +77,13 @@ function userProfileHtml(u, { editable = false } = {}) {
 
     return `
     <div class="max-w-narrow mx-auto py-4">
-        <a href="#/" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        <a href="#/" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
             На главную
         </a>
 
         <header class="mt-12 flex flex-col sm:flex-row sm:items-center gap-8">
-            <div class="w-24 h-24 rounded bg-ember text-ink text-3xl font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
+            <div class="w-24 h-24 rounded bg-brand-soft text-brand-strong text-3xl font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</div>
             <div class="min-w-0 flex-1">
                 <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight leading-tight">${escHtml(u.name)} ${escHtml(u.surname)}</h1>
                 <p class="mt-3 text-lg text-ink-soft">${escHtml(u.email)}</p>

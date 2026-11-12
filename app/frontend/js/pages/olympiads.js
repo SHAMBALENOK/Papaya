@@ -14,7 +14,7 @@ async function renderOlympiads() {
     page.innerHTML = `
     <section class="pt-4 pb-16 md:pb-20">
         <p class="${UI.eyebrow}">Каталог</p>
-        <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Олимпиады</h1>
+        <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">Олимпиады</h1>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Единый каталог олимпиад перечня РСОШ. На странице олимпиады видно,
             какие университеты дают за неё БВИ.
@@ -110,14 +110,14 @@ async function renderOlympiad(olympiadId) {
         const badge = historical
             ? `<span class="${UI.badge} ${UI.badgeNeutral}">Историческая связь</span>`
             : `<span class="${UI.badge} ${UI.badgeSuccess}">
-                   <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
+                   <span class="w-2 h-2 rounded-full bg-success/70" aria-hidden="true"></span>БВИ
                </span>`;
         return `
         <a href="#/universities/${escAttr(university.id)}"
-           class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+           class="group block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 md:p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
             ${badge}
             ${entityTitleHtml(university)}
-            <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть →</p>
+            <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand transition-colors">Открыть →</p>
         </a>`;
     }
 
@@ -146,7 +146,7 @@ async function renderOlympiad(olympiadId) {
 
     page.innerHTML = `
     <article class="max-w-narrow mx-auto pb-16 md:pb-24">
-        <a href="#/olympiads" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        <a href="#/olympiads" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
             Все олимпиады
         </a>
@@ -159,7 +159,7 @@ async function renderOlympiad(olympiadId) {
 
         <header class="mt-14">
             ${olympiadStatusBadge(olympiad.status)}
-            <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(olympiad.name)}</h1>
+            <h1 class="mt-4 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">${escHtml(olympiad.name)}</h1>
             ${olympiad.organizer
                 ? `<p class="mt-4 text-lg text-ink-soft leading-relaxed">Организатор: ${escHtml(olympiad.organizer)}</p>`
                 : ''}

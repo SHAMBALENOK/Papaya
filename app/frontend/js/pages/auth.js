@@ -1,10 +1,10 @@
 /* ==========================================================================
  * pages/auth.js — экраны входа и регистрации.
- * Активная вкладка — чёрная (bg-ink), поля — подложка mist.
+ * Активная вкладка — брендовая (bg-brand), поля — подложка mist.
  * ========================================================================== */
 
-const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-ink text-white shadow-elev-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
-const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60';
+const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-brand text-white shadow-elev-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60';
+const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60';
 
 /* Требования к паролю — зеркало серверной проверки
    (app/middlewares/re_check.py). Список показывается заранее, а не всплывает
@@ -26,7 +26,7 @@ function passwordRulesHtml() {
     return `<div id="reg-password-rules" class="mt-3" aria-live="polite">
         <p class="text-sm font-medium text-ink-soft mb-2">Пароль должен содержать:</p>
         <ul class="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-sm">
-            ${PASSWORD_RULES.map(r => `<li data-rule="${r.id}" class="flex items-start gap-2 text-ink-faint">
+            ${PASSWORD_RULES.map(r => `<li data-rule="${r.id}" data-ok="false" class="flex items-start gap-2">
                 <span data-rule-mark class="shrink-0 leading-6" aria-hidden="true">○</span>
                 <span>${r.label}</span>
             </li>`).join('')}
@@ -43,7 +43,7 @@ function renderAuth() {
 
         <div class="mb-16 md:mb-20">
             <p class="${UI.eyebrow}">Олимпиады и поступление</p>
-            <h1 class="mt-5 text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.05] text-ink">Papaya<span class="text-ember" aria-hidden="true">.</span></h1>
+            <h1 class="mt-5 text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.05] text-ink">Papaya<span class="text-brand" aria-hidden="true">.</span></h1>
             <p class="mt-7 text-lg text-ink-soft leading-relaxed max-w-md">
                 Какие олимпиады дают БВИ в вашем университете — в одном месте.
             </p>
@@ -61,7 +61,7 @@ function renderAuth() {
             ${passwordField({ id: 'login-password', name: 'password', label: 'Пароль', required: true, placeholder: 'Ваш пароль', autocomplete: 'current-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Войти</button>
             <p class="mt-8 text-sm text-ink-soft">Нет аккаунта?
-                <a data-goto="register" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Зарегистрироваться</a>
+                <a data-goto="register" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Зарегистрироваться</a>
             </p>
         </form>
 
@@ -76,7 +76,7 @@ function renderAuth() {
             ${passwordField({ id: 'reg-password2', name: 'password2', label: 'Подтвердите пароль', required: true, placeholder: 'Повторите пароль', autocomplete: 'new-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Зарегистрироваться</button>
             <p class="mt-8 text-sm text-ink-soft">Уже есть аккаунт?
-                <a data-goto="login" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">Войти</a>
+                <a data-goto="login" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Войти</a>
             </p>
         </form>
     </div>`;
@@ -100,6 +100,11 @@ function renderAuth() {
     tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
     page.querySelectorAll('[data-goto]').forEach(a =>
         a.addEventListener('click', () => switchTab(a.dataset.goto)));
+
+    /* Прямая ссылка из шапки «Регистрация» открывает нужную вкладку. */
+    if (new URLSearchParams(currentQuery()).get('tab') === 'register') {
+        switchTab('register');
+    }
 
     // Показ пароля: кнопка переключает тип поля и не отправляет форму
     // (type="button"). Значение и имя поля при этом не меняются, поэтому
@@ -129,8 +134,10 @@ function renderAuth() {
             const li = rulesList.querySelector(`[data-rule="${rule.id}"]`);
             if (!li) return;
             const ok = !!pw && rule.test(pw);
-            li.classList.toggle('text-sage', ok);
-            li.classList.toggle('text-ink-faint', !ok);
+            /* Цвет задаётся стабильным атрибутом и правилом из style.css, а не
+               порядком Tailwind-классов в разметке. Текстовый маркер ✓/○
+               дублирует состояние, чтобы цвет не был единственным сигналом. */
+            li.dataset.ok = String(ok);
             const mark = li.querySelector('[data-rule-mark]');
             if (mark) mark.textContent = ok ? '✓' : '○';
         });

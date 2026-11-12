@@ -1,75 +1,147 @@
 /* ==========================================================================
-   Papaya. Базовый слой (просторный минимализм, dashboard).
-   Основная стилизация — утилиты Tailwind (index.html и js-шаблоны).
-   Принципы:
-     - border: none — у блоков нет рамок;
-     - разделение — только «воздух» и мягкие многослойные тени;
-     - фон #FFFFFC / поверхности #FFFFFF, текст #1A1A1A;
-     - углы: 0px у поверхностей, до 4px у интерактивных элементов.
+   Papaya. Базовая тема: белый холст, зелёный бренд, тёмная типографика.
+   Утилиты Tailwind (index.html и js-шаблоны) отвечают за раскладку; здесь —
+   только глобальные правила, токены и то, что нельзя выразить утилитами.
    ========================================================================== */
 
-:root { color-scheme: light; }
+:root {
+    color-scheme: light;
 
-html { scroll-behavior: smooth; }
+    /* Значения дублируют палитру Tailwind только там, где CSS не может
+       использовать utility-класс: выделение, маркеры, фокус, скроллбар. */
+    --brand: #007f5f;
+    --brand-strong: #00664e;
+    --brand-soft: #e7f2ed;
+    --ink: #14201b;
+    --ink-soft: #55625b;
+    --success: #1e7a46;
+    --line: #dde5df;
+    --focus: rgba(0, 127, 95, 0.55);
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
 
-body { text-rendering: optimizeLegibility; }
+html {
+    scroll-behavior: smooth;
+    /* Сглаживание субпиксельных зазоров у sticky-шапки. */
+    scroll-padding-top: 5rem;
+}
 
-/* Выделение: sage #CBE896 + ink #1A1A1A (контраст 14.2:1). */
-::selection { background: #CBE896; color: #1A1A1A; }
+body {
+    text-rendering: optimizeLegibility;
+    background: #ffffff;
+    color: var(--ink);
+}
 
-/*
-  Надзаголовок секции.
-  Маркер 8px — ember #FF7F11 (декор).
-  Текст #6B6B6B на #FFFFFF — 5.4:1 (WCAG AA).
-*/
+/* Якоря и заголовки не прячутся под sticky-шапкой. */
+:where(h1, h2, h3, h4, [id]) {
+    scroll-margin-top: 5rem;
+}
+
+/* Длинные заголовки не оставляют висячих слов. */
+:where(h1, h2, h3) {
+    text-wrap: balance;
+}
+
+/* Выделение: мягкий брендовый тон, текст остаётся тёмным. */
+::selection {
+    background: var(--brand-soft);
+    color: #08110c;
+}
+
+/* Надзаголовок секции: маркер бренда + служебная подпись. */
 .eyebrow {
     display: inline-flex;
     align-items: center;
     gap: 10px;
     font-size: 0.75rem;
     font-weight: 600;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: #6B6B6B;
+    color: var(--ink-soft);
 }
 .eyebrow::before {
     content: '';
     width: 8px;
     height: 8px;
     flex-shrink: 0;
-    background: #FF7F11;
-    border-radius: 1px;
+    background: var(--brand);
+    border-radius: 2px;
 }
 
-/* Сайдбар: без chrome скрыт; на мобиле — drawer, на desktop — колонка. */
-#sidebar {
-    display: none;
-    transform: translateX(-100%);
-    transition: transform 0.2s ease;
-}
-#sidebar.is-chrome {
-    display: flex;
-}
-#sidebar.is-chrome.is-open {
-    transform: translateX(0);
-}
-@media (min-width: 768px) {
-    #sidebar.is-chrome { transform: translateX(0); }
-    #app-frame.is-chrome { padding-left: 15rem; } /* = w-sidebar, воздух колонки */
+/* Кнопки и ссылки: единый отклик на нажатие и отсутствие задержки тапа. */
+:where(a, button, [role="tab"], summary, label[for]) {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
 }
 
-/* Тонкий скроллбар модалок — нейтральные серые, без рамок */
+/* Мягкая тень у шапки появляется только при прокрутке. */
+.site-header {
+    box-shadow: 0 1px 0 rgba(20, 32, 27, 0.04);
+}
+
+/* Живые индикаторы требований к паролю.
+   Цвет привязан к data-атрибуту, а не к порядку Tailwind-классов: состояние
+   читается из правила и не зависит от того, когда утилита попала в сборку. */
+#reg-password-rules li {
+    color: var(--ink-soft);
+}
+#reg-password-rules li[data-ok="true"] {
+    color: var(--success);
+}
+
+/* --------------------------------------------------------------------------
+   Модальные окна и тосты
+   -------------------------------------------------------------------------- */
+
+.modal-overlay {
+    background: rgba(8, 17, 12, 0.45);
+}
+
+.modal-scroll {
+    overscroll-behavior: contain;
+}
+
+[role="dialog"] {
+    animation: dialog-in 180ms var(--ease-out);
+}
+
+@keyframes dialog-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px) scale(0.99);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
 .modal-scroll::-webkit-scrollbar { width: 8px; }
-.modal-scroll::-webkit-scrollbar-thumb { background: #ECECEC; border-radius: 4px; }
+.modal-scroll::-webkit-scrollbar-thumb { background: #e1e7e2; border-radius: 4px; }
 .modal-scroll::-webkit-scrollbar-track { background: transparent; }
 
-.toast { opacity: 0; transform: translateY(-8px); transition: opacity .25s ease, transform .25s ease; }
-.toast.toast-visible { opacity: 1; transform: translateY(0); }
+.toast {
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
+}
+.toast.toast-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
 
+/* Табличные числа выравниваются по разрядам. */
+table :where(td, th) {
+    font-variant-numeric: tabular-nums;
+}
+
+/* prefers-reduced-motion: убираем движение, оставляем мгновенные состояния. */
 @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     *, *::before, *::after {
-        animation-duration: .01ms !important;
-        transition-duration: .01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
     }
+    [role="dialog"] { animation: none; }
 }

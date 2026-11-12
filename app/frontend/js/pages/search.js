@@ -12,9 +12,9 @@ async function renderSearch(query) {
     store.setSearchQuery(query);
 
     page.innerHTML = `
-    <section class="pt-4 pb-12 md:pb-16">
+    <section class="pt-2 pb-10 md:pb-12">
         <p class="${UI.eyebrow}">Поиск</p>
-        <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Найти</h1>
+        <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">Найти</h1>
         <form id="search-form" class="mt-10 max-w-2xl" role="search">
             <label for="search-input" class="sr-only">Поисковый запрос</label>
             <div class="flex flex-col sm:flex-row gap-3">
@@ -71,10 +71,10 @@ async function renderSearch(query) {
         <div class="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
             ${programs.map(item => `
                 <a href="#/universities/${escAttr(item.university_id)}"
-                   class="block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+                   class="block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
                     <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
                     ${item.code ? `<p class="mt-2 text-sm text-ink-soft">Код: ${escHtml(item.code)}</p>` : ''}
-                    <p class="mt-4 text-sm font-semibold text-ink-soft">Открыть университет →</p>
+                    <p class="mt-4 text-sm font-semibold text-brand-strong">Открыть университет →</p>
                 </a>`).join('')}
         </div>
     </div>` : ''}`;

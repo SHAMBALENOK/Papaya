@@ -35,7 +35,7 @@ async function renderUniversities() {
     page.innerHTML = `
     <section class="pt-4 pb-16 md:pb-20">
         <p class="${UI.eyebrow}">Каталог</p>
-        <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">Университеты</h1>
+        <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">Университеты</h1>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Откройте университет и посмотрите, какие олимпиады дают поступление без
             вступительных испытаний.
@@ -123,7 +123,7 @@ async function renderUniversity(universityId) {
 
     page.innerHTML = `
     <article class="pb-16 md:pb-24">
-        <a href="#/universities" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+        <a href="#/universities" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
             Все университеты
         </a>
@@ -136,7 +136,7 @@ async function renderUniversity(universityId) {
 
         <header class="mt-14">
             <p class="${UI.eyebrow}">Университет</p>
-            <h1 class="mt-6 text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.08]">${escHtml(university.short_name || university.name)}</h1>
+            <h1 class="mt-4 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">${escHtml(university.short_name || university.name)}</h1>
             ${university.short_name && university.short_name !== university.name
                 ? `<p class="mt-4 text-lg text-ink-soft leading-snug">${escHtml(university.name)}</p>`
                 : ''}
@@ -316,7 +316,7 @@ function bviOlympiadCardHtml(olympiad) {
     const badge = historical
         ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архивная олимпиада</span>`
         : `<span class="${UI.badge} ${UI.badgeSuccess}">
-               <span class="w-2 h-2 rounded-full bg-ink/60" aria-hidden="true"></span>БВИ
+               <span class="w-2 h-2 rounded-full bg-success/70" aria-hidden="true"></span>БВИ
            </span>`;
     const note = historical
         ? `<p class="mt-3 text-sm text-ink-faint">Историческая связь: университет давал БВИ, пока олимпиада была в перечне РСОШ.</p>`
@@ -324,14 +324,14 @@ function bviOlympiadCardHtml(olympiad) {
 
     return `
     <a href="#/olympiads/${escAttr(olympiad.id)}"
-       class="group block bg-white shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-1 transition-all duration-200 p-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/60">
+       class="group block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 md:p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
         ${cardImageHtml(olympiad)}
         <div class="flex items-center gap-3 flex-wrap">
             ${badge}
         </div>
-        <h3 class="mt-5 text-lg font-bold tracking-tight leading-snug">${escHtml(olympiad.name)}</h3>
+        <h3 class="mt-4 text-lg font-bold tracking-tight leading-snug">${escHtml(olympiad.name)}</h3>
         ${note}
         <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(olympiad.description || '')}</p>
-        <p class="mt-6 text-sm font-semibold text-ink group-hover:text-black transition-colors">Открыть олимпиаду →</p>
+        <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand transition-colors">Открыть олимпиаду →</p>
     </a>`;
 }
