@@ -56,7 +56,8 @@ async function loadOlympiads() {
     }
     const items = res.data.olympiads || [];
     box.innerHTML = items.length
-        ? `<p class="text-sm text-ink-faint mb-6">Найдено: ${items.length}</p>
+        ? `<h2 class="sr-only">Результаты поиска</h2>
+           <p class="text-sm text-ink-faint mb-6">Найдено: ${items.length}</p>
            <div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${items.map(olympiadCardHtml).join('')}</div>`
         : emptyHtml('Олимпиады не найдены',
                     'Попробуйте другое название: каталог ищет по названию и описанию.',
@@ -114,7 +115,7 @@ async function renderOlympiad(olympiadId) {
                </span>`;
         return `
         <a href="#/universities/${escAttr(university.id)}"
-           class="group block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 md:p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+           class="group block min-w-0 bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 md:p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
             ${badge}
             ${entityTitleHtml(university)}
             <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand transition-colors">Открыть →</p>
@@ -146,7 +147,7 @@ async function renderOlympiad(olympiadId) {
 
     page.innerHTML = `
     <article class="max-w-narrow mx-auto pb-16 md:pb-24">
-        <a href="#/olympiads" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+        <a href="#/olympiads" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
             Все олимпиады
         </a>
@@ -178,7 +179,7 @@ async function renderOlympiad(olympiadId) {
         ${olympiad.description ? `
         <section class="mt-14">
             <h2 class="${UI.eyebrow}">Описание</h2>
-            <p class="mt-6 text-lg text-ink leading-[1.8] whitespace-pre-wrap">${escHtml(olympiad.description)}</p>
+            <p class="mt-6 text-lg text-ink leading-[1.8] whitespace-pre-wrap wrap-anywhere">${escHtml(olympiad.description)}</p>
         </section>` : ''}
 
         ${sourceBlockHtml(source, olympiadId)}

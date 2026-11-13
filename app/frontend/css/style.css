@@ -7,15 +7,39 @@
 :root {
     color-scheme: light;
 
-    /* Значения дублируют палитру Tailwind только там, где CSS не может
-       использовать utility-класс: выделение, маркеры, фокус, скроллбар. */
+    /* Единственный источник палитры: Tailwind читает эти переменные в
+       index.html. Значения заданы один раз, разметка использует токены. */
+    --paper: #ffffff;
+    --cream: #ffffff;
     --brand: #007f5f;
     --brand-strong: #00664e;
     --brand-soft: #e7f2ed;
+    --brand-tint: #d6e9e1;
+    --leaf: #2b9348;
+    --leaf2: #55a630;
+    --lime: #80b918;
+    --lime2: #aacc00;
+    --lemon: #bfd200;
+    --lemon2: #d4d700;
+    --lemon3: #dddf00;
+    --lemon4: #eeef20;
+    --lemon5: #ffff3f;
     --ink: #14201b;
+    --ink-deep: #08110c;
     --ink-soft: #55625b;
-    --success: #1e7a46;
+    --ink-faint: #68746d;
+    --mist: #f4f6f3;
+    --mist-deep: #e8ede8;
     --line: #dde5df;
+    --line-strong: #7a8780;
+    --success: #1e7a46;
+    --success-soft: #dff2e8;
+    --danger: #b3261e;
+    --danger-strong: #8c1d17;
+    --danger-soft: #fbeceb;
+    --warning: #8a5a00;
+    --warning-soft: #fdf4dc;
+    --scrim: rgba(8, 17, 12, 0.45);
     --focus: rgba(0, 127, 95, 0.55);
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
@@ -28,7 +52,7 @@ html {
 
 body {
     text-rendering: optimizeLegibility;
-    background: #ffffff;
+    background: var(--paper);
     color: var(--ink);
 }
 
@@ -45,7 +69,7 @@ body {
 /* Выделение: мягкий брендовый тон, текст остаётся тёмным. */
 ::selection {
     background: var(--brand-soft);
-    color: #08110c;
+    color: var(--ink-deep);
 }
 
 /* Надзаголовок секции: маркер бренда + служебная подпись. */
@@ -77,6 +101,13 @@ body {
 /* Мягкая тень у шапки появляется только при прокрутке. */
 .site-header {
     box-shadow: 0 1px 0 rgba(20, 32, 27, 0.04);
+}
+
+/* Длинные ссылки и слова без пробелов не должны растягивать сетку:
+   overflow-wrap:anywhere участвует в расчёте min-content, в отличие от
+   break-word. Нужен карточкам каталогов и описаниям олимпиад. */
+.wrap-anywhere {
+    overflow-wrap: anywhere;
 }
 
 /* Живые индикаторы требований к паролю.
@@ -117,7 +148,7 @@ body {
 }
 
 .modal-scroll::-webkit-scrollbar { width: 8px; }
-.modal-scroll::-webkit-scrollbar-thumb { background: #e1e7e2; border-radius: 4px; }
+.modal-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 .modal-scroll::-webkit-scrollbar-track { background: transparent; }
 
 .toast {
@@ -134,6 +165,178 @@ body {
 table :where(td, th) {
     font-variant-numeric: tabular-nums;
 }
+
+/* --------------------------------------------------------------------------
+   Мобильное меню
+   -------------------------------------------------------------------------- */
+
+/* Кнопка «бургер → крестик»: три полосы на transform/opacity. */
+.menu-btn-icon {
+    position: relative;
+    display: block;
+    width: 18px;
+    height: 22px;
+}
+.menu-btn-bar {
+    position: absolute;
+    left: 0;
+    width: 18px;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transition: transform 200ms var(--ease-out), opacity 120ms linear;
+}
+.menu-btn-bar:nth-child(1) { top: 4px; }
+.menu-btn-bar:nth-child(2) { top: 10px; }
+.menu-btn-bar:nth-child(3) { top: 16px; }
+[aria-expanded="true"] .menu-btn-bar:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+[aria-expanded="true"] .menu-btn-bar:nth-child(2) { opacity: 0; transform: scaleX(0.4); }
+[aria-expanded="true"] .menu-btn-bar:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* Панель под шапкой. Появляется сдвигом на 8px, а не изменением высоты:
+   анимируются только transform и opacity. */
+.site-menu {
+    max-height: calc(100dvh - 4rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+    background: var(--paper);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 18px 40px -28px rgba(8, 17, 12, 0.55);
+    opacity: 0;
+    transform: translateY(-0.5rem);
+    transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+}
+.site-menu.is-open {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Затемнение под панелью: закрывает меню по тапу мимо ссылок. */
+.site-menu-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(8, 17, 12, 0.32);
+    opacity: 0;
+    transition: opacity 180ms var(--ease-out);
+}
+.site-menu-scrim.is-open { opacity: 1; }
+
+body.menu-open { overflow: hidden; }
+
+.site-menu-label {
+    margin: 0.75rem 0 0.25rem 0.75rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+}
+
+/* Строка меню: иконка, подпись, шеврон. Минимальная высота 48px — удобная
+   цель для пальца; состояние задаётся aria-current, а не цветом в разметке. */
+.site-menu-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 3rem;
+    padding: 0 0.75rem;
+    border-radius: 0.5rem;
+    color: var(--ink);
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: background-color 150ms ease, color 150ms ease;
+}
+.site-menu-link:hover { background: var(--mist); }
+.site-menu-link:active { background: var(--mist-deep); }
+.site-menu-link:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: -2px;
+}
+.site-menu-link[aria-current="page"] {
+    background: var(--brand-soft);
+    color: var(--brand-strong);
+}
+.site-menu-link[aria-current="page"] .site-menu-icon { color: var(--brand); }
+.site-menu-icon { flex: 0 0 auto; color: var(--ink-soft); }
+.site-menu-chevron { flex: 0 0 auto; margin-left: auto; color: var(--ink-faint); }
+.site-menu-hint {
+    margin-left: auto;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--ink-soft);
+}
+
+/* Поиск — единственный акцент в меню: отдельная подложка вместо ещё одного
+   пункта списка. */
+.site-menu-search { background: var(--mist); }
+.site-menu-search:hover { background: var(--mist-deep); }
+.site-menu-search:active { background: var(--brand-soft); }
+/* Поиск — тоже маршрут: на странице поиска он подсвечивается как активный,
+   не теряя своей подложки. */
+.site-menu-search[aria-current="page"],
+.site-menu-search[aria-current="page"]:hover { background: var(--brand-soft); }
+.site-menu-search[aria-current="page"] .site-menu-icon { color: var(--brand); }
+
+.site-menu-account {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--line);
+}
+.site-menu-user { gap: 0.875rem; height: auto; padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.site-menu-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    background: var(--brand-soft);
+    color: var(--brand-strong);
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+.site-menu-user-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--ink);
+}
+.site-menu-user-role {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--ink-soft);
+}
+.site-menu-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0 0.75rem;
+}
+.site-menu-actions > * {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+}
+/* «Выйти» — действие, а не переход: тот же ритм строки, приглушённый цвет. */
+.site-menu-logout {
+    width: 100%;
+    color: var(--ink-soft);
+    font-weight: 600;
+}
+.site-menu-logout:hover { color: var(--ink); }
 
 /* prefers-reduced-motion: убираем движение, оставляем мгновенные состояния. */
 @media (prefers-reduced-motion: reduce) {

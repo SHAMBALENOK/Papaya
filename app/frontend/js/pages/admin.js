@@ -8,21 +8,52 @@
  *   #/admin/imports     документы РСОШ: загрузка, импорт, preview, подтверждение
  * ========================================================================== */
 
-const ADMIN_TABS = [
-    { key: 'dashboard', label: 'Сводка', href: '#/admin/dashboard' },
-    { key: 'users', label: 'Пользователи', href: '#/admin/users' },
-    { key: 'olympiads', label: 'Олимпиады', href: '#/admin/olympiads' },
-    { key: 'universities', label: 'Университеты', href: '#/admin/universities' },
-    { key: 'benefits', label: 'Льготы', href: '#/admin/benefits' },
-    { key: 'seasons', label: 'Сезоны', href: '#/admin/seasons' },
-    { key: 'programs', label: 'Программы', href: '#/admin/programs' },
-    { key: 'docs', label: 'Документы', href: '#/admin/docs' },
-    { key: 'sources', label: 'Источники', href: '#/admin/sources' },
-    { key: 'bvi', label: 'Заявки БВИ', href: '#/admin/bvi' },
-    { key: 'imports', label: 'Импорт РСОШ', href: '#/admin/imports' },
-    { key: 'repapps', label: 'Заявки представителей', href: '#/admin/repapps' },
-    { key: 'audit', label: 'Аудит', href: '#/admin/audit' },
+/* Группы администрирования: верхний уровень — смысловые блоки, внутри —
+   подразделы. Ключи вкладок и маршруты не меняются, поэтому старые прямые
+   ссылки (`#/admin/seasons`, `#/admin/benefits` и т.д.) продолжают работать. */
+const ADMIN_GROUPS = [
+    {
+        key: 'dashboard', label: 'Сводка',
+        tabs: [{ key: 'dashboard', label: 'Сводка' }],
+    },
+    {
+        key: 'users', label: 'Пользователи',
+        tabs: [{ key: 'users', label: 'Пользователи' }],
+    },
+    {
+        key: 'olympiads', label: 'Олимпиады',
+        tabs: [
+            { key: 'olympiads', label: 'Олимпиады' },
+            { key: 'seasons', label: 'Сезоны' },
+        ],
+    },
+    {
+        key: 'universities', label: 'Университеты',
+        tabs: [
+            { key: 'universities', label: 'Университеты' },
+            { key: 'benefits', label: 'Льготы' },
+            { key: 'programs', label: 'Программы' },
+            { key: 'bvi', label: 'Заявки БВИ' },
+            { key: 'repapps', label: 'Заявки представителей' },
+        ],
+    },
+    {
+        key: 'data', label: 'Данные',
+        tabs: [
+            { key: 'docs', label: 'Документы' },
+            { key: 'sources', label: 'Источники' },
+            { key: 'imports', label: 'Импорт РСОШ' },
+        ],
+    },
+    {
+        key: 'audit', label: 'Аудит',
+        tabs: [{ key: 'audit', label: 'Аудит' }],
+    },
 ];
+
+const ADMIN_TABS = ADMIN_GROUPS.flatMap(group =>
+    group.tabs.map(tab => ({ ...tab, href: `#/admin/${tab.key}` })));
+const ADMIN_TAB_KEYS = new Set(ADMIN_TABS.map(tab => tab.key));
 
 /** Размер страницы при выгрузке очереди БВИ: список качается постранично. */
 const BVI_PAGE_SIZE = 50;
@@ -50,7 +81,32 @@ function renderAdmin(initialTab) {
         renderForbidden('Администрирование Papaya', 'Этот раздел доступен только администратору платформы.');
         return;
     }
-    const tab = ADMIN_TABS.some(item => item.key === initialTab) ? initialTab : 'users';
+    const tab = ADMIN_TAB_KEYS.has(initialTab) ? initialTab : 'users';
+    const activeGroup = ADMIN_GROUPS.find(group =>
+        group.tabs.some(item => item.key === tab)) || ADMIN_GROUPS[1];
+    const groupNav = ADMIN_GROUPS.map(group => {
+        const active = group.key === activeGroup.key;
+        const href = `#/admin/${group.tabs[0].key}`;
+        return `<a href="${href}"
+                   class="px-4 py-2.5 rounded text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                       active
+                           ? 'bg-white text-brand-strong shadow-elev-1'
+                           : 'text-ink-soft hover:text-ink hover:bg-white'
+                   }" aria-current="${active ? 'page' : 'false'}">${group.label}</a>`;
+    }).join('');
+    const subNav = activeGroup.tabs.length > 1
+        ? `<nav class="flex flex-wrap gap-1.5 mb-12" aria-label="Подразделы: ${activeGroup.label}">
+               ${activeGroup.tabs.map(item => {
+                   const active = item.key === tab;
+                   return `<a href="#/admin/${item.key}"
+                              class="px-3.5 py-2 rounded text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                                  active
+                                      ? 'bg-brand text-white'
+                                      : 'text-ink-soft hover:text-ink hover:bg-mist'
+                              }" aria-current="${active ? 'page' : 'false'}">${item.label}</a>`;
+               }).join('')}
+           </nav>`
+        : '<div class="mb-12"></div>';
 
     page.innerHTML = `
     <section class="pt-2 pb-10 md:pb-12">
@@ -61,13 +117,10 @@ function renderAdmin(initialTab) {
         </p>
     </section>
 
-    <div class="flex flex-wrap gap-2 bg-mist rounded p-2 mb-12" role="tablist" aria-label="Разделы администрирования">
-        ${ADMIN_TABS.map(item => `
-        <a href="${item.href}" data-admin-tab="${item.key}" role="tab" aria-selected="${item.key === tab}"
-           class="admin-tab flex-1 sm:flex-none sm:min-w-[10rem] text-center px-5 py-2.5 rounded text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 ${
-               item.key === tab ? 'bg-brand text-white shadow-elev-1' : 'text-ink-soft hover:text-ink hover:bg-white'
-           }">${item.label}</a>`).join('')}
-    </div>
+    <nav class="flex flex-wrap gap-1 bg-mist rounded p-2 mb-4" aria-label="Разделы администрирования">
+        ${groupNav}
+    </nav>
+    ${subNav}
 
     <section id="admin-content" aria-live="polite">${loadingHtml()}</section>`;
 
@@ -483,7 +536,7 @@ function currentAdminTab() {
 
 async function reloadAdmin() {
     const tab = currentAdminTab();
-    await loadAdminTab(ADMIN_TABS.some(item => item.key === tab) ? tab : 'users');
+    await loadAdminTab(ADMIN_TAB_KEYS.has(tab) ? tab : 'users');
 }
 
 /* ------------------------------- Пользователи ------------------------------ */
@@ -1161,7 +1214,7 @@ function importNoticesHtml(warnings) {
 function importFabHtml(state) {
     if (!['processing', 'paused', 'review'].includes(state)) return '';
     return `<button type="button" data-ri="addManualCandidate"
-        class="fixed bottom-8 right-8 z-40 inline-flex items-center gap-2 rounded bg-brand text-white px-6 py-4 text-sm font-semibold shadow-elev-2 hover:bg-brand-strong transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+        class="fixed bottom-8 right-8 z-40 inline-flex items-center gap-2 rounded bg-brand text-white px-6 py-4 text-sm font-semibold shadow-elev-2 hover:bg-brand-strong transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
         <span aria-hidden="true" class="text-lg leading-none">+</span> Добавить олимпиаду
     </button>`;
 }

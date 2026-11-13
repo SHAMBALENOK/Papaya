@@ -29,16 +29,17 @@ const UI = {
     eyebrow: 'eyebrow',
 
     /* Кнопки: радиус 6px, заметный фокус, лёгкий отклик на нажатие. */
-    btn: 'inline-flex items-center justify-center gap-2 font-semibold rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 transition-[transform,background-color,color,box-shadow] duration-150 ease-out active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none',
+    btn: 'inline-flex items-center justify-center gap-2 font-semibold rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 transition-[transform,background-color,color,box-shadow] duration-150 ease-out active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none',
     btnPrimary: 'bg-brand text-white px-6 py-3 shadow-elev-1 hover:bg-brand-strong hover:shadow-elev-2',
     btnSecondary: 'bg-brand-soft text-brand-strong px-6 py-3 hover:bg-brand-tint',
     btnDanger: 'bg-danger text-white px-4 py-2 text-sm shadow-elev-1 hover:bg-danger-strong hover:shadow-elev-2',
-    btnGhost: 'text-ink-soft px-4 py-2 hover:text-ink hover:bg-mist focus-visible:ring-brand/60',
+    btnGhost: 'text-ink-soft px-4 py-2 hover:text-ink hover:bg-mist focus-visible:ring-brand',
     btnSmall: 'px-4 py-2 text-sm',
 
-    /* Поля без тяжёлых рамок: подложка mist, фокус — брендовое кольцо. */
+    /* Поля без тяжёлых рамок: подложка mist, тонкая граница с контрастом
+       ≥3:1 к белому и фокусное кольцо сплошным брендом. */
     label: 'block text-sm font-semibold text-ink mb-2',
-    input: 'w-full bg-mist rounded px-4 py-3 text-base text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-brand/40 transition-shadow',
+    input: 'w-full bg-mist rounded px-4 py-3 text-base text-ink border border-lineStrong placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand transition-shadow',
     field: 'mb-6',
 
     card: 'bg-white shadow-elev-1',
@@ -160,7 +161,7 @@ function passwordField({ id, label, name, placeholder = '', required = false, au
                    placeholder="${escAttr(placeholder)}"
                    ${required ? 'required' : ''} ${autocomplete ? `autocomplete="${autocomplete}"` : ''}>
             <button type="button" data-toggle-password="${id}" aria-pressed="false" aria-controls="${id}"
-                    class="absolute inset-y-0 right-0 flex items-center px-4 text-sm font-semibold text-ink-soft hover:text-ink rounded-r focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Показать</button>
+                    class="absolute inset-y-0 right-0 flex items-center px-4 text-sm font-semibold text-ink-soft hover:text-ink rounded-r focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Показать</button>
         </div>
     </div>`;
 }
@@ -197,7 +198,7 @@ function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } 
             <div class="flex items-start justify-between gap-6 mb-8">
                 <h2 class="text-2xl font-bold tracking-tight text-ink">${escHtml(title)}</h2>
                 <button type="button" data-modal-close aria-label="Закрыть окно"
-                        class="shrink-0 w-10 h-10 rounded bg-mist hover:bg-mist-deep text-ink-soft hover:text-ink flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">&times;</button>
+                        class="shrink-0 w-10 h-10 rounded bg-mist hover:bg-mist-deep text-ink-soft hover:text-ink flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">&times;</button>
             </div>
             <div class="modal-body">${bodyHtml}</div>
         </div>
@@ -409,33 +410,85 @@ function setChrome(visible) {
     else closeMobileMenu();
 }
 
-/** Открывает/закрывает мобильную панель навигации под шапкой. */
+/** Открывает/закрывает мобильную панель навигации под шапкой.
+ *
+ *  Панель живёт в DOM постоянно: скрытие через `hidden` после анимации, а не
+ *  скачком. Движение — только transform/opacity, поэтому открытие не вызывает
+ *  пересчёт раскладки; при prefers-reduced-motion состояние меняется сразу.
+ */
+let menuCloseTimer = null;
+
 function toggleMobileMenu(force) {
     const menu = document.getElementById('mobile-menu');
     const btn = document.getElementById('menu-toggle');
+    const scrim = document.getElementById('menu-scrim');
     if (!menu || !btn) return;
     const open = typeof force === 'boolean' ? force : menu.hidden;
-    menu.hidden = !open;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    clearTimeout(menuCloseTimer);
+    menuCloseTimer = null;
     btn.setAttribute('aria-expanded', String(open));
     btn.setAttribute('aria-label', open ? 'Закрыть меню' : 'Открыть меню');
+    document.body.classList.toggle('menu-open', open);
+
+    if (open) {
+        const wasHidden = menu.hidden;
+        menu.hidden = false;
+        if (scrim) scrim.hidden = false;
+        /* Кадр в закрытом состоянии: без него переход не запустится. */
+        if (wasHidden && !reduce) void menu.offsetHeight;
+        menu.classList.add('is-open');
+        if (scrim) scrim.classList.add('is-open');
+        return;
+    }
+
+    /* Фокус не должен остаться в скрытой панели. */
+    if (menu.contains(document.activeElement)) btn.focus();
+    menu.classList.remove('is-open');
+    if (scrim) scrim.classList.remove('is-open');
+    if (reduce) {
+        menu.hidden = true;
+        if (scrim) scrim.hidden = true;
+        return;
+    }
+    menuCloseTimer = setTimeout(() => {
+        menu.hidden = true;
+        if (scrim) scrim.hidden = true;
+        menuCloseTimer = null;
+    }, 200);
 }
 
 function openMobileMenu() { toggleMobileMenu(true); }
 function closeMobileMenu() { toggleMobileMenu(false); }
 
 function navLinkClass(active) {
-    const base = 'inline-flex items-center px-3 py-2 rounded text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60';
+    const base = 'inline-flex items-center px-3 py-2 rounded text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand';
     return active
         ? `${base} text-brand-strong bg-brand-soft`
         : `${base} text-ink-soft hover:text-ink hover:bg-mist`;
 }
 
-function mobileNavLinkClass(active) {
-    const base = 'block px-3 py-2.5 rounded text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60';
-    return active
-        ? `${base} text-brand-strong bg-brand-soft`
-        : `${base} text-ink-soft hover:text-ink hover:bg-mist`;
+/* Иконки строк мобильного меню: 20px, stroke 1.75 — та же оптическая
+   плотность, что у иконки поиска в шапке. */
+const MENU_ICONS = {
+    '/': '<path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
+    '/olympiads': '<path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+    '/universities': '<path d="M3 21h18M5 21V9l7-4 7 4v12M9 21v-5h6v5"/>',
+    '/benefits': '<path d="M20.6 12.6 12 21l-9-9V4h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+    '/my-university': '<path d="M3 21h18M6 21V9l6-3 6 3v12M10 21v-5h4v5"/><path d="m9.5 11 2 2 3.5-3.5"/>',
+    '/admin': '<path d="M12 3 5 6v6c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V6z"/>',
+    '/search': '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    '/profile': '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
+    'logout': '<path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M9 8l-4 4 4 4"/><path d="M5 12h10"/>',
+};
+
+function menuIcon(route) {
+    const body = MENU_ICONS[route] || MENU_ICONS['/'];
+    return `<svg class="site-menu-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }
+
+const MENU_CHEVRON = '<svg class="site-menu-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
 
 /** Основные разделы. Порядок задаёт сценарий: сначала главная и каталоги. */
 function navLinks() {
@@ -446,11 +499,11 @@ function navLinks() {
     ];
     if (store.user) {
         /* «Мой университет» — кабинет представителя: у администратора он не
-           показывается, иначе раздел дублировал бы модерацию БВИ в панели. */
+           показывается, иначе раздел дублировал бы модерацию БВИ в панели.
+           «Профиль» живёт в блоке аккаунта (аватар), а не в основной навигации. */
         if (store.isUniversityRep()) {
             links.push({ href: '#/my-university', route: '/my-university', label: 'Мой университет' });
         }
-        links.push({ href: '#/profile', route: '/profile', label: 'Профиль' });
     }
     if (store.isAdmin()) {
         links.push({ href: '#/admin/users', route: '/admin', label: 'Администрирование' });
@@ -467,12 +520,12 @@ function secondaryNavLinks() {
 function desktopAuthHtml() {
     if (!store.user) {
         return `
-        <a href="#/auth" class="rounded px-3 py-2 text-sm font-semibold text-ink-soft hover:text-ink hover:bg-mist transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Войти</a>
+        <a href="#/auth" class="rounded px-3 py-2 text-sm font-semibold text-ink-soft hover:text-ink hover:bg-mist transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Войти</a>
         <a href="#/auth?tab=register" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Регистрация</a>`;
     }
     const initials = userInitials(store.user);
     return `
-    <a href="#/profile" class="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-mist transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+    <a href="#/profile" class="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-mist transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
         <span class="w-8 h-8 rounded-full bg-brand-soft text-brand-strong text-xs font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</span>
         <span class="hidden lg:block max-w-[12rem] truncate text-sm font-semibold text-ink">${escHtml(store.user.name)} ${escHtml(store.user.surname)}</span>
     </a>
@@ -482,19 +535,27 @@ function desktopAuthHtml() {
 function mobileAuthHtml() {
     if (!store.user) {
         return `
-        <a href="#/auth" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall} w-full">Войти</a>
-        <a href="#/auth?tab=register" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall} w-full mt-2">Регистрация</a>`;
+        <p class="site-menu-label">Аккаунт</p>
+        <div class="site-menu-actions">
+            <a href="#/auth" class="${UI.btn} ${UI.btnSecondary}">Войти</a>
+            <a href="#/auth?tab=register" class="${UI.btn} ${UI.btnPrimary}">Регистрация</a>
+        </div>`;
     }
     const initials = userInitials(store.user);
     return `
-    <div class="flex items-center gap-3 py-2">
-        <span class="w-9 h-9 rounded-full bg-brand-soft text-brand-strong text-xs font-extrabold flex items-center justify-center shrink-0" aria-hidden="true">${escHtml(initials)}</span>
-        <div class="min-w-0">
-            <p class="text-sm font-semibold text-ink truncate">${escHtml(store.user.name)} ${escHtml(store.user.surname)}</p>
-            <p class="text-xs text-ink-soft truncate">${escHtml(store.roleLabel())}</p>
-        </div>
-    </div>
-    <button type="button" data-logout class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} w-full mt-1">Выйти</button>`;
+    <p class="site-menu-label">Аккаунт</p>
+    <a href="#/profile" data-route="/profile" class="site-menu-link site-menu-user">
+        <span class="site-menu-avatar" aria-hidden="true">${escHtml(initials)}</span>
+        <span class="min-w-0 flex-1">
+            <span class="site-menu-user-name">${escHtml(store.user.name)} ${escHtml(store.user.surname)}</span>
+            <span class="site-menu-user-role">${escHtml(store.roleLabel())}</span>
+        </span>
+        ${MENU_CHEVRON}
+    </a>
+    <button type="button" data-logout class="site-menu-link site-menu-logout">
+        ${menuIcon('logout')}
+        <span>Выйти</span>
+    </button>`;
 }
 
 function renderHeader() {
@@ -506,22 +567,36 @@ function renderHeader() {
 
     const primary = navLinks();
     const extra = secondaryNavLinks();
-    const all = primary.concat(extra);
 
     if (nav) {
         nav.innerHTML = primary.map(l =>
             `<a href="${l.href}" data-route="${l.route}" class="${navLinkClass(false)}">${l.label}</a>`
         ).join('') + `
             <span class="mx-2 h-5 w-px bg-line" aria-hidden="true"></span>
+            <span class="hidden xl:inline-flex items-center gap-1">
             ${extra.map(l =>
                 `<a href="${l.href}" data-route="${l.route}" class="${navLinkClass(false)}">${l.label}</a>`
-            ).join('')}`;
+            ).join('')}
+            </span>`;
     }
 
     if (mobileNav) {
-        mobileNav.innerHTML = all.map(l =>
-            `<a href="${l.href}" data-route="${l.route}" class="${mobileNavLinkClass(false)}">${l.label}</a>`
-        ).join('');
+        /* Поиск поднят над списком: на телефоне это самый частый сценарий,
+           а не ещё один равноправный пункт. */
+        const rows = primary.concat(extra).map(l =>
+            `<a href="${l.href}" data-route="${l.route}" class="site-menu-link">
+                ${menuIcon(l.route)}
+                <span class="min-w-0 truncate">${escHtml(l.label)}</span>
+                ${MENU_CHEVRON}
+            </a>`).join('');
+        mobileNav.innerHTML = `
+            <a href="#/search" data-route="/search" class="site-menu-link site-menu-search">
+                ${menuIcon('/search')}
+                <span class="min-w-0 truncate">Поиск</span>
+                <span class="site-menu-hint">олимпиады и вузы</span>
+            </a>
+            <p class="site-menu-label">Разделы</p>
+            ${rows}`;
     }
 
     if (actions) actions.innerHTML = desktopAuthHtml();
@@ -539,6 +614,7 @@ function highlightNav(path) {
     if (current.startsWith('/universities')) current = '/universities';
     else if (current.startsWith('/olympiads')) current = '/olympiads';
     else if (current.startsWith('/benefits')) current = '/benefits';
+    else if (current.startsWith('/search')) current = '/search';
     else if (current.startsWith('/admin')) current = '/admin';
     else if (current === '/my-university') current = '/my-university';
     document.querySelectorAll('#nav a[data-route]').forEach(a => {
@@ -546,11 +622,17 @@ function highlightNav(path) {
         a.setAttribute('aria-current', active ? 'page' : 'false');
         a.className = navLinkClass(active);
     });
-    document.querySelectorAll('#mobile-nav a[data-route]').forEach(a => {
+    document.querySelectorAll('#mobile-nav a[data-route], #mobile-auth a[data-route]').forEach(a => {
         const active = a.dataset.route === current;
         a.setAttribute('aria-current', active ? 'page' : 'false');
-        a.className = mobileNavLinkClass(active);
     });
+    const searchLink = document.getElementById('header-search');
+    if (searchLink) {
+        const active = current === '/search';
+        searchLink.setAttribute('aria-current', active ? 'page' : 'false');
+        searchLink.classList.toggle('text-brand', active);
+        searchLink.classList.toggle('text-ink-soft', !active);
+    }
     closeMobileMenu();
 }
 
@@ -585,11 +667,15 @@ async function logout() {
 function bindChromeControls() {
     const toggle = document.getElementById('menu-toggle');
     if (toggle) toggle.addEventListener('click', () => toggleMobileMenu());
+    const scrim = document.getElementById('menu-scrim');
+    if (scrim) scrim.addEventListener('click', closeMobileMenu);
     document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') closeMobileMenu();
+        const menu = document.getElementById('mobile-menu');
+        if (e.key === 'Escape' && menu && !menu.hidden) closeMobileMenu();
     });
-    /* На широком экране мобильная панель не должна оставаться открытой. */
-    const desktop = window.matchMedia('(min-width: 768px)');
+    /* На широком экране мобильная панель не должна оставаться открытой:
+       иначе вернувшийся на десктоп пользователь получит закрытый скролл. */
+    const desktop = window.matchMedia('(min-width: 1024px)');
     const syncViewport = e => { if (e.matches) closeMobileMenu(); };
     if (desktop.addEventListener) desktop.addEventListener('change', syncViewport);
     else if (desktop.addListener) desktop.addListener(syncViewport);

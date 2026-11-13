@@ -61,7 +61,8 @@ async function loadUniversities(query) {
     }
     const items = res.data.universities || [];
     box.innerHTML = items.length
-        ? `<p class="text-sm text-ink-faint mb-6">Найдено: ${items.length}</p>
+        ? `<h2 class="sr-only">Результаты поиска</h2>
+           <p class="text-sm text-ink-faint mb-6">Найдено: ${items.length}</p>
            <div class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${items.map(universityCardHtml).join('')}</div>`
         : emptyHtml('Университеты не найдены',
                     'Попробуйте другое название: каталог ищет по полному названию, аббревиатуре и описанию.',
@@ -123,7 +124,7 @@ async function renderUniversity(universityId) {
 
     page.innerHTML = `
     <article class="pb-16 md:pb-24">
-        <a href="#/universities" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+        <a href="#/universities" class="inline-flex items-center gap-2 text-ink-soft font-semibold hover:text-ink transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>
             Все университеты
         </a>
@@ -324,14 +325,14 @@ function bviOlympiadCardHtml(olympiad) {
 
     return `
     <a href="#/olympiads/${escAttr(olympiad.id)}"
-       class="group block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 md:p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+       class="group block min-w-0 bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 md:p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
         ${cardImageHtml(olympiad)}
         <div class="flex items-center gap-3 flex-wrap">
             ${badge}
         </div>
-        <h3 class="mt-4 text-lg font-bold tracking-tight leading-snug">${escHtml(olympiad.name)}</h3>
+        <h3 class="mt-4 text-lg font-bold tracking-tight leading-snug wrap-anywhere">${escHtml(olympiad.name)}</h3>
         ${note}
-        <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2">${escHtml(olympiad.description || '')}</p>
+        <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2 wrap-anywhere">${escHtml(olympiad.description || '')}</p>
         <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand transition-colors">Открыть олимпиаду →</p>
     </a>`;
 }

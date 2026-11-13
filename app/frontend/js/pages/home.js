@@ -49,7 +49,7 @@ function renderHome() {
                         Проверенные льготы с документом-основанием.
                     </li>
                 </ul>
-                <a href="#/benefits" class="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+                <a href="#/benefits" class="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
                     Смотреть каталог льгот →
                 </a>
             </aside>
@@ -62,7 +62,7 @@ function renderHome() {
                 <p class="${UI.eyebrow}">Возможности</p>
                 <h2 id="home-features-title" class="mt-3 text-2xl md:text-3xl font-extrabold tracking-tight">Что можно сделать</h2>
             </div>
-            <a href="#/search" class="text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Открыть поиск →</a>
+            <a href="#/search" class="text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Открыть поиск →</a>
         </div>
 
         <div class="mt-8 grid gap-x-10 gap-y-8 sm:grid-cols-2">
@@ -113,8 +113,8 @@ function renderHome() {
                     </div>
                 </form>
                 <div class="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm font-semibold">
-                    <a href="#/olympiads" class="text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Каталог олимпиад →</a>
-                    <a href="#/universities" class="text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Каталог университетов →</a>
+                    <a href="#/olympiads" class="text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Каталог олимпиад →</a>
+                    <a href="#/universities" class="text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Каталог университетов →</a>
                 </div>
             </div>
         </div>
@@ -187,7 +187,7 @@ async function loadHomeCatalog() {
         <p class="${UI.eyebrow}">Каталог БВИ университетов</p>
         <div class="mt-3 flex flex-wrap items-end justify-between gap-4">
             <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight leading-[1.1]">Университеты</h2>
-            <a href="#/universities" class="text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Все университеты →</a>
+            <a href="#/universities" class="text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Все университеты →</a>
         </div>
         <p class="mt-3 text-ink-soft leading-relaxed max-w-2xl">
             Откройте университет, чтобы увидеть олимпиады, за которые он даёт
@@ -199,7 +199,7 @@ async function loadHomeCatalog() {
         <p class="${UI.eyebrow}">Перечень олимпиад РСОШ</p>
         <div class="mt-3 flex flex-wrap items-end justify-between gap-4">
             <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight leading-[1.1]">Олимпиады</h2>
-            <a href="#/olympiads" class="text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Все олимпиады →</a>
+            <a href="#/olympiads" class="text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Все олимпиады →</a>
         </div>
         <p class="mt-3 text-ink-soft leading-relaxed max-w-2xl">
             Одна запись на олимпиаду, независимо от года проведения. Каталог
@@ -228,11 +228,11 @@ function isHistoricalBvi(item) {
 function universityCardHtml(university) {
     return `
     <a href="#/universities/${escAttr(university.id)}"
-       class="group block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+       class="group block min-w-0 bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
         <div class="p-5 md:p-6">
             ${cardImageHtml(university)}
             ${entityTitleHtml(university)}
-            <p class="mt-2 text-sm text-ink-soft leading-relaxed line-clamp-3">${escHtml(university.description || '')}</p>
+            <p class="mt-2 text-sm text-ink-soft leading-relaxed line-clamp-3 wrap-anywhere">${escHtml(university.description || '')}</p>
             <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand">Олимпиады с БВИ →</p>
         </div>
     </a>`;
@@ -241,12 +241,12 @@ function universityCardHtml(university) {
 function olympiadCardHtml(olympiad) {
     return `
     <a href="#/olympiads/${escAttr(olympiad.id)}"
-       class="group block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+       class="group block min-w-0 bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
         <div class="p-5 md:p-6">
             ${cardImageHtml(olympiad)}
             <div class="flex items-center gap-3 flex-wrap">${olympiadStatusBadge(olympiad.status)}</div>
-            <h3 class="mt-4 text-lg font-bold tracking-tight leading-snug">${escHtml(olympiad.name)}</h3>
-            <p class="mt-2 text-sm text-ink-soft leading-relaxed line-clamp-3">${escHtml(olympiad.description || '')}</p>
+            <h3 class="mt-4 text-lg font-bold tracking-tight leading-snug wrap-anywhere">${escHtml(olympiad.name)}</h3>
+            <p class="mt-2 text-sm text-ink-soft leading-relaxed line-clamp-3 wrap-anywhere">${escHtml(olympiad.description || '')}</p>
             <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand">Подробнее →</p>
         </div>
     </a>`;
@@ -265,7 +265,7 @@ function cardImageHtml(entity) {
             <div class="mb-4 overflow-hidden rounded-md bg-mist">
                 <img src="${escAttr(src)}" alt="${escAttr(entity.name)}"
                      width="640" height="320" loading="lazy" decoding="async"
-                     class="w-full h-36 object-cover"
+                     class="w-full max-w-full h-36 object-cover"
                      onerror="this.onerror=null;this.parentElement.style.display='none'">
             </div>`;
 }
@@ -281,9 +281,9 @@ function entityTitleHtml(entity) {
     const name = escHtml(entity.name || '');
     const shortName = escHtml(entity.short_name || '');
     if (!shortName || shortName === name) {
-        return `<h3 class="text-xl font-bold tracking-tight leading-snug">${name}</h3>`;
+        return `<h3 class="text-xl font-bold tracking-tight leading-snug wrap-anywhere">${name}</h3>`;
     }
     return `
-            <h3 class="text-xl font-bold tracking-tight leading-snug">${shortName}</h3>
-            <p class="mt-0.5 text-sm text-ink-soft leading-snug break-words">${name}</p>`;
+            <h3 class="text-xl font-bold tracking-tight leading-snug wrap-anywhere">${shortName}</h3>
+            <p class="mt-0.5 text-sm text-ink-soft leading-snug break-words wrap-anywhere">${name}</p>`;
 }

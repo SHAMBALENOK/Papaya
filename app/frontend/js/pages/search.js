@@ -57,22 +57,22 @@ async function renderSearch(query) {
     box.innerHTML = `
     ${universities.length ? `
     <div class="mb-16">
-        <p class="${UI.eyebrow}">Университеты (${universities.length})</p>
+        <h2 class="${UI.eyebrow}">Университеты (${universities.length})</h2>
         <div class="mt-8 grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${universities.map(universityCardHtml).join('')}</div>
     </div>` : ''}
     ${olympiads.length ? `
     <div class="${programs.length ? 'mb-16' : ''}">
-        <p class="${UI.eyebrow}">Олимпиады (${olympiads.length})</p>
+        <h2 class="${UI.eyebrow}">Олимпиады (${olympiads.length})</h2>
         <div class="mt-8 grid gap-8 sm:grid-cols-2 xl:grid-cols-3">${olympiads.map(olympiadCardHtml).join('')}</div>
     </div>` : ''}
     ${programs.length ? `
     <div>
-        <p class="${UI.eyebrow}">Образовательные программы (${programs.length})</p>
+        <h2 class="${UI.eyebrow}">Образовательные программы (${programs.length})</h2>
         <div class="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
             ${programs.map(item => `
                 <a href="#/universities/${escAttr(item.university_id)}"
-                   class="block bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
-                    <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
+                   class="block min-w-0 bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                    <p class="font-bold text-ink leading-snug wrap-anywhere">${escHtml(item.name)}</p>
                     ${item.code ? `<p class="mt-2 text-sm text-ink-soft">Код: ${escHtml(item.code)}</p>` : ''}
                     <p class="mt-4 text-sm font-semibold text-brand-strong">Открыть университет →</p>
                 </a>`).join('')}
