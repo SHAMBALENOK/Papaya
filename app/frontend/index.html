@@ -15,78 +15,57 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Public+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 
-    <!--
-      Tailwind CSS (Play CDN): zero-build, SPA без сборщика.
-      Все цвета палитры объявлены один раз здесь; разметка использует только
-      семантические имена токенов, а не hex-значения.
-    -->
+    <!-- Единый источник палитры — style.css. Tailwind читает его переменные
+         ниже, поэтому hex-значения объявлены ровно один раз. -->
+    <link rel="stylesheet" href="/frontend/css/style.css?v=0.13.8">
+
+    <!-- Tailwind CSS (Play CDN): zero-build, SPA без сборщика. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-    /* ======================================================================
-       ДИЗАЙН-ТОКЕНЫ — белый холст, зелёный бренд, тёмная типографика.
-
-       ПАЛИТРА (значения заданы один раз):
-         brand      #007F5F  главный бренд: кнопки действия, активная навигация,
-                             ссылки и ключевые акценты
-         leaf       #2B9348  вторичный акцент (успех, подтверждение)
-         leaf2      #55A630  вторичный акцент (hover, метки)
-         lime       #80B918  категории и небольшие маркеры
-         lime2      #AACC00  категории и небольшие маркеры
-         lemon…     #BFD200…#FFFF3F  только декор: точки, полоски, иллюстрации
-
-       НЕЙТРАЛИ:
-         paper      #FFFFFF  холст и поверхности
-         mist       #F4F6F3  подложки полей, мягкие панели
-         line       #DDE5DF  единственный тонкий разделитель
-         ink        #14201B  основной текст (≈16:1 на белом)
-         ink.soft   #55625B  вторичный текст (≈6.4:1 — WCAG AA)
-         ink.faint  #68746D  подписи и плейсхолдеры (≈4.9:1)
-
-       СТАТУСЫ (цвет + текст, не только цвет):
-         success    #1E7A46 / soft #DFF2E8
-         warning    #8A5A00 / soft #FDF4DC
-         danger     #B3261E / soft #FBECEB
-
-       ГЕОМЕТРИЯ:
-         поверхности 6–14px, интерактив 6px; тени мягкие, без тяжёлых рамок.
-       ====================================================================== */
+    /* Дизайн-токены читаются из CSS-переменных style.css. Разметка использует
+       только семантические имена, а не hex-значения. */
+    const cssToken = (name) =>
+        getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     const PALETTE = {
-        brand: '#007F5F',
-        brandStrong: '#00664E',
-        brandSoft: '#E7F2ED',
-        brandTint: '#D6E9E1',
-        leaf: '#2B9348',
-        leaf2: '#55A630',
-        lime: '#80B918',
-        lime2: '#AACC00',
-        lemon: '#BFD200',
-        lemon2: '#D4D700',
-        lemon3: '#DDDF00',
-        lemon4: '#EEEF20',
-        lemon5: '#FFFF3F',
-        ink: '#14201B',
-        inkDeep: '#08110C',
-        inkSoft: '#55625B',
-        inkFaint: '#68746D',
-        mist: '#F4F6F3',
-        mistDeep: '#E8EDE8',
-        line: '#DDE5DF',
-        success: '#1E7A46',
-        successSoft: '#DFF2E8',
-        danger: '#B3261E',
-        dangerStrong: '#8C1D17',
-        dangerSoft: '#FBECEB',
-        warning: '#8A5A00',
-        warningSoft: '#FDF4DC',
-        scrim: 'rgba(8, 17, 12, 0.45)',
+        paper: cssToken('--paper'),
+        cream: cssToken('--cream'),
+        brand: cssToken('--brand'),
+        brandStrong: cssToken('--brand-strong'),
+        brandSoft: cssToken('--brand-soft'),
+        brandTint: cssToken('--brand-tint'),
+        leaf: cssToken('--leaf'),
+        leaf2: cssToken('--leaf2'),
+        lime: cssToken('--lime'),
+        lime2: cssToken('--lime2'),
+        lemon: cssToken('--lemon'),
+        lemon2: cssToken('--lemon2'),
+        lemon3: cssToken('--lemon3'),
+        lemon4: cssToken('--lemon4'),
+        lemon5: cssToken('--lemon5'),
+        ink: cssToken('--ink'),
+        inkDeep: cssToken('--ink-deep'),
+        inkSoft: cssToken('--ink-soft'),
+        inkFaint: cssToken('--ink-faint'),
+        mist: cssToken('--mist'),
+        mistDeep: cssToken('--mist-deep'),
+        line: cssToken('--line'),
+        lineStrong: cssToken('--line-strong'),
+        success: cssToken('--success'),
+        successSoft: cssToken('--success-soft'),
+        danger: cssToken('--danger'),
+        dangerStrong: cssToken('--danger-strong'),
+        dangerSoft: cssToken('--danger-soft'),
+        warning: cssToken('--warning'),
+        warningSoft: cssToken('--warning-soft'),
+        scrim: cssToken('--scrim'),
     };
 
     tailwind.config = {
         theme: {
             extend: {
                 colors: {
-                    paper: '#FFFFFF',
-                    cream: '#FFFFFF',
+                    paper: PALETTE.paper,
+                    cream: PALETTE.cream,
                     ink: {
                         DEFAULT: PALETTE.ink,
                         deep: PALETTE.inkDeep,
@@ -98,6 +77,7 @@
                         deep: PALETTE.mistDeep,
                     },
                     line: PALETTE.line,
+                    lineStrong: PALETTE.lineStrong,
                     brand: {
                         DEFAULT: PALETTE.brand,
                         strong: PALETTE.brandStrong,
@@ -158,8 +138,6 @@
         },
     };
     </script>
-
-    <link rel="stylesheet" href="/frontend/css/style.css?v=0.13.2">
 </head>
 <body class="bg-white text-ink font-sans antialiased min-h-screen flex flex-col">
 
@@ -175,27 +153,39 @@
     -->
     <header id="header" class="site-header sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-line">
         <div class="mx-auto max-w-content px-5 md:px-10 h-16 flex items-center gap-3 md:gap-6">
-            <a href="#/" class="shrink-0 text-xl md:text-2xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60" aria-label="Papaya — на главную">
+            <a href="#/" class="shrink-0 text-xl md:text-2xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand" aria-label="Papaya — на главную">
                 Papaya<span class="text-brand" aria-hidden="true">.</span>
             </a>
 
-            <nav id="nav" class="hidden md:flex items-center gap-1 flex-1 min-w-0" aria-label="Основная навигация"></nav>
+            <nav id="nav" class="hidden lg:flex items-center gap-1 flex-1 min-w-0" aria-label="Основная навигация"></nav>
 
-            <div id="auth-actions" class="hidden md:flex items-center gap-2 shrink-0"></div>
+            <a href="#/search" id="header-search" aria-label="Поиск"
+               class="hidden lg:inline-flex shrink-0 w-10 h-10 items-center justify-center rounded text-ink-soft hover:text-ink hover:bg-mist transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"></circle>
+                    <path d="m20 20-3.5-3.5"></path>
+                </svg>
+            </a>
+
+            <div id="auth-actions" class="hidden lg:flex items-center gap-2 shrink-0"></div>
 
             <button type="button" id="menu-toggle" aria-label="Открыть меню" aria-controls="mobile-menu" aria-expanded="false"
-                    class="md:hidden ml-auto w-10 h-10 rounded bg-mist text-ink hover:bg-mist-deep flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                    <path d="M4 7h16M4 12h16M4 17h16"></path>
-                </svg>
+                    class="lg:hidden ml-auto -mr-2 w-11 h-11 shrink-0 rounded-full text-ink flex items-center justify-center hover:bg-mist active:scale-95 transition-[background-color,transform] duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                <span class="menu-btn-icon" aria-hidden="true">
+                    <span class="menu-btn-bar"></span>
+                    <span class="menu-btn-bar"></span>
+                    <span class="menu-btn-bar"></span>
+                </span>
             </button>
         </div>
 
-        <div id="mobile-menu" class="md:hidden border-t border-line bg-white" hidden>
-            <nav id="mobile-nav" class="px-4 py-3 flex flex-col gap-1" aria-label="Мобильная навигация"></nav>
-            <div id="mobile-auth" class="px-4 pb-4"></div>
+        <div id="mobile-menu" class="site-menu lg:hidden" hidden>
+            <nav id="mobile-nav" class="flex flex-col" aria-label="Мобильная навигация"></nav>
+            <div id="mobile-auth" class="site-menu-account"></div>
         </div>
     </header>
+
+    <div id="menu-scrim" class="site-menu-scrim lg:hidden" aria-hidden="true" hidden></div>
 
     <!--
       Статический первый экран: остаётся видимым даже если JavaScript или CDN
@@ -213,10 +203,10 @@
                 испытаний, и перейдите на сайт олимпиады.
             </p>
             <div class="mt-8 flex flex-wrap gap-3">
-                <a href="#/search" class="inline-flex items-center justify-center font-semibold rounded bg-brand text-white px-6 py-3 shadow-elev-1 hover:bg-brand-strong">
+                <a href="#/search" class="inline-flex items-center justify-center font-semibold rounded bg-brand text-white px-6 py-3 shadow-elev-1 hover:bg-brand-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2">
                     Найти олимпиаду
                 </a>
-                <a href="#/universities" class="inline-flex items-center justify-center font-semibold rounded bg-brand-soft text-brand-strong px-6 py-3 hover:bg-brand-tint">
+                <a href="#/universities" class="inline-flex items-center justify-center font-semibold rounded bg-brand-soft text-brand-strong px-6 py-3 hover:bg-brand-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2">
                     Выбрать университет
                 </a>
             </div>
@@ -226,7 +216,7 @@
     <footer class="border-t border-line bg-white">
         <div class="mx-auto max-w-content px-5 md:px-10 py-10 md:py-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-                <a href="#/" class="text-xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+                <a href="#/" class="text-xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
                     Papaya<span class="text-brand" aria-hidden="true">.</span>
                 </a>
                 <p class="mt-3 text-sm text-ink-soft leading-relaxed max-w-xs">
@@ -236,18 +226,18 @@
             <nav aria-label="Разделы сайта">
                 <h2 class="text-sm font-semibold text-ink">Разделы</h2>
                 <ul class="mt-3 space-y-2 text-sm">
-                    <li><a href="#/search" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Поиск</a></li>
-                    <li><a href="#/olympiads" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Олимпиады</a></li>
-                    <li><a href="#/universities" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Университеты</a></li>
-                    <li><a href="#/benefits" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Льготы</a></li>
+                    <li><a href="#/search" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Поиск</a></li>
+                    <li><a href="#/olympiads" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Олимпиады</a></li>
+                    <li><a href="#/universities" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Университеты</a></li>
+                    <li><a href="#/benefits" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Льготы</a></li>
                 </ul>
             </nav>
             <nav aria-label="Учётная запись">
                 <h2 class="text-sm font-semibold text-ink">Аккаунт</h2>
                 <ul class="mt-3 space-y-2 text-sm">
-                    <li><a href="#/auth" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Войти</a></li>
-                    <li><a href="#/auth?tab=register" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Регистрация</a></li>
-                    <li><a href="#/profile" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Профиль</a></li>
+                    <li><a href="#/auth" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Войти</a></li>
+                    <li><a href="#/auth?tab=register" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Регистрация</a></li>
+                    <li><a href="#/profile" class="text-ink-soft hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Профиль</a></li>
                 </ul>
             </nav>
             <div>
@@ -268,19 +258,19 @@
     <div id="toast-container" aria-live="polite"
          class="fixed top-20 right-4 md:right-6 z-[60] flex flex-col gap-3 pointer-events-none"></div>
 
-    <script src="/frontend/js/store.js?v=0.13.2"></script>
-    <script src="/frontend/js/api.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/auth.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/home.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/universities.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/olympiads.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/search.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/myuniversity.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/benefits.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/profile.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/admin.js?v=0.13.2"></script>
-    <script src="/frontend/js/pages/admin_extra.js?v=0.13.2"></script>
-    <script src="/frontend/js/router.js?v=0.13.2"></script>
-    <script src="/frontend/js/app.js?v=0.13.2"></script>
+    <script src="/frontend/js/store.js?v=0.13.8"></script>
+    <script src="/frontend/js/api.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/auth.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/home.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/universities.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/olympiads.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/search.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/myuniversity.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/benefits.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/profile.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/admin.js?v=0.13.8"></script>
+    <script src="/frontend/js/pages/admin_extra.js?v=0.13.8"></script>
+    <script src="/frontend/js/router.js?v=0.13.8"></script>
+    <script src="/frontend/js/app.js?v=0.13.8"></script>
 </body>
 </html>

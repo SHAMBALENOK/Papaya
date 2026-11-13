@@ -3,8 +3,8 @@
  * Активная вкладка — брендовая (bg-brand), поля — подложка mist.
  * ========================================================================== */
 
-const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-brand text-white shadow-elev-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60';
-const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60';
+const TAB_ACTIVE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold bg-brand text-white shadow-elev-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand';
+const TAB_IDLE = 'auth-tab flex-1 sm:flex-none sm:min-w-[10rem] px-6 py-3 rounded text-sm font-semibold text-ink-soft hover:text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand';
 
 /* Требования к паролю — зеркало серверной проверки
    (app/middlewares/re_check.py). Список показывается заранее, а не всплывает
@@ -50,22 +50,22 @@ function renderAuth() {
         </div>
 
         <div class="flex sm:inline-flex flex-wrap gap-2 bg-mist rounded p-2 mb-12" role="tablist" aria-label="Вход или регистрация">
-            <button class="${TAB_ACTIVE}" role="tab" aria-selected="true" data-tab="login">Вход</button>
-            <button class="${TAB_IDLE}" role="tab" aria-selected="false" data-tab="register">Регистрация</button>
+            <button id="tab-login" class="${TAB_ACTIVE}" role="tab" aria-selected="true" aria-controls="login-form" tabindex="0" data-tab="login">Вход</button>
+            <button id="tab-register" class="${TAB_IDLE}" role="tab" aria-selected="false" aria-controls="register-form" tabindex="-1" data-tab="register">Регистрация</button>
         </div>
 
         <div id="auth-alert"></div>
 
-        <form id="login-form" class="max-w-md">
+        <form id="login-form" class="max-w-md" role="tabpanel" aria-labelledby="tab-login">
             ${inputField({ id: 'login-email', name: 'email', label: 'Email', type: 'email', required: true, placeholder: 'you@example.com', autocomplete: 'email' })}
             ${passwordField({ id: 'login-password', name: 'password', label: 'Пароль', required: true, placeholder: 'Ваш пароль', autocomplete: 'current-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Войти</button>
             <p class="mt-8 text-sm text-ink-soft">Нет аккаунта?
-                <a data-goto="register" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Зарегистрироваться</a>
+                <button type="button" data-goto="register" class="font-semibold text-ink underline decoration-brand/40 underline-offset-4 hover:text-brand transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Зарегистрироваться</button>
             </p>
         </form>
 
-        <form id="register-form" class="max-w-md hidden">
+        <form id="register-form" class="max-w-md hidden" role="tabpanel" aria-labelledby="tab-register">
             <div class="grid sm:grid-cols-2 gap-x-4">
                 ${inputField({ id: 'reg-name', name: 'name', label: 'Имя', required: true, placeholder: 'Иван', autocomplete: 'given-name' })}
                 ${inputField({ id: 'reg-surname', name: 'surname', label: 'Фамилия', required: true, placeholder: 'Иванов', autocomplete: 'family-name' })}
@@ -76,7 +76,7 @@ function renderAuth() {
             ${passwordField({ id: 'reg-password2', name: 'password2', label: 'Подтвердите пароль', required: true, placeholder: 'Повторите пароль', autocomplete: 'new-password' })}
             <button type="submit" class="${UI.btn} ${UI.btnPrimary} w-full mt-4">Зарегистрироваться</button>
             <p class="mt-8 text-sm text-ink-soft">Уже есть аккаунт?
-                <a data-goto="login" class="text-ink font-semibold hover:text-black transition-colors cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">Войти</a>
+                <button type="button" data-goto="login" class="font-semibold text-ink underline decoration-brand/40 underline-offset-4 hover:text-brand transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Войти</button>
             </p>
         </form>
     </div>`;
@@ -91,15 +91,30 @@ function renderAuth() {
             const active = t.dataset.tab === mode;
             t.className = active ? TAB_ACTIVE : TAB_IDLE;
             t.setAttribute('aria-selected', String(active));
+            t.tabIndex = active ? 0 : -1;
         });
         loginForm.classList.toggle('hidden', mode !== 'login');
         regForm.classList.toggle('hidden', mode !== 'register');
         alertEl.innerHTML = '';
     }
 
+    const tablist = page.querySelector('[role="tablist"]');
+    if (tablist) {
+        tablist.addEventListener('keydown', event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            const order = [...tabs];
+            const index = order.indexOf(document.activeElement);
+            const step = event.key === 'ArrowRight' ? 1 : -1;
+            const next = order[(index + step + order.length) % order.length];
+            next.focus();
+            switchTab(next.dataset.tab);
+        });
+    }
+
     tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
-    page.querySelectorAll('[data-goto]').forEach(a =>
-        a.addEventListener('click', () => switchTab(a.dataset.goto)));
+    page.querySelectorAll('[data-goto]').forEach(btn =>
+        btn.addEventListener('click', () => switchTab(btn.dataset.goto)));
 
     /* Прямая ссылка из шапки «Регистрация» открывает нужную вкладку. */
     if (new URLSearchParams(currentQuery()).get('tab') === 'register') {
