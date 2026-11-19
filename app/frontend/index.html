@@ -4,20 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#ffffff">
-    <title>Papaya — какие олимпиады дают БВИ в университете</title>
-    <meta name="description" content="Papaya помогает узнать, какие олимпиады дают БВИ (поступление без вступительных испытаний) в конкретных университетах, и какие льготы подтверждены вузами.">
+    <title>Papaya — олимпиады и льготы при поступлении</title>
+    <meta name="description" content="Papaya помогает узнать, какие олимпиады и за какой результат дают льготы при поступлении в конкретный университет: БВИ, 100 баллов ЕГЭ или ДВИ, другая льгота. Документ-основание и статус проверки — рядом с записью.">
 
     <!--
-      Шрифтовая пара: Inter (основной гротеск) + Public Sans (резерв).
-      Geist добавлен в стек на случай локальной установки.
+      Шрифтовая пара: Inter для текста, Manrope для заголовков.
     -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Public+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 
     <!-- Единый источник палитры — style.css. Tailwind читает его переменные
          ниже, поэтому hex-значения объявлены ровно один раз. -->
-    <link rel="stylesheet" href="/frontend/css/style.css?v=0.13.8">
+    <link rel="stylesheet" href="/frontend/css/style.css?v=0.15.0">
 
     <!-- Tailwind CSS (Play CDN): zero-build, SPA без сборщика. -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -115,7 +114,8 @@
                     crimson: PALETTE.danger,
                 },
                 fontFamily: {
-                    sans: ['Inter', 'Public Sans', 'Geist', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+                    sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+                    display: ['Manrope', 'Inter', 'system-ui', 'sans-serif'],
                 },
                 borderRadius: {
                     none: '0px',
@@ -153,8 +153,12 @@
     -->
     <header id="header" class="site-header sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-line">
         <div class="mx-auto max-w-content px-5 md:px-10 h-16 flex items-center gap-3 md:gap-6">
-            <a href="#/" class="shrink-0 text-xl md:text-2xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand" aria-label="Papaya — на главную">
-                Papaya<span class="text-brand" aria-hidden="true">.</span>
+            <a href="#/" class="shrink-0 inline-flex items-center gap-2 text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand" aria-label="Papaya — на главную">
+                <svg class="text-brand" width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                    <path d="M16 29c-5.8 0-10-4.4-10-10.2C6 11 10 5.2 16 3c6 2.2 10 8 10 15.8C26 24.6 21.8 29 16 29Z" fill="currentColor"/>
+                    <path d="M16 8v13M16 14.2c-2.8 0-4.8-1.5-5.4-3.8M16 18.4c2.8 0 4.8-1.5 5.4-3.8" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>
+                </svg>
+                <span class="text-xl md:text-2xl font-extrabold tracking-tight">Papaya</span>
             </a>
 
             <nav id="nav" class="hidden lg:flex items-center gap-1 flex-1 min-w-0" aria-label="Основная навигация"></nav>
@@ -195,12 +199,12 @@
         <section class="max-w-3xl">
             <p class="eyebrow">Олимпиады и поступление</p>
             <h1 class="mt-5 text-4xl md:text-5xl font-black tracking-tight leading-[1.08]">
-                Какие олимпиады дают <span class="text-brand">БВИ</span> в нужном мне университете?
+                Какие олимпиады дают <span class="text-brand">льготу</span> в нужном мне университете?
             </h1>
             <p class="mt-6 text-lg text-ink-soft leading-relaxed">
-                Papaya собирает официальные перечни РСОШ и связывает их с университетами:
-                найдите университет, посмотрите олимпиады, дающие поступление без вступительных
-                испытаний, и перейдите на сайт олимпиады.
+                Papaya собирает официальные перечни РСОШ и приказы университетов:
+                найдите вуз, посмотрите, за какие олимпиады, сезоны и профили он даёт
+                БВИ, 100 баллов или другую льготу, и откройте документ-основание.
             </p>
             <div class="mt-8 flex flex-wrap gap-3">
                 <a href="#/search" class="inline-flex items-center justify-center font-semibold rounded bg-brand text-white px-6 py-3 shadow-elev-1 hover:bg-brand-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2">
@@ -216,11 +220,15 @@
     <footer class="border-t border-line bg-white">
         <div class="mx-auto max-w-content px-5 md:px-10 py-10 md:py-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-                <a href="#/" class="text-xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
-                    Papaya<span class="text-brand" aria-hidden="true">.</span>
+                <a href="#/" class="inline-flex items-center gap-2 text-xl font-extrabold tracking-tight text-ink rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                    <svg class="text-brand" width="24" height="24" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                        <path d="M16 29c-5.8 0-10-4.4-10-10.2C6 11 10 5.2 16 3c6 2.2 10 8 10 15.8C26 24.6 21.8 29 16 29Z" fill="currentColor"/>
+                        <path d="M16 8v13M16 14.2c-2.8 0-4.8-1.5-5.4-3.8M16 18.4c2.8 0 4.8-1.5 5.4-3.8" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>
+                    </svg>
+                    Papaya
                 </a>
                 <p class="mt-3 text-sm text-ink-soft leading-relaxed max-w-xs">
-                    Каталог олимпиад, университетов и подтверждённых льгот при поступлении.
+                    Каталог олимпиад, университетов и льгот при поступлении с документом-основанием и статусом проверки.
                 </p>
             </div>
             <nav aria-label="Разделы сайта">
@@ -243,8 +251,9 @@
             <div>
                 <h2 class="text-sm font-semibold text-ink">О проекте</h2>
                 <p class="mt-3 text-sm text-ink-soft leading-relaxed">
-                    Papaya не заменяет правила приёма: сервис показывает источники и отмечает
-                    льготы, проверенные администратором. Решение о поступлении принимает вуз.
+                    Papaya не заменяет правила приёма: сервис показывает документ-основание,
+                    сезон и профиль правила и отмечает льготы, проверенные Papaya. Решение
+                    о поступлении принимает вуз.
                 </p>
             </div>
         </div>
@@ -255,22 +264,25 @@
         </div>
     </footer>
 
+    <!-- Нижняя мобильная навигация: главные сценарии под большим пальцем. -->
+    <nav id="bottom-nav" class="bottom-nav lg:hidden" aria-label="Быстрая навигация"></nav>
+
     <div id="toast-container" aria-live="polite"
          class="fixed top-20 right-4 md:right-6 z-[60] flex flex-col gap-3 pointer-events-none"></div>
 
-    <script src="/frontend/js/store.js?v=0.13.8"></script>
-    <script src="/frontend/js/api.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/auth.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/home.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/universities.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/olympiads.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/search.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/myuniversity.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/benefits.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/profile.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/admin.js?v=0.13.8"></script>
-    <script src="/frontend/js/pages/admin_extra.js?v=0.13.8"></script>
-    <script src="/frontend/js/router.js?v=0.13.8"></script>
-    <script src="/frontend/js/app.js?v=0.13.8"></script>
+    <script src="/frontend/js/store.js?v=0.15.0"></script>
+    <script src="/frontend/js/api.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/auth.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/home.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/universities.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/olympiads.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/search.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/myuniversity.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/benefits.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/profile.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/admin.js?v=0.15.0"></script>
+    <script src="/frontend/js/pages/admin_extra.js?v=0.15.0"></script>
+    <script src="/frontend/js/router.js?v=0.15.0"></script>
+    <script src="/frontend/js/app.js?v=0.15.0"></script>
 </body>
 </html>

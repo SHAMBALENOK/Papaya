@@ -2,9 +2,10 @@
  * pages/home.js — главная страница Papaya.
  *
  * Точка входа в сервис: объясняет продукт, даёт быстрый поиск и показывает
- * существующие каталоги. Сценарий — «найди университет → узнай олимпиады
- * с БВИ → открой олимпиаду → перейди на её сайт», поэтому главная не
- * дублирует административную панель и не показывает выдуманную статистику.
+ * существующие каталоги. Сценарий — «найди университет → узнай, за какие
+ * олимпиады он даёт льготы → открой олимпиаду → перейди на её сайт»,
+ * поэтому главная не дублирует административную панель и не показывает
+ * выдуманную статистику.
  * ========================================================================== */
 
 function renderHome() {
@@ -16,12 +17,12 @@ function renderHome() {
             <div>
                 <p class="${UI.eyebrow}">Олимпиады и поступление</p>
                 <h1 id="home-title" class="mt-5 text-4xl md:text-5xl xl:text-6xl font-black tracking-tight leading-[1.06] max-w-3xl">
-                    Какие олимпиады дают <span class="text-brand">БВИ</span> в нужном мне университете?
+                    Какие олимпиады дают <span class="text-brand">льготу</span> в нужном мне университете?
                 </h1>
                 <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
                     Papaya помогает найти олимпиаду и понять, какие преимущества она даёт
                     при поступлении в конкретный университет: БВИ, 100 баллов или другую
-                    льготу. Источники и подтверждённые правила — рядом с записью.
+                    льготу. Документ-основание и статус проверки — рядом с записью.
                 </p>
                 <div class="mt-8 flex flex-wrap gap-3">
                     <a href="#/search" class="${UI.btn} ${UI.btnPrimary}">Найти олимпиаду</a>
@@ -42,11 +43,11 @@ function renderHome() {
                     </li>
                     <li class="flex items-start gap-3">
                         <span class="mt-1.5 h-2 w-2 rounded-full bg-leaf shrink-0" aria-hidden="true"></span>
-                        Университеты, которые засчитывают олимпиаду для БВИ.
+                        Олимпиады, сезоны и профили с уровнем РСОШ.
                     </li>
                     <li class="flex items-start gap-3">
                         <span class="mt-1.5 h-2 w-2 rounded-full bg-lime2 shrink-0" aria-hidden="true"></span>
-                        Проверенные льготы с документом-основанием.
+                        Правила льгот с документом-основанием и статусом проверки.
                     </li>
                 </ul>
                 <a href="#/benefits" class="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
@@ -75,13 +76,13 @@ function renderHome() {
             <div class="border-t-2 border-leaf pt-4">
                 <h3 class="text-base font-bold tracking-tight">Посмотреть университеты</h3>
                 <p class="mt-2 text-sm text-ink-soft leading-relaxed">
-                    На странице олимпиады видно, какие вузы засчитывают её для БВИ.
+                    На странице вуза видно, за какие олимпиады и профили он даёт льготы.
                 </p>
             </div>
             <div class="border-t-2 border-lime pt-4">
                 <h3 class="text-base font-bold tracking-tight">Узнать условия льготы</h3>
                 <p class="mt-2 text-sm text-ink-soft leading-relaxed">
-                    Проверенные правила: БВИ, 100 баллов или другой результат за диплом.
+                    Тип льготы, требуемый результат, сезон, профиль и требование ЕГЭ.
                 </p>
             </div>
             <div class="border-t-2 border-lemon2 pt-4">
@@ -170,9 +171,9 @@ async function loadHomeCatalog() {
           `</div>
            <p class="mt-6"><a href="#/universities" class="${UI.btn} ${UI.btnGhost}">Все университеты →</a></p>`
         : emptyHtml('Каталог университетов пока пуст',
-                    'Университеты заводит администратор Papaya. Связь с олимпиадами '
-                    + 'запрашивает представитель университета, а подтверждает модератор '
-                    + 'Papaya — после этого в каталоге появляются олимпиады этого вуза.');
+                    'Университеты заводит администратор Papaya. Правила льгот '
+                    + 'добавляет представитель университета, а проверяет модератор '
+                    + 'Papaya — после публикации они появляются в каталоге.');
 
     const olympiadsHtml = olympiadsData.length
         ? `<div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">` +
@@ -184,14 +185,14 @@ async function loadHomeCatalog() {
 
     box.innerHTML = `
     <div class="mb-12 md:mb-16">
-        <p class="${UI.eyebrow}">Каталог БВИ университетов</p>
+        <p class="${UI.eyebrow}">Каталог университетов</p>
         <div class="mt-3 flex flex-wrap items-end justify-between gap-4">
             <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight leading-[1.1]">Университеты</h2>
             <a href="#/universities" class="text-sm font-semibold text-brand-strong hover:text-brand rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">Все университеты →</a>
         </div>
         <p class="mt-3 text-ink-soft leading-relaxed max-w-2xl">
-            Откройте университет, чтобы увидеть олимпиады, за которые он даёт
-            поступление без вступительных испытаний.
+            Откройте университет, чтобы увидеть правила льгот: олимпиада, сезон,
+            профиль и документ-основание.
         </p>
         <div class="mt-8">${universitiesHtml}</div>
     </div>
@@ -209,22 +210,6 @@ async function loadHomeCatalog() {
     </div>`;
 }
 
-/** Историческая ли связь БВИ.
- *
- * Единственное место, где это решается во фронтенде: раздел актуальных и
- * исторических связей на страницах университета и олимпиады обязан считать
- * одинаково, иначе одна страница покажет олимпиаду как действующую льготу,
- * а другая — как историю.
- *
- * Проверяются оба признака: сервер отдаёт `is_historical` (унаследовано от
- * олимпиады), а на всякий случай и её собственный статус. `is_archived` —
- * дублирование того же факта, поэтому в проверке не участвует.
- */
-function isHistoricalBvi(item) {
-    return Boolean(item.is_historical) || item.status === 'ARCHIVED';
-}
-
-
 function universityCardHtml(university) {
     return `
     <a href="#/universities/${escAttr(university.id)}"
@@ -233,7 +218,7 @@ function universityCardHtml(university) {
             ${cardImageHtml(university)}
             ${entityTitleHtml(university)}
             <p class="mt-2 text-sm text-ink-soft leading-relaxed line-clamp-3 wrap-anywhere">${escHtml(university.description || '')}</p>
-            <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand">Олимпиады с БВИ →</p>
+            <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand">Правила льгот →</p>
         </div>
     </a>`;
 }

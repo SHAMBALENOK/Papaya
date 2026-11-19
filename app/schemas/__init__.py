@@ -1,1 +1,1 @@
-from . import bvi, docs, olympiads, universities, users
+from . import docs, olympiads, universities, users

@@ -3,10 +3,12 @@
  *
  *   #/universities        → GET /api/v1/universities
  *   #/universities/{id}   → GET /api/v1/universities/{id}
- *                          GET /api/v1/universities/{id}/olympiads
+ *                          GET /api/v1/universities/{id}/benefits?…
+ *                          GET /api/v1/universities/{id}/programs
  *
- * Страница университета — главный экран продукта: основная информация
- * плюс список олимпиад, дающих БВИ.
+ * Страница университета отвечает на главный вопрос продукта: какие олимпиады
+ * и за какой результат этот вуз засчитывает. Источник ответа — правила льгот,
+ * отдельного списка «олимпиады с БВИ» больше нет.
  * ========================================================================== */
 
 function universitySearchFormHtml(value = '') {
@@ -37,8 +39,8 @@ async function renderUniversities() {
         <p class="${UI.eyebrow}">Каталог</p>
         <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">Университеты</h1>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-            Откройте университет и посмотрите, какие олимпиады дают поступление без
-            вступительных испытаний.
+            Откройте университет и посмотрите, за какие олимпиады, сезоны и
+            профили он даёт льготы при поступлении.
         </p>
         ${universitySearchFormHtml(store.searchQuery)}
     </section>
@@ -74,10 +76,9 @@ async function renderUniversity(universityId) {
     if (!universityId) { renderNotFound(); return; }
     page.innerHTML = loadingHtml('Открываем университет…');
 
-    const [uniRes, olyRes, benRes, progRes] = await Promise.all([
+    const [uniRes, benRes, progRes] = await Promise.all([
         api.getUniversity(universityId),
-        api.getUniversityOlympiads(universityId),
-        api.listUniversityBenefits(universityId),
+        api.listUniversityBenefits(universityId, { limit: 200 }),
         api.listPrograms(universityId),
     ]);
 
@@ -89,38 +90,11 @@ async function renderUniversity(universityId) {
     }
 
     const university = uniRes.data;
-    const all = (olyRes.ok && olyRes.data && olyRes.data.olympiads) || [];
     const benefits = (benRes.ok && benRes.data && benRes.data.rules) || [];
+    const total = (benRes.ok && benRes.data && benRes.data.total != null)
+        ? benRes.data.total : benefits.length;
     const programs = (progRes.ok && progRes.data && progRes.data.programs) || [];
     const isAdmin = store.isAdmin();
-
-    // Актуальные и исторические связи — разные ответы на разные вопросы.
-    // «Какие олимпиады дают БВИ здесь сейчас?» — только про актуальные;
-    // архивные показываются отдельно и не входят в счётчик, иначе страница
-    // отвечала бы на вопрос завышенным числом.
-    const current = all.filter(item => !isHistoricalBvi(item));
-    const historical = all.filter(isHistoricalBvi);
-
-    const olympiadsHtml = current.length
-        ? `<div class="grid gap-8 md:grid-cols-2">` + current.map(bviOlympiadCardHtml).join('') + `</div>`
-        : emptyHtml('Пока нет олимпиад с БВИ',
-            'Олимпиады появляются здесь, когда представитель запросит связь, '
-            + 'а модератор Papaya её подтвердит. Перечень олимпиад приходит из РСОШ.');
-
-    // Исторический блок — визуально второстепенный и только при наличии.
-    const historicalHtml = historical.length
-        ? `<div class="mt-14 pt-10 border-t border-mist">
-               <h2 class="${UI.eyebrow}">Исторические связи</h2>
-<p class="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
-                    Олимпиады, которые университет учитывал для БВИ раньше. Сейчас
-                    их нет в актуальном перечне РСОШ, поэтому вуз их не показывает
-                    среди действующих — связи сохранены как история.
-                </p>
-               <div class="mt-8 grid gap-6 md:grid-cols-2 opacity-70">
-                   ${historical.map(bviOlympiadCardHtml).join('')}
-               </div>
-           </div>`
-        : '';
 
     page.innerHTML = `
     <article class="pb-16 md:pb-24">
@@ -162,8 +136,8 @@ async function renderUniversity(universityId) {
                     </dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-ink-faint">Олимпиад с БВИ сейчас</dt>
-                    <dd class="mt-2 text-base font-semibold">${current.length}</dd>
+                    <dt class="text-sm font-medium text-ink-faint">Правил льгот</dt>
+                    <dd class="mt-2 text-base font-semibold">${total}</dd>
                 </div>
             </dl>
         </section>
@@ -173,47 +147,47 @@ async function renderUniversity(universityId) {
             <button type="button" id="uni-edit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Редактировать университет</button>
         </section>` : ''}
 
-        <section class="mt-20 md:mt-28" aria-labelledby="uni-bvi-title">
-            <p class="${UI.eyebrow}">Главное для поступления</p>
-            <h2 id="uni-bvi-title" class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">
-                Олимпиады, которые университет учитывает для БВИ
-            </h2>
-            <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-                Дипломы этих олимпиад университет засчитывает для поступления без
-                вступительных испытаний. Условия засчитывания устанавливает сам
-                университет.
-            </p>
-            <div class="mt-12">${olympiadsHtml}</div>
-            ${historicalHtml}
-        </section>
-
         <section class="mt-20 md:mt-28" aria-labelledby="uni-benefits-title">
             <p class="${UI.eyebrow}">Льготы</p>
             <h2 id="uni-benefits-title" class="mt-5 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">
-                Правила предоставления льгот
+                За какие олимпиады вуз даёт льготы
             </h2>
             <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-                Проверенные администрацией Papaya правила. Условия и источники
-                указывает сам университет.
+                Правила указывает сам университет и подтверждает документом.
+                Непроверенные правила помечены предупреждением «Не проверено Papaya».
             </p>
-            <form id="uni-benefits-filter" class="mt-8 flex flex-col sm:flex-row gap-3 max-w-3xl" role="search">
-                <label for="uni-benefit-type" class="sr-only">Тип льготы</label>
-                <select id="uni-benefit-type" name="benefit_type" class="${UI.input} sm:max-w-xs">
-                    <option value="">Все типы льгот</option>
-                    <option value="BVI">БВИ</option>
-                    <option value="EGE_100">100 баллов ЕГЭ</option>
-                    <option value="DVI_100">100 баллов ДВИ</option>
-                    <option value="OTHER">Другая льгота</option>
-                </select>
-                <label for="uni-benefit-subject" class="sr-only">Предмет</label>
-                <input id="uni-benefit-subject" name="subject" type="search" class="${UI.input} flex-1"
-                       placeholder="Предмет или профиль">
+            <form id="uni-benefits-filter" class="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_16rem_12rem_auto]" role="search">
+                <div>
+                    <label for="uni-benefit-search" class="sr-only">Поиск по олимпиаде или профилю</label>
+                    <input id="uni-benefit-search" name="search" type="search" class="${UI.input}"
+                           placeholder="Олимпиада или профиль">
+                </div>
+                <div>
+                    <label for="uni-benefit-type" class="sr-only">Тип льготы</label>
+                    <select id="uni-benefit-type" name="benefit_type" class="${UI.input}">
+                        <option value="">Все типы льгот</option>
+                        <option value="BVI">БВИ</option>
+                        <option value="EGE_100">100 баллов ЕГЭ</option>
+                        <option value="DVI_100">100 баллов ДВИ</option>
+                        <option value="OTHER">Другая льгота</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="uni-benefit-level" class="sr-only">Уровень РСОШ</label>
+                    <select id="uni-benefit-level" name="level" class="${UI.input}">
+                        <option value="">Любой уровень</option>
+                        <option value="1">Уровень 1</option>
+                        <option value="2">Уровень 2</option>
+                        <option value="3">Уровень 3</option>
+                    </select>
+                </div>
                 <button type="submit" class="${UI.btn} ${UI.btnSecondary} shrink-0">Показать</button>
             </form>
-            <p id="uni-benefits-count" class="mt-5 text-sm text-ink-faint">Найдено: ${benefits.length}</p>
+            <p id="uni-benefits-count" class="mt-5 text-sm text-ink-faint" aria-live="polite">Найдено: ${total}</p>
             <div id="uni-benefits-list" class="mt-6 space-y-4">
-                ${benefitCardsHtml(benefits, programs)}
+                ${benefitCardsHtml(benefits)}
             </div>
+            <div id="uni-benefits-more" class="mt-6"></div>
         </section>
 
         <section class="mt-12" aria-labelledby="uni-programs-title">
@@ -237,48 +211,57 @@ async function renderUniversity(universityId) {
             openUniversityFormModal(university, () => renderUniversity(universityId)));
     }
 
-    bindUniversityBenefitsFilter(universityId, programs);
+    bindUniversityBenefitsFilter(universityId);
 }
 
-/** Карточки публичных правил льгот: только проверенные записи. */
-function benefitCardsHtml(rules, programs) {
+/** Карточки публичных правил льгот: опубликованные, включая непроверенные. */
+function benefitCardsHtml(rules) {
     if (!rules.length) {
         return emptyHtml('Правила льгот не опубликованы',
-            'Данные появятся после проверки администрацией Papaya.');
+            'Данные появятся, когда представитель университета добавит правило и опубликует его.');
     }
-    const programNames = new Map((programs || []).map(item => [String(item.id), item.name]));
     return rules.map(item => {
-        const result = publicBenefitResultText(item);
-        const names = (item.program_ids || [])
-            .map(id => programNames.get(String(id)))
-            .filter(Boolean);
+        const result = benefitResultText(item);
+        const ege = benefitEgeLine(item);
+        const olympiadLabel = item.olympiad_name || 'Олимпиада';
+        const context = [
+            item.season_label ? `сезон ${item.season_label}` : '',
+            item.profile_name
+                ? `${item.profile_name}${item.profile_rsosh_level ? ` · уровень РСОШ ${item.profile_rsosh_level}` : ''}`
+                : '',
+        ].filter(Boolean).join(' · ');
         return `
         <article class="${UI.card} px-8 py-6">
             <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                 <div class="min-w-0">
                     <p class="font-bold text-ink leading-snug">
-                        ${escHtml(BENEFIT_TYPE_LABELS[item.benefit_type] || item.benefit_type || 'Льгота')}${item.subject ? ` · ${escHtml(item.subject)}` : ''}
+                        ${escHtml(benefitTypeLabel(item.benefit_type))}${result ? ` · ${escHtml(result)}` : ''}
                     </p>
-                    ${result ? `<p class="mt-3 text-sm text-ink-soft">Условие: ${escHtml(result)}</p>` : ''}
-                    ${item.additional_requirements ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(item.additional_requirements)}</p>` : ''}
-                    ${names.length ? `<p class="mt-3 text-xs text-ink-faint">Программы: ${names.map(escHtml).join(', ')}</p>` : ''}
-                    ${item.source_url ? `<p class="mt-3 text-sm"><a href="${escAttr(item.source_url)}" target="_blank" rel="noopener noreferrer" class="underline">Источник</a></p>` : ''}
+                    <p class="mt-2 text-sm text-ink-soft">
+                        <a href="#/olympiads/${escAttr(item.olympiad_id)}"
+                           class="underline decoration-line hover:decoration-brand">${escHtml(olympiadLabel)}</a>
+                    </p>
+                    ${context ? `<p class="mt-1 text-sm text-ink-soft">${escHtml(context)}</p>` : ''}
+                    ${ege ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(ege)}</p>` : ''}
+                    ${item.doc && item.doc.name
+                        ? `<p class="mt-3 text-xs text-ink-faint">Документ: ${
+                            item.doc.source_url
+                                ? `<a href="${escAttr(item.doc.source_url)}" target="_blank" rel="noopener noreferrer"
+                                       class="underline">${escHtml(item.doc.name)}</a>`
+                                : escHtml(item.doc.name)
+                        }</p>`
+                        : ''}
                 </div>
-                <div class="shrink-0">${benefitStatusBadge(item.verification_status)}</div>
+                <div class="shrink-0 flex flex-wrap gap-2">
+                    ${benefitStatusBadge(item.verification_status)}
+                    ${item.needs_review ? `<span class="${UI.badge} ${UI.badgeDanger}">Требует уточнения</span>` : ''}
+                </div>
             </div>
         </article>`;
     }).join('');
 }
 
-function publicBenefitResultText(rule) {
-    if (rule.required_result_type) {
-        const label = BENEFIT_RESULT_LABELS[rule.required_result_type] || rule.required_result_type;
-        return rule.required_result_value ? `${label}: ${rule.required_result_value}` : label;
-    }
-    return rule.required_result || '';
-}
-
-async function bindUniversityBenefitsFilter(universityId, programs) {
+async function bindUniversityBenefitsFilter(universityId) {
     const form = document.getElementById('uni-benefits-filter');
     const list = document.getElementById('uni-benefits-list');
     const count = document.getElementById('uni-benefits-count');
@@ -286,11 +269,12 @@ async function bindUniversityBenefitsFilter(universityId, programs) {
 
     form.addEventListener('submit', async e => {
         e.preventDefault();
-        const params = {};
-        const benefitType = (document.getElementById('uni-benefit-type') || {}).value || '';
-        const subject = ((document.getElementById('uni-benefit-subject') || {}).value || '').trim();
-        if (benefitType) params.benefit_type = benefitType;
-        if (subject) params.subject = subject;
+        const params = {
+            benefit_type: (document.getElementById('uni-benefit-type') || {}).value || '',
+            level: (document.getElementById('uni-benefit-level') || {}).value || '',
+            search: ((document.getElementById('uni-benefit-search') || {}).value || '').trim(),
+            limit: 200,
+        };
 
         list.innerHTML = loadingHtml('Ищем правила…');
         const res = await api.listUniversityBenefits(universityId, params);
@@ -299,40 +283,9 @@ async function bindUniversityBenefitsFilter(universityId, programs) {
             return;
         }
         const rules = (res.data && res.data.rules) || [];
-        if (count) count.textContent = `Найдено: ${res.data.total != null ? res.data.total : rules.length}`;
-        list.innerHTML = benefitCardsHtml(rules, programs);
+        if (count) {
+            count.textContent = `Найдено: ${res.data.total != null ? res.data.total : rules.length}`;
+        }
+        list.innerHTML = benefitCardsHtml(rules);
     });
-}
-
-/** Карточка олимпиады в списке БВИ университета.
- *
- * Разница между действующей и исторической связью — не в оформлении, а в
- * подписи: подтверждённая связь с актуальной олимпиадой даёт «БВИ», а связь с
- * архивной олимпиадой — «Архивная олимпиада» и «Историческая связь».
- * Помечать архивную олимпиаду зелёным «БВИ» значило бы показывать льготу,
- * которой сейчас нет.
- */
-function bviOlympiadCardHtml(olympiad) {
-    const historical = isHistoricalBvi(olympiad);
-    const badge = historical
-        ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архивная олимпиада</span>`
-        : `<span class="${UI.badge} ${UI.badgeSuccess}">
-               <span class="w-2 h-2 rounded-full bg-success/70" aria-hidden="true"></span>БВИ
-           </span>`;
-    const note = historical
-        ? `<p class="mt-3 text-sm text-ink-faint">Историческая связь: университет давал БВИ, пока олимпиада была в перечне РСОШ.</p>`
-        : '';
-
-    return `
-    <a href="#/olympiads/${escAttr(olympiad.id)}"
-       class="group block min-w-0 bg-white rounded-lg border border-line shadow-elev-1 hover:shadow-elev-2 hover:-translate-y-0.5 hover:border-brand/30 transition-[transform,box-shadow,border-color] duration-200 ease-out p-6 md:p-7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
-        ${cardImageHtml(olympiad)}
-        <div class="flex items-center gap-3 flex-wrap">
-            ${badge}
-        </div>
-        <h3 class="mt-4 text-lg font-bold tracking-tight leading-snug wrap-anywhere">${escHtml(olympiad.name)}</h3>
-        ${note}
-        <p class="mt-3 text-sm text-ink-soft leading-relaxed line-clamp-2 wrap-anywhere">${escHtml(olympiad.description || '')}</p>
-        <p class="mt-5 text-sm font-semibold text-brand-strong group-hover:text-brand transition-colors">Открыть олимпиаду →</p>
-    </a>`;
 }

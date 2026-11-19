@@ -51,6 +51,7 @@ def _storage_path(doc_id: str, extension: str) -> Path:
 _MEDIA_TYPES = {
     '.pdf': 'application/pdf',
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.html': 'text/html; charset=utf-8',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
@@ -174,11 +175,11 @@ async def upload_doc(
 ):
     """Загрузить документ-источник (PDF, XLSX, PNG/JPG/JPEG)."""
     try:
-        if doc_type not in schemas.docs.DOC_TYPES:
+        if doc_type not in schemas.docs.SOURCE_DOC_TYPES:
             raise HTTPException(
                 status_code=422,
                 detail='Invalid document type. Allowed: '
-                + ', '.join(schemas.docs.DOC_TYPES),
+                + ', '.join(schemas.docs.SOURCE_DOC_TYPES),
             )
 
         filename = secure_filename(file.filename or '')

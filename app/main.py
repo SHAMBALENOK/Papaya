@@ -20,6 +20,7 @@ from app.routers import (
     auth,
     benefits,
     docs,
+    entity_requests,
     health,
     imports,
     olympiads,
@@ -27,7 +28,6 @@ from app.routers import (
     representative,
     search,
     seasons,
-    sources,
     universities,
     user,
 )
@@ -70,11 +70,12 @@ app.include_router(benefits.benefit_rules_page, prefix='/api/v1')
 app.include_router(benefits.university_benefits_page, prefix='/api/v1')
 app.include_router(benefits.olympiad_benefits_page, prefix='/api/v1')
 app.include_router(benefits.admin_benefits_page, prefix='/api/v1')
-app.include_router(sources.admin_sources_page, prefix='/api/v1')
-app.include_router(sources.university_sources_page, prefix='/api/v1')
+app.include_router(seasons.profiles_page, prefix='/api/v1')
 app.include_router(representative.rep_apps_page, prefix='/api/v1')
 app.include_router(representative.applications_page, prefix='/api/v1')
 app.include_router(representative.admin_rep_page, prefix='/api/v1')
+app.include_router(entity_requests.university_requests_page, prefix='/api/v1')
+app.include_router(entity_requests.admin_requests_page, prefix='/api/v1')
 
 
 @app.get(

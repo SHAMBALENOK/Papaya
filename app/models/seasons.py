@@ -1,9 +1,30 @@
+"""Сезоны олимпиад и профили сезонов.
+
+Сезон отвечает только на вопрос «в каком году проводилась олимпиада»:
+``season_label`` — например, ``2025/2026``. Дат регистрации и проведения, а
+также флага доступности в модели нет: это состояние приёмной кампании
+университета, а не свойство олимпиады, и в каталоге Papaya оно не хранится.
+
+Профиль принадлежит конкретному сезону. Уровень РСОШ (1, 2, 3) — свойство
+профиля сезона, а не олимпиады: в перечень могут входить только отдельные
+профили, и в следующем сезоне их набор и уровни меняются. Поэтому уровень
+одного сезона никогда не переносится на другой.
+"""
+
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy import Boolean
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.database.base import Base
@@ -13,8 +34,17 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+#: Допустимые уровни РСОШ. ``None`` — профиль не входит в перечень.
+RSOSH_LEVELS = ('1', '2', '3')
+
+
 class OlympiadSeason(Base):
     __tablename__ = 'olympiad_seasons'
+    __table_args__ = (
+        UniqueConstraint(
+            'olympiad_id', 'season_label', name='uq_olympiad_seasons_olympiad_label'
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     olympiad_id = Column(
@@ -24,20 +54,10 @@ class OlympiadSeason(Base):
         index=True,
     )
     season_label = Column(String, nullable=False)
-    rsosh_level = Column(String, nullable=True)
-    registration_start = Column(DateTime(timezone=True), nullable=True)
-    registration_end = Column(DateTime(timezone=True), nullable=True)
-    event_start = Column(DateTime(timezone=True), nullable=True)
-    event_end = Column(DateTime(timezone=True), nullable=True)
-    extra_params = Column(JSONB, nullable=True)
-    availability = Column(String, nullable=False, default='unknown')
+    #: Версия нужна откату и защите от параллельной правки.
     version = Column('version', Integer, nullable=False, default=1)
+    #: Архивный сезон остаётся доступным: профили и правила не удаляются.
     is_archived = Column(Boolean, nullable=False, default=False, index=True)
-    source_doc_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey('docs.id', ondelete='SET NULL'),
-        nullable=True,
-    )
     createdAt = Column(DateTime(timezone=True), default=_utcnow, index=True)
     updatedAt = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -52,6 +72,11 @@ class OlympiadSeason(Base):
 
 class SeasonProfile(Base):
     __tablename__ = 'season_profiles'
+    __table_args__ = (
+        UniqueConstraint(
+            'season_id', 'name_norm', name='uq_season_profiles_season_name'
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     season_id = Column(
@@ -60,11 +85,13 @@ class SeasonProfile(Base):
         nullable=False,
         index=True,
     )
-    discipline = Column(String, nullable=True)
-    subject = Column(String, nullable=True)
-    profile_name = Column(String, nullable=True)
+    name = Column(String, nullable=False)
+    #: Нормализованное название: уникальность профиля внутри сезона.
+    name_norm = Column(String, nullable=False, index=True)
+    #: Уровень РСОШ конкретного профиля конкретного сезона: '1', '2', '3' или
+    #: NULL, если профиль не входит в перечень.
+    rsosh_level = Column(String, nullable=True)
     description = Column(Text, nullable=True)
-    extra_params = Column(JSONB, nullable=True)
     version = Column('version', Integer, nullable=False, default=1)
     createdAt = Column(DateTime(timezone=True), default=_utcnow, index=True)
     updatedAt = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

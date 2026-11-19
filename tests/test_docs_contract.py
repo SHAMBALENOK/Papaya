@@ -34,8 +34,12 @@ PUBLIC_ROUTES = [
     '/api/v1/olympiads/{olympiad_id}',
     '/api/v1/olympiads',
     '/api/v1/search',
-    '/api/v1/universities/{university_id}/olympiads',
+    '/api/v1/universities/{university_id}/benefits',
+    '/api/v1/benefits',
+    '/api/v1/benefits/olympiad/{olympiad_id}',
     '/api/v1/olympiads/{olympiad_id}/universities',
+    '/api/v1/olympiads/{olympiad_id}/seasons',
+    '/api/v1/seasons/{season_id}/profiles',
 ]
 
 
@@ -188,10 +192,9 @@ def test_promised_fields_are_present():
     """Обещанные документацией поля есть в схеме."""
     problems = []
     promised = {
-            '/api/v1/olympiads/{olympiad_id}': {'is_archived'},
-            '/api/v1/olympiads/{olympiad_id}/universities': {'is_historical'},
-            '/api/v1/universities/{university_id}/olympiads': {'is_historical'},
-        }
+        '/api/v1/olympiads/{olympiad_id}': {'is_archived', 'official_url'},
+        '/api/v1/search': {'universities', 'olympiads', 'programs'},
+    }
     for route, fields in promised.items():
         operation = PATHS.get(route, {}).get('get')
         available = _fields(_json_body(operation)) if operation else set()
@@ -204,14 +207,35 @@ def test_promised_fields_are_present():
     assert not problems, '\n'.join(problems)
 
 
-def test_bvi_request_response_hides_moderation_fields():
-    """Ответ на заявку БВИ не содержит полей модерации."""
-    operation = PATHS['/api/v1/universities/{university_id}/bvi']['post']
-    props = _fields(_json_body(operation, '201'))
-    assert props, 'у POST /bvi нет описанного ответа 201'
+def test_benefit_rule_contract_is_documented():
+    """Контракт правила описан в документации, без служебных полей модерации."""
+    md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
+    section = _section(md, 'Правила льгот', 'GET /admin/stats')
+    for field in (
+        'olympiad_id', 'season_id', 'profile_id', 'benefit_type',
+        'required_result_type', 'ege_requirement', 'needs_review',
+    ):
+        assert field in section, f'в разделе правил нет поля {field}'
     for field in ('createdBy', 'confirmedBy', 'createdAt', 'updatedAt'):
-        assert field not in props, f'{field} не должен отдаваться представителю'
-    assert 'is_historical' in props, 'признак исторической связи должен отдаваться'
+        assert field not in section, f'{field} не должен попадать в контракт правила'
+
+
+def test_legacy_entities_are_absent_from_schema_and_docs():
+    """Отдельных сущностей БВИ и источников больше нет ни в API, ни в docs."""
+    legacy_paths = [
+        p for p in PATHS
+        if '/bvi' in p or p.startswith('/api/v1/sources')
+        or re.search(r'/admin/sources', p)
+    ]
+    assert not legacy_paths, f'легаси-маршруты в схеме: {legacy_paths}'
+
+    for doc in ('docs/responses.md', 'English.md', 'README.md'):
+        text = (ROOT / doc).read_text(encoding='utf-8')
+        assert '/bvi' not in text, f'{doc}: упоминание /bvi'
+        assert '/admin/sources' not in text, f'{doc}: упоминание /admin/sources'
+        assert 'university_olympiads' not in text, (
+            f'{doc}: упоминание удалённой таблицы связей БВИ'
+        )
 
 
 def test_confirm_contract_matches_documentation():
@@ -269,15 +293,6 @@ def test_frontend_has_no_way_to_force_outdated():
         )
 
 
-def test_legacy_status_route_is_not_documented_or_present():
-    """Старый маршрут смены статуса БВИ не вернулся."""
-    assert not [p for p in PATHS if p.endswith('/status') and '/bvi' in p]
-    text = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
-    assert '/bvi/{olympiad_id}/status' not in text
-    english = (ROOT / 'English.md').read_text(encoding='utf-8')
-    assert 'bvi/<olympiad_id>/status' not in english
-
-
 def _section(md: str, start: str, end: str) -> str:
     """Текст раздела ``## {start}`` до ``## {end}`` (без первого заголовка)."""
     begin = md.index(f'## {start}')
@@ -319,16 +334,49 @@ def test_docs_reject_uses_conflict_not_client_error():
     assert '| 400 |' not in reject, 'reject больше не отдаёт 400'
 
 
-def test_docs_bvi_remove_cover_admin_only_confirmed():
-    """Снятие подтверждённой связи — только администратором, и это описано."""
+def test_docs_benefit_moderation_covers_reason_and_document():
+    """Проверка и отклонение правила описаны: документ, причина, права."""
     md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
-    section = _section(
-        md,
-        'POST /universities/{university_id}/bvi/remove',
-        'POST /universities/{university_id}/bvi/{olympiad_id}/moderation',
+    section = _section(md, 'Правила льгот', 'GET /admin/stats')
+    assert 'UNIVERSITY_ORDER' in section, 'проверка требует приказ вуза'
+    assert 'непустой' in section and 'reason' in section, (
+        'отклонение должно требовать непустую причину'
     )
-    assert '| 409 |' in section
+    assert 'unverified' in section
     assert 'только администратор' in section
+    assert 'rollback' in section and 'expected_version' in section, (
+        'откат версии должен быть описан с ожидаемой текущей версией'
+    )
+
+
+def test_docs_describe_seasons_profiles_and_entity_requests():
+    """Сезоны, профили с уровнем РСОШ и запросы представителей описаны."""
+    md = (ROOT / 'docs/responses.md').read_text(encoding='utf-8')
+    seasons = _section(
+        md,
+        'GET/POST /olympiads/{olympiad_id}/seasons',
+        'GET/PUT/DELETE /seasons/{season_id}',
+    )
+    assert 'season_label' in seasons
+    assert 'include_archived' in seasons
+    assert 'Дат регистрации' in seasons or 'дат регистрации' in seasons
+
+    profiles = _section(
+        md,
+        'GET/POST /seasons/{season_id}/profiles',
+        'GET/POST /universities/{university_id}/entity-requests',
+    )
+    assert 'rsosh_level' in profiles
+    assert 'профиля сезона' in profiles
+
+    requests = _section(
+        md,
+        'GET/POST /universities/{university_id}/entity-requests',
+        'GET /olympiads',
+    )
+    assert 'entity_type' in requests
+    assert 'approve' in requests and 'reject' in requests
+    assert 'дубль' in requests
 
 
 def test_docs_import_start_cover_conflict_and_auth():

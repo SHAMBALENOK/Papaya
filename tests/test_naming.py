@@ -10,11 +10,12 @@
 """
 
 from tests.conftest import (
-    admin_client,
+    create_benefit_rule,
     create_olympiad,
+    create_profile,
+    create_season,
     create_university,
-    moderate_bvi,
-    university_rep_client,
+    upload_university_doc,
 )
 
 
@@ -70,35 +71,35 @@ async def test_both_names_survive_in_catalog_and_search(client):
     )
 
 
-async def test_university_with_bvi_keeps_olympiad_names(client):
-    """Связь БВИ не теряет названия: оба у вуза, оба у олимпиады."""
+async def test_benefit_rule_keeps_names_on_both_sides(client):
+    """Правило льготы не теряет названия: оба у вуза, оба у олимпиады."""
     university = await create_university(
         client, 'МФТИ полное название', short_name='МФТИ'
     )
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-
-    await university_rep_client(client, university['id'])
-    created = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
+    season = await create_season(client, olympiad['id'])
+    profile = await create_profile(client, season['id'])
+    doc = await upload_university_doc(client, university['id'])
+    rule = await create_benefit_rule(
+        client, university['id'], olympiad['id'], season['id'],
+        profile['id'], doc['id'],
     )
-    assert created.status_code == 201
 
-    await admin_client(client)
-    confirmed = await moderate_bvi(
-        client, university['id'], olympiad['id'], 'confirm'
+    on_university = await client.get(
+        f"/api/v1/universities/{university['id']}/benefits"
     )
-    assert confirmed.status_code == 200
-
-    on_olympiad = await client.get(f"/api/v1/olympiads/{olympiad['id']}/universities")
-    assert on_olympiad.status_code == 200
-    listed = on_olympiad.json()['universities'][0]
-    assert listed['short_name'] == 'МФТИ'
-    assert listed['name'] == 'МФТИ полное название'
-
-    on_university = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
     assert on_university.status_code == 200
-    olympiads = on_university.json()['olympiads']
-    assert [row['name'] for row in olympiads] == [
-        'Олимпиада школьников «Физтех»'
-    ]
+    listed = next(
+        row for row in on_university.json()['rules'] if row['id'] == rule['id']
+    )
+    assert listed['olympiad_name'] == 'Олимпиада школьников «Физтех»'
+
+    on_olympiad = await client.get(
+        f"/api/v1/benefits/olympiad/{olympiad['id']}"
+    )
+    assert on_olympiad.status_code == 200
+    row = next(
+        item for item in on_olympiad.json()['rules'] if item['id'] == rule['id']
+    )
+    assert row['university_short_name'] == 'МФТИ'
+    assert row['university_name'] == 'МФТИ полное название'

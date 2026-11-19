@@ -175,6 +175,18 @@ async def run_import(doc_id) -> dict:
 
         section = states.rsosh_section(doc)
         resume_records = section.get('records')
+        if not resume_records and not section.get('mode'):
+            # Сначала проверяем, не является ли документ официальным перечнем:
+            # у него отдельный конвейер с таблицей и планом импорта. Для всех
+            # остальных документов функция возвращает None, и обработка идёт
+            # прежним путём без изменений.
+            from app.rsosh import list_processor
+
+            listed = await list_processor.run_list_import(doc['id'])
+            if listed is not None:
+                return listed
+            doc = await db_docs.get_doc(doc['id']) or doc
+            section = states.rsosh_section(doc)
         if resume_records:
             # Возобновление после приостановки: строки уже распознаны и
             # провалидированы, повторное чтение документа не нужно.

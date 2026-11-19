@@ -122,13 +122,6 @@ function archiveReasonText(reason) {
          + 'Она вернётся автоматически, если снова появится в перечне.';
 }
 
-function bviStatusBadge(status) {
-    if (status === 'CONFIRMED') {
-        return `<span class="${UI.badge} ${UI.badgeSuccess}">Подтверждено</span>`;
-    }
-    return `<span class="${UI.badge} ${UI.badgePending}">Ждёт подтверждения</span>`;
-}
-
 /** Статус правила льготы: черновик, проверено или отклонено. */
 function benefitStatusBadge(status) {
     if (status === 'verified') {
@@ -137,7 +130,54 @@ function benefitStatusBadge(status) {
     if (status === 'rejected') {
         return `<span class="${UI.badge} ${UI.badgeDanger}">Отклонено</span>`;
     }
-    return `<span class="${UI.badge} ${UI.badgePending}">Не проверено</span>`;
+    return `<span class="${UI.badge} ${UI.badgePending}">Не проверено Papaya</span>`;
+}
+
+/* Словари общие для каталога, кабинета и админки: одно и то же значение не
+   должно называться по-разному на соседних экранах. */
+const BENEFIT_TYPE_LABELS = {
+    BVI: 'БВИ',
+    EGE_100: '100 баллов ЕГЭ',
+    DVI_100: '100 баллов ДВИ',
+    OTHER: 'Другая льгота',
+};
+
+const BENEFIT_RESULT_LABELS = {
+    WINNER: 'Победитель',
+    PRIZE: 'Призёр',
+    WINNER_OR_PRIZE: 'Победитель или призёр',
+};
+
+const DOC_TYPE_LABELS = {
+    RSOSH_LIST: 'Перечень РСОШ',
+    UNIVERSITY_ORDER: 'Приказ университета',
+    OTHER: 'Другой документ',
+    // Производные документы перечня: таблица и её HTML-версия создаются
+    // импортом и открываются рядом с исходным сканом.
+    RSOSH_TABLE: 'Таблица перечня (XLSX)',
+    RSOSH_HTML: 'Таблица перечня (HTML)',
+};
+
+function benefitTypeLabel(type) {
+    return BENEFIT_TYPE_LABELS[type] || type || 'Льгота';
+}
+
+function benefitResultText(rule) {
+    if (!rule || !rule.required_result_type) return '';
+    return BENEFIT_RESULT_LABELS[rule.required_result_type] || rule.required_result_type;
+}
+
+/* ЕГЭ — отдельное требование правила, а не свойство профиля олимпиады. */
+function benefitEgeLine(rule) {
+    const ege = rule && rule.ege_requirement;
+    if (!ege || !ege.subject) return '';
+    return ege.min_score != null
+        ? `ЕГЭ по предмету «${ege.subject}» — не ниже ${ege.min_score}`
+        : `ЕГЭ по предмету «${ege.subject}»`;
+}
+
+function docTypeLabel(type) {
+    return DOC_TYPE_LABELS[type] || type || 'Документ';
 }
 
 /* ---------- Поля форм ---------- */
@@ -186,6 +226,11 @@ function selectField({ id, label, name, options, value = '' }) {
 
 /* ---------- Модальные окна ---------- */
 
+/* Открытые окна: верхнее получает Escape первым. Иначе вложенное окно
+   (например, профили сезона поверх правки олимпиады) закрывалось бы вместе с
+   родительским — обработчик Escape висит на каждом overlay. */
+const modalStack = [];
+
 function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } = {}) {
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-50 modal-overlay bg-scrim flex items-center justify-center p-4 md:p-8';
@@ -204,8 +249,12 @@ function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } 
         </div>
     </div>`;
     document.body.appendChild(overlay);
+    modalStack.push(overlay);
 
     const onEsc = e => {
+        // Escape обрабатывает только верхнее окно: вложенная модалка не должна
+        // закрывать родительскую.
+        if (modalStack[modalStack.length - 1] !== overlay) return;
         if (e.key === 'Escape') close();
     };
     const close = () => {
@@ -220,6 +269,8 @@ function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } 
             return;
         }
         document.removeEventListener('keydown', onEsc);
+        const index = modalStack.indexOf(overlay);
+        if (index !== -1) modalStack.splice(index, 1);
         overlay.remove();
     };
     overlay.querySelector('[data-modal-close]').addEventListener('click', close);
@@ -325,8 +376,16 @@ function openUniversityFormModal(university, onDone) {
 
 function openOlympiadFormModal(olympiad, onDone) {
     const isEdit = !!olympiad;
-    let dirty = false;
-    const body = `
+    // Изменения считаются по полям самой олимпиады: добавление сезона в правой
+    // колонке — уже сохранённое действие и не должно давать «несохранённые
+    // изменения» при закрытии окна.
+    let olympiadForm = null;
+    let initialValues = '';
+    const isDirty = () => {
+        if (!olympiadForm) return false;
+        return JSON.stringify(Object.fromEntries(new FormData(olympiadForm))) !== initialValues;
+    };
+    const formHtml = `
         <div id="modal-alert"></div>
         <form id="olympiad-form">
             ${inputField({ id: 'ol-name', name: 'name', label: 'Название олимпиады', required: true, value: (olympiad || {}).name || '' })}
@@ -344,12 +403,32 @@ function openOlympiadFormModal(olympiad, onDone) {
             Ручное создание — резервный способ. Основной путь наполнения каталога —
             импорт официальных документов РСОШ (вкладка «Импорт РСОШ»).
         </p>`;
+    // Сезоны редактируются рядом с олимпиадой: это её часть, а не отдельная
+    // сущность каталога. Раньше добавление сезона жило в отдельной вкладке и
+    // требовало выбирать олимпиаду заново.
+    const seasonsHtml = `
+        <section class="lg:border-l lg:border-mist lg:pl-10" aria-labelledby="ol-seasons-title">
+            <p class="${UI.eyebrow}">Сезоны</p>
+            <h3 id="ol-seasons-title" class="mt-2 text-xl font-bold tracking-tight text-ink">Сезоны олимпиады</h3>
+            <p class="mt-3 text-sm text-ink-soft leading-relaxed">
+                Сезон — это метка года. Профили и уровни РСОШ задаются внутри сезона,
+                потому что набор профилей меняется каждый год.
+            </p>
+            <div id="ol-seasons-box" class="mt-6">${loadingHtml('Загружаем сезоны…')}</div>
+        </section>`;
+    const body = isEdit
+        ? `<div class="grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+               <div>${formHtml}</div>
+               ${seasonsHtml}
+           </div>`
+        : formHtml;
     const { overlay, close } = openModal(
         isEdit ? 'Редактирование олимпиады' : 'Новая олимпиада',
         body,
-        { isDirty: () => dirty }
+        { size: isEdit ? 'xl' : 'lg', isDirty }
     );
-    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
+    olympiadForm = overlay.querySelector('#olympiad-form');
+    initialValues = JSON.stringify(Object.fromEntries(new FormData(olympiadForm)));
 
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
     overlay.querySelector('#olympiad-form').addEventListener('submit', async e => {
@@ -370,7 +449,6 @@ function openOlympiadFormModal(olympiad, onDone) {
                 ? await api.editOlympiad(olympiad.id, payload)
                 : await api.addOlympiad(payload);
             if (res.ok) {
-                dirty = false;
                 close();
                 showToast(isEdit ? 'Олимпиада обновлена' : 'Олимпиада создана', 'success');
                 if (onDone) onDone();
@@ -381,6 +459,78 @@ function openOlympiadFormModal(olympiad, onDone) {
             showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
         }
         btn.disabled = false;
+    });
+
+    if (isEdit) loadOlympiadSeasonsBox(overlay, olympiad.id, onDone);
+}
+
+/** Список сезонов и добавление сезона прямо в окне правки олимпиады. */
+async function loadOlympiadSeasonsBox(overlay, olympiadId, onDone) {
+    const box = overlay.querySelector('#ol-seasons-box');
+    if (!box) return;
+    const res = await api.listSeasons(olympiadId, { include_archived: true, profiles: true });
+    if (!res.ok) {
+        box.innerHTML = alertHtml(errorText(res), 'error');
+        return;
+    }
+    const seasons = (res.data && res.data.seasons) || [];
+    const rows = seasons.map(season => {
+        const profiles = season.profiles || [];
+        const profileLine = profiles.length
+            ? profiles.map(item => `${item.name}${item.rsosh_level ? ` · уровень ${item.rsosh_level}` : ''}`).join('; ')
+            : 'Профили не заведены';
+        return `
+        <div class="rounded border border-lineStrong px-4 py-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="font-semibold text-ink">${escHtml(season.season_label)}</p>
+                ${season.is_archived
+                    ? `<span class="${UI.badge} ${UI.badgeNeutral}">Архив</span>`
+                    : `<span class="${UI.badge} ${UI.badgeSuccess}">Актуален</span>`}
+            </div>
+            <p class="mt-2 text-xs text-ink-soft leading-relaxed">${escHtml(profileLine)}</p>
+            <button type="button" data-season-profiles="${escAttr(season.id)}"
+                    class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall} mt-3">Профили</button>
+        </div>`;
+    }).join('');
+    box.innerHTML = `
+        <form id="ol-season-add" class="rounded bg-mist px-4 py-4">
+            <label for="ol-season-label" class="${UI.label}">Новый сезон</label>
+            <div class="mt-2 flex flex-col sm:flex-row gap-3">
+                <input id="ol-season-label" name="season_label" class="${UI.input} flex-1"
+                       placeholder="2026/2027" required>
+                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Добавить</button>
+            </div>
+            <p class="mt-2 text-xs text-ink-faint">Метка года, например 2025/2026. Даты и уровень здесь не задаются.</p>
+        </form>
+        <div class="mt-5 space-y-3">
+            ${rows || '<p class="text-sm text-ink-soft">Сезонов пока нет. Добавьте первый.</p>'}
+        </div>`;
+    box.querySelectorAll('[data-season-profiles]').forEach(btn => {
+        btn.addEventListener('click', () => openSeasonProfilesModal(
+            btn.dataset.seasonProfiles,
+            () => loadOlympiadSeasonsBox(overlay, olympiadId)
+        ));
+    });
+    box.querySelector('#ol-season-add').addEventListener('submit', async e => {
+        e.preventDefault();
+        const form = e.target;
+        const label = (new FormData(form).get('season_label') || '').trim();
+        if (!label) {
+            showToast('Укажите метку сезона', 'error');
+            return;
+        }
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        const created = await api.createSeason(olympiadId, { season_label: label });
+        if (!created.ok) {
+            showToast(errorText(created), 'error');
+            btn.disabled = false;
+            return;
+        }
+        showToast('Сезон создан', 'success');
+        await loadOlympiadSeasonsBox(overlay, olympiadId);
+        // Страница под окном должна увидеть новый сезон сразу после закрытия.
+        if (onDone) onDone();
     });
 }
 
@@ -480,6 +630,7 @@ const MENU_ICONS = {
     '/admin': '<path d="M12 3 5 6v6c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V6z"/>',
     '/search': '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     '/profile': '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
+    '/auth': '<path d="M15 3h4a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-4"/><path d="M10 8l4 4-4 4"/><path d="M14 12H3"/>',
     'logout': '<path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M9 8l-4 4 4 4"/><path d="M5 12h10"/>',
 };
 
@@ -515,6 +666,29 @@ function navLinks() {
  *  на виду в шапке и в мобильном меню. */
 function secondaryNavLinks() {
     return [{ href: '#/benefits', route: '/benefits', label: 'Льготы' }];
+}
+
+/** Нижняя мобильная навигация: пять главных сценариев без раскрытия меню. */
+function bottomNavLinks() {
+    return [
+        { href: '#/', route: '/', label: 'Главная' },
+        { href: '#/olympiads', route: '/olympiads', label: 'Олимпиады' },
+        { href: '#/universities', route: '/universities', label: 'Вузы' },
+        { href: '#/benefits', route: '/benefits', label: 'Льготы' },
+        store.user
+            ? { href: '#/profile', route: '/profile', label: 'Профиль' }
+            : { href: '#/auth', route: '/auth', label: 'Войти' },
+    ];
+}
+
+function renderBottomNav() {
+    const nav = document.getElementById('bottom-nav');
+    if (!nav) return;
+    nav.innerHTML = bottomNavLinks().map(link => `
+        <a href="${link.href}" data-route="${link.route}" class="bottom-nav-link">
+            ${menuIcon(link.route)}
+            <span>${escHtml(link.label)}</span>
+        </a>`).join('');
 }
 
 function desktopAuthHtml() {
@@ -601,6 +775,7 @@ function renderHeader() {
 
     if (actions) actions.innerHTML = desktopAuthHtml();
     if (mobileAuth) mobileAuth.innerHTML = mobileAuthHtml();
+    renderBottomNav();
 
     document.querySelectorAll('[data-logout]').forEach(btn =>
         btn.addEventListener('click', logout)
@@ -623,6 +798,10 @@ function highlightNav(path) {
         a.className = navLinkClass(active);
     });
     document.querySelectorAll('#mobile-nav a[data-route], #mobile-auth a[data-route]').forEach(a => {
+        const active = a.dataset.route === current;
+        a.setAttribute('aria-current', active ? 'page' : 'false');
+    });
+    document.querySelectorAll('#bottom-nav a[data-route]').forEach(a => {
         const active = a.dataset.route === current;
         a.setAttribute('aria-current', active ? 'page' : 'false');
     });

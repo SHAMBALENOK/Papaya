@@ -17,13 +17,14 @@ import uuid
 from tests.conftest import (
     admin_client,
     create_olympiad,
+    create_profile,
+    create_season,
     create_university,
     login_user,
-    promote_role,
     register_user,
     set_user_role,
     university_rep_client,
-    upload_document,
+    upload_university_doc,
 )
 from tests.rsosh_fixtures import xlsx_bytes
 
@@ -71,7 +72,8 @@ async def test_admin_has_full_access(client):
 
     assert (await client.get('/api/v1/admin/users')).status_code == 200
     assert (await client.get('/api/v1/admin/olympiads')).status_code == 200
-    assert (await client.get('/api/v1/admin/bvi')).status_code == 200
+    assert (await client.get('/api/v1/admin/benefits')).status_code == 200
+    assert (await client.get('/api/v1/admin/entity-requests')).status_code == 200
     assert (await client.get('/api/v1/docs')).status_code == 200
 
     edited = await client.post(
@@ -104,14 +106,28 @@ async def test_admin_assigns_university_representative(client):
     assert assigned.json()['role'] == 'EDITOR'
     assert assigned.json()['university_id'] == university['id']
 
-    # Назначение меняет права: представитель управляет связями своего вуза.
-    await login_user(client, rep['email'])
+    # Данные для правила готовит администратор: представитель не создаёт
+    # олимпиады, сезоны и профили.
+    await admin_client(client)
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
-    linked = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
+    season = await create_season(client, olympiad['id'])
+    profile = await create_profile(client, season['id'])
+    doc = await upload_university_doc(client, university['id'])
+    payload = {
+        'olympiad_id': olympiad['id'],
+        'season_id': season['id'],
+        'profile_id': profile['id'],
+        'benefit_type': 'BVI',
+        'required_result_type': 'WINNER',
+        'doc_id': doc['id'],
+    }
+
+    # Назначение меняет права: представитель управляет правилами своего вуза.
+    await login_user(client, rep['email'])
+    created = await client.post(
+        f"/api/v1/universities/{university['id']}/benefits", json=payload
     )
-    assert linked.status_code == 201
+    assert created.status_code == 200, created.text
 
     # Снятие роли возвращает обычного пользователя и убирает привязку.
     await admin_client(client)
@@ -122,8 +138,7 @@ async def test_admin_assigns_university_representative(client):
 
     await login_user(client, rep['email'])
     blocked = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
+        f"/api/v1/universities/{university['id']}/benefits", json=payload
     )
     assert blocked.status_code == 403
 
@@ -158,6 +173,10 @@ async def test_representative_university_can_be_changed(client):
     first = await create_university(client, 'Университет ИТМО')
     second = await create_university(client, 'Университет МФТИ')
     olympiad = await create_olympiad(client, 'Олимпиада школьников «Физтех»')
+    season = await create_season(client, olympiad['id'])
+    profile = await create_profile(client, season['id'])
+    first_doc = await upload_university_doc(client, first['id'])
+    second_doc = await upload_university_doc(client, second['id'])
     rep = await register_user(client)
     await admin_client(client)
 
@@ -166,16 +185,27 @@ async def test_representative_university_can_be_changed(client):
     assert moved.status_code == 200
     assert moved.json()['university_id'] == second['id']
 
+    def payload(doc):
+        return {
+            'olympiad_id': olympiad['id'],
+            'season_id': season['id'],
+            'profile_id': profile['id'],
+            'benefit_type': 'BVI',
+            'required_result_type': 'WINNER',
+            'doc_id': doc['id'],
+        }
+
     # Права следуют за новым вузом: старый больше недоступен.
     await login_user(client, rep['email'])
     assert (await client.post(
-        f"/api/v1/universities/{first['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
+        f"/api/v1/universities/{first['id']}/benefits",
+        json=payload(first_doc),
     )).status_code == 403
-    assert (await client.post(
-        f"/api/v1/universities/{second['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
-    )).status_code == 201
+    allowed = await client.post(
+        f"/api/v1/universities/{second['id']}/benefits",
+        json=payload(second_doc),
+    )
+    assert allowed.status_code == 200, allowed.text
 
 
 async def test_representative_role_rejects_unknown_university(client):
@@ -334,7 +364,8 @@ async def test_rep_cannot_import_documents(client):
         files={'file': ('rsosh.xlsx', xlsx_bytes(), 'application/octet-stream')},
         data={'type': 'RSOSH_LIST'},
     )).status_code == 403
-    assert (await client.get('/api/v1/admin/bvi')).status_code == 403
+    assert (await client.get('/api/v1/admin/benefits')).status_code == 403
+    assert (await client.get('/api/v1/admin/entity-requests')).status_code == 403
 
 
 async def test_admin_users_supports_pagination(client):

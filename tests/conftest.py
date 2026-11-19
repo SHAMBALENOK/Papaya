@@ -144,11 +144,12 @@ async def clean_state():
     async with AsyncSessionLocal() as session:
         await session.execute(
             text(
-                'TRUNCATE TABLE import_records, import_jobs, sources, '
-                'benefit_rule_programs, benefit_rule_versions, benefit_status_history, '
+                'TRUNCATE TABLE import_records, import_jobs, migration_archive, '
+                'benefit_rule_migration_issues, benefit_ege_requirements, '
+                'benefit_rule_versions, benefit_status_history, '
                 'benefit_rules, university_programs, season_profiles, olympiad_seasons, '
-                'representative_applications, audit_logs, university_olympiads, universities, '
-                'olympiads, docs, users CASCADE'
+                'entity_requests, representative_applications, audit_logs, '
+                'universities, olympiads, docs, users CASCADE'
             )
         )
         await session.commit()
@@ -309,21 +310,77 @@ async def set_user_role(
     )
 
 
-async def moderate_bvi(
+async def create_season(
+    test_client: AsyncClient,
+    olympiad_id: str,
+    label: str = '2025/2026',
+) -> dict:
+    """Создать сезон олимпиады от имени администратора."""
+    response = await test_client.post(
+        f'/api/v1/olympiads/{olympiad_id}/seasons',
+        json={'season_label': label},
+    )
+    assert response.status_code in (200, 201), response.text
+    return response.json()
+
+
+async def create_profile(
+    test_client: AsyncClient,
+    season_id: str,
+    name: str = 'Математика',
+    rsosh_level: str | None = '1',
+) -> dict:
+    """Создать профиль сезона: название и уровень РСОШ."""
+    response = await test_client.post(
+        f'/api/v1/seasons/{season_id}/profiles',
+        json={'name': name, 'rsosh_level': rsosh_level},
+    )
+    assert response.status_code in (200, 201), response.text
+    return response.json()
+
+
+async def upload_university_doc(
+    test_client: AsyncClient,
+    university_id: str,
+    filename: str = 'order.pdf',
+    payload: bytes = b'%PDF-1.4 fake',
+    doc_type: str = 'UNIVERSITY_ORDER',
+    name: str = 'Приказ университета о льготах',
+) -> dict:
+    """Загрузить документ университета (приказ-основание правила)."""
+    response = await test_client.post(
+        f'/api/v1/universities/{university_id}/docs',
+        files={'file': (filename, payload, 'application/pdf')},
+        data={'type': doc_type, 'name': name},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def create_benefit_rule(
     test_client: AsyncClient,
     university_id: str,
     olympiad_id: str,
-    action: str,
-):
-    """Административное действие над заявкой БВИ.
-
-    ``action`` — ``confirm`` | ``reject`` | ``revoke``. Отдельного «снятия
-    подтверждения в PENDING» в модели нет: отзыв подтверждения удаляет связь.
-    """
-    return await test_client.post(
-        f'/api/v1/universities/{university_id}/bvi/{olympiad_id}/moderation',
-        json={'action': action},
+    season_id: str,
+    profile_id: str,
+    doc_id: str,
+    **fields,
+) -> dict:
+    """Создать правило льготы от имени представителя/администратора."""
+    payload = {
+        'olympiad_id': olympiad_id,
+        'season_id': season_id,
+        'profile_id': profile_id,
+        'benefit_type': 'BVI',
+        'required_result_type': 'WINNER',
+        'doc_id': doc_id,
+        **fields,
+    }
+    response = await test_client.post(
+        f'/api/v1/universities/{university_id}/benefits', json=payload
     )
+    assert response.status_code in (200, 201), response.text
+    return response.json()
 
 
 async def upload_document(

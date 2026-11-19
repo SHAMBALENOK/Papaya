@@ -338,6 +338,57 @@ body.menu-open { overflow: hidden; }
 }
 .site-menu-logout:hover { color: var(--ink); }
 
+/* Заголовки — Manrope, текст — Inter. Токены шрифтов заданы в index.html. */
+:where(h1, h2, h3) {
+    font-family: 'Manrope', 'Inter', system-ui, sans-serif;
+}
+
+/* --------------------------------------------------------------------------
+   Нижняя мобильная навигация
+   -------------------------------------------------------------------------- */
+
+.bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    background: rgba(255, 255, 255, 0.98);
+    border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+    backdrop-filter: blur(8px);
+}
+
+.bottom-nav-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 56px;
+    padding: 6px 2px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--ink-soft);
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.bottom-nav-link:active { background: var(--mist); }
+.bottom-nav-link:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+.bottom-nav-link[aria-current="page"] { color: var(--brand-strong); }
+.bottom-nav-link svg { width: 20px; height: 20px; }
+
+/* Контент не должен прятаться под нижней панелью на телефоне. */
+@media (max-width: 1023px) {
+    body { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+}
+
 /* prefers-reduced-motion: убираем движение, оставляем мгновенные состояния. */
 @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }

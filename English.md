@@ -23,25 +23,26 @@
 
 ## What Papaya is
 
-Papaya answers one question: **which olympiads grant BVI (admission without entrance exams) at the university I want?**
+Papaya answers one question: **which olympiads give a university applicant a benefit, and on what terms?**
 
-It aggregates official RSOSH olympiad lists and links them to universities. A school student finds their university in the catalog, sees the olympiads that grant admission without entrance exams, opens an olympiad and follows the link to its official website. No more browsing university websites and orders by hand.
+It aggregates official RSOSH olympiad lists, university orders and the olympiad seasons and profiles those orders refer to. A school student finds their university in the catalog, sees the benefit rules published by that university, opens the olympiad of the relevant season and follows the link to its official website. No more browsing university websites and orders by hand.
 
 The whole product is described by one chain:
 
 ```text
-University → olympiads that grant BVI → olympiad details → official website
+Olympiad → season → profile (RSOSH level)
+        → university benefit rule → supporting document
 ```
 
-Anything that does not support this chain is intentionally absent: no olympiad calendar, no stage schedule, no deadlines, no recommendation algorithms. Papaya is an aggregator and a catalog, not an admissions system.
+Anything that does not support this chain is intentionally absent: no olympiad calendar, no registration or event dates, no deadlines, no recommendation algorithms. Papaya is an aggregator and a catalog, not an admissions system.
 
 ## User flow
 
 | Role | What they do |
 |------|--------------|
 | **Student** (guest or registered) | Searches universities and olympiads, browses catalogs and entity pages. Registration is not required. |
-| **University representative** | Manages BVI links of **their own** university: picks existing olympiads from the catalog and claims the university grants BVI for them. They never create olympiads. |
-| **Papaya administrator** | Maintains the olympiad and university catalogs, uploads RSOSH documents and confirms imports, moderates BVI requests, manages users and roles. |
+| **University representative** | Manages benefit rules of **their own** university: links an existing olympiad, season and profile, states the benefit type and required result, and attaches the university order. They never create olympiads or seasons; they can request a missing one. |
+| **Papaya administrator** | Maintains the olympiad and university catalogs, uploads RSOSH documents and confirms imports, verifies or rejects benefit rules, manages users, roles and entity requests. |
 
 End-to-end flow:
 
@@ -50,50 +51,53 @@ Open Papaya
       ↓
 Find a university
       ↓
-Open the university
+Open the university or filter the benefit catalog
       ↓
-See the olympiads that grant BVI
+See the rules: olympiad, season, profile, RSOSH level, benefit type
       ↓
-Open an olympiad
+Open an olympiad and switch between actual and archived seasons
       ↓
-Read its details and follow the link to the official website
+Read the supporting document and follow the link to the official website
 ```
-
-The olympiad page also shows the reverse path: the universities that grant BVI for it.
 
 ## Data model
 
 ```text
-University ──(university_olympiads)── Olympiad ──(source_doc_id)── Docs
-        │                                 │
-        └──── PENDING / CONFIRMED ────────┘
+Olympiad ── Season ── Profile (RSOSH level 1/2/3 or null)
+    │            │                 │
+    └──────── Benefit rule ────────┘
+                   │
+          University order (doc)
 ```
 
 Key decisions:
 
-- **An olympiad is a single canonical entity.** There are no "olympiad 2026" and "olympiad 2027" records: one entry per olympiad, independent of the year.
-- **A university never creates a copy of an olympiad.** A link references an existing catalog entry, and a unique index on the pair makes duplicate links impossible even at the database level.
-- **A request is not a public fact.** `PENDING` links are visible to the university's own representative and to the administrator; public lists contain confirmed links only.
-- **Archive, not delete.** An olympiad that disappears from the RSOSH list moves to `ARCHIVED`: the record is kept and the interface states that it is no longer in the current list.
-- **An archived olympiad accepts no new BVI requests.** A request means "we admit students through this olympiad right now", which cannot be true for an olympiad outside the current list: such a request gets 409. Already confirmed links are kept and flagged as historical (`is_historical`) — the archive changes relevance, not history.
-- **Archive, never delete.** An olympiad carries history: confirmed links, its source document, its path through the RSOSH lists. There is no physical deletion of catalog records anywhere in the system — neither in the data layer nor in the API.
-- **An archive has a reason.** The status is one, but two different mechanisms decide it, so an archived record always carries `archive_reason`: `RSOSH_ABSENT` (not in the RSOSH list — an import brings it back) or `MANUAL` (excluded by an administrator — restorable by hand). A record that vanished from the RSOSH list cannot be restored manually: only the list itself can say it is current again.
+- **An olympiad is a single canonical entity.** There are no "olympiad 2026" and "olympiad 2027" records: one entry per olympiad, independent of the year. The year lives in a season.
+- **A season is an olympiad plus a label.** It has no registration or event dates and no `availability`: those describe a university's admission campaign, not the olympiad.
+- **RSOSH level belongs to a profile of a season.** Only `1`, `2` or `3` (or nothing) is valid, and a level is never copied to another season: the set of profiles and their levels change every year.
+- **A benefit rule is the only place where a benefit is stated.** It references a university, an olympiad, a season and a profile, names the benefit type (`BVI`, `EGE_100`, `DVI_100`, `OTHER`) and the required result (`WINNER`, `PRIZE`, `WINNER_OR_PRIZE`), and points at a supporting university document. Admission without entrance exams is just `benefit_type: "BVI"`; there is no separate BVI entity, request or moderation queue.
+- **EGE requirement is a separate optional structure.** `{"subject", "min_score"}` is attached to the rule, not to the olympiad profile.
+- **A rule is consistent by construction.** The season must belong to the olympiad, the profile to the season, and the document to the same university; otherwise the API returns `422`. Archived olympiads accept no new rules, but existing rules stay readable and editable.
+- **Archive, never delete.** An olympiad carries history: benefit rules, its source document, its path through the RSOSH lists. There is no physical deletion of catalog records anywhere in the system — neither in the data layer nor in the API.
+- **An archive has a reason.** The status is one, but two different mechanisms decide it, so an archived record always carries `archive_reason`: `RSOSH_ABSENT` (not in the RSOSH list — an import brings it back) or `MANUAL` (excluded by an administrator — restorable by hand).
 - **A skipped row is not a missing one.** If an administrator removed a row in the preview, it does not count as missing from the list: a single recognition error must not archive a real olympiad.
 - **Two images per entity.** `preview_image` is used in catalog cards, `image` on the entity page; if one is missing, the interface falls back to the other.
-- **Documents are data sources.** Each olympiad stores `source_doc_id`, so it is always clear where the information came from: the olympiad page shows the source via `GET /api/v1/olympiads/<id>/source`, publicly and without exposing the uploaded file itself. The internal `source_doc_id` is not part of public responses, and the source endpoint always answers `200` — a manual entry has a source too ("created by a Papaya administrator").
-- **The public model is minimal.** An olympiad response carries only user-facing fields (`id`, `name`, `description`, `official_url`, `preview_image`, `image`, `organizer`, `status`). Internal `name_norm`, `source_doc_id`, `createdAt`, `updatedAt` and `archive_reason` never reach a visitor: they matter for imports and for the admin panel, and explain nothing to a reader.
+- **Two kinds of documents.** An RSOSH list (`RSOSH_LIST`) is the import source; a university order (`UNIVERSITY_ORDER`) or other document (`OTHER`) belongs to a university and supports its benefit rules. There is no separate "Source" entity.
+- **The public model is minimal.** An olympiad response carries only user-facing fields (`id`, `name`, `description`, `official_url`, `preview_image`, `image`, `organizer`, `status`). Internal `name_norm`, `source_doc_id`, `createdAt`, `updatedAt` and `archive_reason` never reach a visitor.
+- **Programs are an independent reference.** `university_programs` belongs to a university; benefit rules do not reference programs.
 - **The short name comes first.** Cards, catalogs and page headings show the short name (`MIPT`) first and the full name underneath. The full name is never hidden.
-- **Organizers are a free-text field, not an entity.** An olympiad has an optional `organizer` string (a university, a ministry, another organization). RSOSH lists phrase it differently, so normalizing it into a directory would lose data; no organizer catalog or "organization" abstraction exists.
-- **Sources are references, not organizations.** A `Source` is a semantic link to a document or page a benefit rule was taken from (an RSOSH list, a university order, a website). It is a directory maintained by the administrator, reusable across rules, and deliberately not an organization record.
 
 ## Roles and permissions
 
 | Action | Student / guest | University representative | Administrator |
 |--------|-----------------|---------------------------|---------------|
 | Catalogs, search, university and olympiad pages | ✅ | ✅ | ✅ |
-| Link own university to an existing olympiad | ❌ | ✅ (own university only) | ✅ (any university) |
-| Confirm or revoke a BVI link | ❌ | ❌ | ✅ |
-| Create or edit an olympiad | ❌ | ❌ | ✅ |
+| Create and edit own university's benefit rules | ❌ | ✅ (own university only) | ✅ (any university) |
+| Publish or hide a rule | ❌ | ✅ (own university) | ✅ |
+| Verify or reject a rule | ❌ | ❌ | ✅ |
+| Manage own university's programs and documents | ❌ | ✅ | ✅ |
+| Request a missing olympiad, season or profile | ❌ | ✅ | ✅ |
+| Create or edit an olympiad, season or profile | ❌ | ❌ | ✅ |
 | Create or edit a university | ❌ | ❌ | ✅ |
 | Upload RSOSH documents and run an import | ❌ | ❌ | ✅ |
 | Manage users and roles | ❌ | ❌ | ✅ |
@@ -107,17 +111,11 @@ The last active administrator cannot be banned or demoted (409), because nobody 
 
 The check is atomic: it runs under a lock on the administrator rows (`SELECT ... FOR UPDATE` in `id` order) inside the same transaction as the operation itself. Without it, two parallel operations (demote the first admin, ban the second) would each see "someone else remains" and together leave the system without a single active `ADMIN`.
 
-BVI link rights: a representative creates a request for a **current** olympiad and may withdraw it while it is `PENDING`; only an administrator can revoke a confirmed link. A confirmed link is a public fact, so removing it is the administrator's decision, not the requester's.
+Rule verification: a representative creates and edits rules of their own university and may publish or hide them, but a rule is always created `unverified`. Only an administrator can `verify` it (the rule must have a `UNIVERSITY_ORDER` document of the same university) or `reject` it with a non-empty reason, which also unpublishes the rule.
 
-Moderation is three explicit actions rather than "any status change":
+Public catalog: a rule is visible when it is published and not rejected. An unverified rule remains visible with an honest "Not verified by Papaya" warning; a draft or rejected rule is not visible even by direct id.
 
-| Action | Effect |
-|--------|--------|
-| `confirm` | `PENDING` → `CONFIRMED`: the link becomes public |
-| `reject`  | the request is declined, the link is deleted |
-| `revoke`  | the confirmation is withdrawn, the link is deleted |
-
-There is no `CONFIRMED → PENDING` transition: that is not a request state but the withdrawal of a public fact. Such a record would be invisible in the catalog and would sit in the moderation queue as if the university had just applied again. `confirmedBy` exists only on `CONFIRMED` and points at the administrator who confirmed the link.
+Versions are optimistic: every update and rollback sends the current `version`, a stale value returns `409`. A rollback is atomic under `FOR UPDATE`, accepts both the target and the expected current version, creates a new version, marks the rule `unverified` and records the change in the status history.
 
 ## RSOSH document import
 
@@ -165,6 +163,36 @@ What the importer accounts for:
 Import state lives in `docs.metadata['rsosh']` (`processing` / `paused` / `review` / `approved` / `rejected` / `failed`) — a separate table for runs is unnecessary because a run always belongs to a concrete document. Imports run in a Celery task by default and fall back to in-process execution when the broker is unavailable (`RSOSH_EXECUTION=auto|celery|inline`).
 
 While a run is `processing` the section carries a `progress` stage (`starting` / `extracting` / `matching`), so the panel shows what is happening instead of a bare "processing". An administrator can pause a run and resume it later: pausing takes effect at a stage boundary, and when it lands after recognition the run keeps the recognized rows, so resuming continues straight to matching without re-reading the document. The administrator's review choices (confirmed/dropped candidates, renamed names and descriptions, forced merges) are saved with the run, survive a page reload, and are applied on confirmation when the request body is omitted.
+
+### Official list: table → plan → apply
+
+A scan recognized as an official RSOSH list (table detected and the academic year read from the document) goes through its own pipeline; every other document keeps the legacy `preview` + `confirm` path. The mode is visible as `mode: "official_list"` in the import state.
+
+```text
+PDF stored under a UUID name
+    ↓ background Celery task (RSOSH_EXECUTION=auto|celery|inline)
+Recognition: page orientation, table borders, repeated headers, merged and multi-line cells
+    ↓
+XLSX ("Перечень <season>" + "Сводка") and an HTML rendering
+    ↓ served as RSOSH_TABLE / RSOSH_HTML companion documents, server-side files only
+Import plan: create / use / review / skip, with seasons, profiles, levels, missing records
+    ↓ administrator corrects the plan (PATCH …/plan)
+Atomic apply (POST …/apply) — one transaction, one document applied once
+    ↓
+ImportJob / ImportRecord rows and the decision history in docs.metadata['rsosh']
+```
+
+Rules the pipeline enforces:
+
+- **The table exists before matching.** The XLSX is an intermediate artifact, not a report: the plan is built from it. Sheet 1 is the list, sheet 2 is the summary aggregated from sheet 1.
+- **The season comes from the document**, not from the year the import was started. Profiles and levels belong to the season, so an olympiad is never duplicated across seasons; a level change is recorded in history.
+- **Fuzzy matches are never applied automatically.** Only an exact normalized-name match becomes `use`; similar entries produce `review` and require an explicit administrator decision.
+- **Unreadable rows are errors, not silence.** A row whose profile or level could not be recognized blocks `apply` until the administrator fills it in or explicitly skips it (`action: "skip"`).
+- **Missing olympiads are not deleted.** Absence is recorded only for a complete list (`complete=true`, a season, no unresolved errors, `missing_allowed=true`) and only on request (`mark_missing=true`): profiles lose their level and olympiads are archived with the `RSOSH_ABSENT` reason.
+- **Re-importing the same document creates nothing twice.** The generated table and HTML are reused; the plan is rebuilt; a second apply returns `409`.
+- **Apply is atomic.** One transaction under the list-application lock; an error rolls everything back, so a partially applied list cannot exist.
+
+The documents page shows the source PDF, the generated XLSX, the HTML table, the season, the date, the status and the author. The table itself is paged on the server (`GET …/table` with `sheet`, `offset`, `limit`, `search`): a list has 300+ rows.
 
 ## Technology stack
 
@@ -228,7 +256,7 @@ Tests run in an isolated container of the `testing` profile and never touch the 
 docker compose --profile testing run --rm test
 ```
 
-Covered scenarios: catalogs and search, the two images per entity, the public source endpoint, manual archive and the manual-restore restriction, BVI links on both sides, moderation, role boundaries (student / representative / administrator), and the importer — XLSX, PDF with a text layer, scanned PDF, pages rotated by 90/180/270, PNG/JPEG images, multi-line and merged cells, repeated import of the same document, archiving of missing olympiads, unreadable documents, and permissions.
+Covered scenarios: catalogs and search, the two images per entity, the public source endpoint, manual archive, seasons and profiles with RSOSH levels, benefit rules with EGE requirements and versions, the public catalog filters and `total`, entity requests, role boundaries (student / representative / administrator), and the importer — XLSX, PDF with a text layer, scanned PDF, pages rotated by 90/180/270, PNG/JPEG images, multi-line and merged cells, repeated import of the same document, archiving of missing olympiads, unreadable documents, and permissions.
 
 ## API and routes
 
@@ -238,24 +266,33 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/universities?search=` | University catalog | Public |
 | `GET` | `/api/v1/universities/<id>` | University page | Public |
-| `GET` | `/api/v1/universities/<id>/olympiads` | Olympiads granting BVI (`?include_pending=true` for own requests) | Public / own requests |
 | `POST` | `/api/v1/universities/add_university` | Create a university | `ADMIN` |
 | `POST` | `/api/v1/universities/edit_university/<id>` | Update a university | `ADMIN` |
-| `POST` | `/api/v1/universities/<id>/bvi` | Request a BVI link to an existing olympiad | `EDITOR` (own university) or `ADMIN` |
-| `POST` | `/api/v1/universities/<id>/bvi/remove` | Remove a BVI link | `EDITOR` (own university) or `ADMIN` |
-| `POST` | `/api/v1/universities/<id>/bvi/<olympiad_id>/moderation` | Confirm, reject or revoke a BVI link | `ADMIN` |
+| `GET` | `/api/v1/universities/<id>/programs` | University programs (independent reference) | Public |
+| `POST` | `/api/v1/universities/<id>/programs` | Create a program of own university | `EDITOR` (own university) or `ADMIN` |
+| `GET` | `/api/v1/universities/<id>/entity-requests` | Own requests for missing catalog entities | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/entity-requests` | Request a missing olympiad, season or profile | `EDITOR` (own university) or `ADMIN` |
 | `GET` | `/api/v1/olympiads?search=&include_archived=` | Olympiad catalog | Public |
 | `GET` | `/api/v1/olympiads/<id>/source` | Where the olympiad data came from | Public |
 | `GET` | `/api/v1/olympiads/<id>` | Olympiad page | Public |
-| `GET` | `/api/v1/olympiads/<id>/universities` | Universities granting BVI for this olympiad | Public |
+| `GET` | `/api/v1/olympiads/<id>/universities` | Universities with published rules for this olympiad | Public |
+| `GET` | `/api/v1/olympiads/<id>/seasons` | Seasons of an olympiad (`include_archived`, `profiles`) | Public |
+| `POST` | `/api/v1/olympiads/<id>/seasons` | Create a season | `ADMIN` |
+| `GET` | `/api/v1/seasons/<id>` | Season | Public |
+| `PUT` | `/api/v1/seasons/<id>` | Update a season (requires `version`) | `ADMIN` |
+| `GET` | `/api/v1/seasons/<id>/profiles` | Profiles of a season | Public |
+| `POST` | `/api/v1/seasons/<id>/profiles` | Create a profile with RSOSH level | `ADMIN` |
 | `POST` | `/api/v1/olympiads/add_olympiad` | Create an olympiad manually | `ADMIN` |
 | `POST` | `/api/v1/olympiads/edit_olympiad/<id>` | Update an olympiad | `ADMIN` |
 | `GET` | `/api/v1/search?q=` | Search both catalogs | Public |
-| `GET` | `/api/v1/benefits` | Verified and published benefit rules (`search`, `benefit_type`, `university_id`, `limit`, `offset`) | Public |
+| `GET` | `/api/v1/benefits` | Published benefit rules (`search`, `benefit_type`, `university_id`, `olympiad_id`, `season_id`, `profile_id`, `level`, `limit`, `offset`) | Public |
 | `GET` | `/api/v1/benefits/<id>` | One published benefit rule | Public |
-| `GET` | `/api/v1/olympiads/<id>/benefits` | Published benefit rules for an olympiad | Public |
+| `GET` | `/api/v1/benefits/olympiad/<id>` | Published benefit rules for an olympiad | Public |
 | `GET` | `/api/v1/universities/<id>/benefits` | Published benefit rules of a university | Public |
-| `GET` | `/api/v1/universities/<id>/sources` | Sources available to the representative: global ones and the university's own | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/universities/<id>/benefits` | Create a benefit rule of own university | `EDITOR` (own university) or `ADMIN` |
+| `PUT` | `/api/v1/benefits/<id>` | Update a rule (requires `version`) | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/benefits/<id>/rollback` | Restore a version atomically | `EDITOR` (own university) or `ADMIN` |
+| `POST` | `/api/v1/benefits/<id>/verify` | Verify a rule against a university order | `ADMIN` |
 | `POST` | `/api/v1/docs/upload` | Upload a source document (RSOSH list, order, other) | `ADMIN` |
 | `POST` | `/api/v1/imports/rsosh` | Start an RSOSH import | `ADMIN` |
 | `GET` | `/api/v1/imports` | List of import runs | `ADMIN` |
@@ -266,15 +303,20 @@ Every route uses the `/api/v1` prefix. The complete interactive schema is availa
 | `POST` | `/api/v1/imports/<id>/pause` | Pause a running import | `ADMIN` |
 | `POST` | `/api/v1/imports/<id>/resume` | Resume a paused import | `ADMIN` |
 | `PUT` | `/api/v1/imports/<id>/selection` | Save the administrator's review choices | `ADMIN` |
+| `GET` | `/api/v1/imports/<id>/plan` | Official list import plan (nothing written yet) | `ADMIN` |
+| `PATCH` | `/api/v1/imports/<id>/plan` | Correct matches, names, levels or actions in the plan | `ADMIN` |
+| `POST` | `/api/v1/imports/<id>/apply` | Apply the approved plan atomically | `ADMIN` |
+| `GET` | `/api/v1/imports/<id>/history` | What the document changed in the catalog | `ADMIN` |
+| `GET` | `/api/v1/imports/<id>/table` | Paged view of the generated list/summary table | `ADMIN` |
 | `POST` | `/api/v1/admin/archive_olympiad/<id>` | Archive or restore an olympiad (409 when restoring one absent in the RSOSH list) | `ADMIN` |
 | `GET` | `/api/v1/admin/users` | Manage users and roles | `ADMIN` |
-| `GET` | `/api/v1/admin/bvi` | BVI request moderation queue | `ADMIN` |
+| `GET` | `/api/v1/admin/benefits` | Benefit rule moderation queue (`needs_review`, `verification_status`) | `ADMIN` |
+| `GET` | `/api/v1/admin/entity-requests` | Requests for missing catalog entities (`status`, `limit`, `offset`, `total`) | `ADMIN` |
+| `POST` | `/api/v1/admin/entity-requests/<id>/approve` | Approve a request and create the entity once | `ADMIN` |
+| `POST` | `/api/v1/admin/entity-requests/<id>/reject` | Reject a request with a required reason | `ADMIN` |
 | `GET` | `/api/v1/admin/docs` | Document list (`search`, `type`, `status`, `limit`, `offset`, `total`) | `ADMIN` |
 | `GET` | `/api/v1/admin/imports` | Import run journal | `ADMIN` |
 | `GET` | `/api/v1/admin/imports/<id>` | One import run with per-row records | `ADMIN` |
-| `GET` | `/api/v1/admin/sources` | Source directory (`university_id`, `kind`, `limit`, `offset`, `total`) | `ADMIN` |
-| `POST` | `/api/v1/admin/sources` | Create a source | `ADMIN` |
-| `DELETE` | `/api/v1/admin/sources/<id>` | Delete a source (rules keep their document and URL) | `ADMIN` |
 | `GET` | `/api/v1/admin/audit` | Audit log (`entity_type`, `entity_id`, `action`, `limit`, `offset`, `total`) | `ADMIN` |
 | `POST` | `/api/v1/representative-applications` | Apply to represent a university | Authenticated |
 | `GET` | `/api/v1/applications/my` | Own representative applications | Authenticated |

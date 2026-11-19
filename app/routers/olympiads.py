@@ -223,30 +223,25 @@ async def olympiad_source_file(olympiad_id: uuid.UUID):
 
 @olympiads_page.get(
     '/{olympiad_id}/universities',
-    response_model=schemas.bvi.BviUniversitiesResponse,
     responses={
-        200: {'description': 'Университеты, дающие БВИ за эту олимпиаду'},
+        200: {'description': 'Университеты, дающие льготы за эту олимпиаду'},
         404: {'description': 'Olympiad not found'},
         500: {'description': 'Internal server error'},
     },
 )
 async def olympiad_universities(olympiad_id: uuid.UUID):
-    """Университеты, дающие БВИ за олимпиаду (обратная сторона связи).
+    """Университеты, у которых есть опубликованные правила по олимпиаде.
 
-    Публично видны только подтверждённые связи: заявка, ещё не одобренная
-    администратором, публичным фактом не является.
-
-    Если олимпиада архивная, связи остаются в списке, но помечаются
-    ``is_historical``: университеты действительно давали БВИ, пока олимпиада
-    была в перечне РСОШ. Удалять их из-за архива нельзя — это стёрло бы
-    историю, и страница олимпиады выглядела бы «пустой», хотя информация о
-    льготе была.
+    Отдельной сущности «олимпиада с БВИ» больше нет: список строится по
+    правилам льгот, поэтому не может разойтись с каталогом.
     """
     try:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)
         if not olympiad:
             raise HTTPException(status_code=404, detail='Olympiad not found')
-        universities = await database.bvi.list_universities_for_olympiad(olympiad_id)
+        universities = await database.benefits.list_universities_for_olympiad(
+            olympiad_id
+        )
         return {'universities': universities}
     except HTTPException:
         raise

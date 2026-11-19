@@ -11,7 +11,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-DOC_TYPES = ('RSOSH_LIST', 'UNIVERSITY_ORDER', 'OTHER')
+DOC_TYPES = (
+    'RSOSH_LIST',
+    'UNIVERSITY_ORDER',
+    'OTHER',
+    # Производные документы официального перечня: таблица и её HTML-версия.
+    # Они создаются конвейером, а не загружаются руками, но живут в том же
+    # хранилище и открываются по тем же маршрутам.
+    'RSOSH_TABLE',
+    'RSOSH_HTML',
+)
+#: Типы, которые администратор может указать при загрузке файла. Производные
+#: типы создаёт сервер: загруженный «RSOSH_TABLE» был бы файлом неизвестного
+#: происхождения под именем таблицы перечня.
+SOURCE_DOC_TYPES = ('RSOSH_LIST', 'UNIVERSITY_ORDER', 'OTHER')
 DOC_STATUSES = (
     'UPLOADED',
     'PROCESSING',

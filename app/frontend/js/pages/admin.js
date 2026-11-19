@@ -4,7 +4,7 @@
  *   #/admin/users       пользователи: роли, блокировки, привязка к университету
  *   #/admin/olympiads   каталог олимпиад: правка, архив, ручное создание
  *   #/admin/universities каталог университетов
- *   #/admin/bvi         заявки университетов на связи БВИ
+ *   #/admin/requests    запросы представителей на отсутствующие сущности
  *   #/admin/imports     документы РСОШ: загрузка, импорт, preview, подтверждение
  * ========================================================================== */
 
@@ -25,6 +25,7 @@ const ADMIN_GROUPS = [
         tabs: [
             { key: 'olympiads', label: 'Олимпиады' },
             { key: 'seasons', label: 'Сезоны' },
+            { key: 'requests', label: 'Запросы в каталог' },
         ],
     },
     {
@@ -33,7 +34,6 @@ const ADMIN_GROUPS = [
             { key: 'universities', label: 'Университеты' },
             { key: 'benefits', label: 'Льготы' },
             { key: 'programs', label: 'Программы' },
-            { key: 'bvi', label: 'Заявки БВИ' },
             { key: 'repapps', label: 'Заявки представителей' },
         ],
     },
@@ -41,7 +41,6 @@ const ADMIN_GROUPS = [
         key: 'data', label: 'Данные',
         tabs: [
             { key: 'docs', label: 'Документы' },
-            { key: 'sources', label: 'Источники' },
             { key: 'imports', label: 'Импорт РСОШ' },
         ],
     },
@@ -55,23 +54,20 @@ const ADMIN_TABS = ADMIN_GROUPS.flatMap(group =>
     group.tabs.map(tab => ({ ...tab, href: `#/admin/${tab.key}` })));
 const ADMIN_TAB_KEYS = new Set(ADMIN_TABS.map(tab => tab.key));
 
-/** Размер страницы при выгрузке очереди БВИ: список качается постранично. */
-const BVI_PAGE_SIZE = 50;
-
 /** Размер страницы списков пользователей и олимпиад. */
 const ADMIN_LIST_PAGE_SIZE = 50;
-
-/** Текущее состояние постраничной очереди БВИ (загруженные строки и всего). */
-let bviState = { links: [], total: 0 };
 
 /** Состояние постраничных списков панели: строки, всего и активный поиск. */
 let adminUsersState = { users: [], total: 0, search: '', universities: [] };
 let adminOlympiadsState = { olympiads: [], total: 0, search: '' };
-let adminBenefitsState = { rules: [], total: 0, status: '', search: '', universities: [], olympiads: [] };
+let adminBenefitsState = {
+    rules: [], total: 0, status: '', search: '', needsReview: false,
+    universities: [], olympiads: [],
+};
 let adminSeasonsState = { seasons: [], total: 0, olympiads: [] };
 let adminProgramsState = { programs: [], total: 0, universities: [] };
 let adminDocsState = { docs: [], total: 0, search: '', type: '', status: '' };
-let adminSourcesState = { sources: [], total: 0, universities: [] };
+let adminRequestsState = { requests: [], total: 0, status: '' };
 let adminAuditState = { logs: [], total: 0, entityType: '', action: '' };
 let adminRepAppsStatus = '';
 
@@ -113,7 +109,8 @@ function renderAdmin(initialTab) {
         <p class="${UI.eyebrow}">Администрирование</p>
         <h1 class="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.1]">Панель администратора</h1>
         <p class="mt-6 text-lg text-ink-soft leading-relaxed max-w-2xl">
-            Каталог олимпиад и университетов, модерация связей БВИ и импорт документов РСОШ.
+            Каталог олимпиад и университетов, модерация правил льгот, запросы
+            представителей и импорт документов РСОШ.
         </p>
     </section>
 
@@ -171,6 +168,7 @@ async function loadAdminTab(tab) {
                 total: res.data.total != null ? res.data.total : rules.length,
                 status: '',
                 search: '',
+                needsReview: false,
                 universities: (universities.data && universities.data.universities) || [],
                 olympiads: (olympiads.data && olympiads.data.olympiads) || [],
             };
@@ -214,25 +212,15 @@ async function loadAdminTab(tab) {
             };
             return docs;
         },
-        sources: async () => {
-            const [res, universities] = await Promise.all([
-                api.adminSources({ limit: ADMIN_LIST_PAGE_SIZE, offset: 0 }),
-                api.adminUniversities({ include_archived: true, limit: 200 }).catch(() => ({ data: {} })),
-            ]);
-            const sources = res.data.sources || [];
-            adminSourcesState = {
-                sources,
-                total: res.data.total != null ? res.data.total : sources.length,
-                universities: (universities.data && universities.data.universities) || [],
+        requests: async () => {
+            const res = await api.adminEntityRequests({ limit: ADMIN_LIST_PAGE_SIZE, offset: 0 });
+            const requests = res.data.requests || [];
+            adminRequestsState = {
+                requests,
+                total: res.data.total != null ? res.data.total : requests.length,
+                status: '',
             };
-            return sources;
-        },
-        bvi: async () => {
-            // Группировка по университетам возможна только по всему списку:
-            // порционная выдача разрезала бы один вуз между страницами.
-            const links = await fetchAllBviLinks();
-            bviState = { links, total: links.length };
-            return links;
+            return requests;
         },
         imports: async () => {
             // Документы РСОШ — рабочая вкладка; журнал прогонов идёт отдельной
@@ -284,8 +272,7 @@ async function loadAdminTab(tab) {
         seasons: () => adminSeasonsHtml(),
         programs: () => adminProgramsHtml(),
         docs: () => adminDocsHtml(),
-        sources: () => adminSourcesHtml(),
-        bvi: () => adminBviHtml(data),
+        requests: () => adminRequestsHtml(),
         imports: () => adminImportsHtml(data),
         repapps: () => adminRepAppsHtml(data),
         audit: () => adminAuditHtml(data),
@@ -296,13 +283,15 @@ async function loadAdminTab(tab) {
 /* Действия, которые открывают модалку или сами показывают результат. */
 const ADMIN_SIDE_EFFECT_ACTIONS = new Set([
     'newUniversity', 'editUniversity', 'newOlympiad', 'editOlympiad',
-    'newImport', 'runImport', 'previewImport', 'confirmAllBvi',
+    'newImport', 'runImport', 'previewImport',
     'pauseImport', 'resumeImport',
     'newSeason', 'editSeason', 'seasonProfiles',
+    'newBenefit', 'editBenefit',
     'newProgram', 'editProgram',
     'searchBenefits', 'loadMoreBenefits',
     'loadMoreUsers', 'searchUsers', 'loadMoreOlympiads', 'searchOlympiads',
-    'newSource', 'searchDocs', 'loadMoreDocs', 'importJobRecords',
+    'searchDocs', 'loadMoreDocs', 'importJobRecords',
+    'searchRequests', 'loadMoreRequests',
     'loadMoreAudit',
 ]);
 
@@ -330,9 +319,22 @@ async function handleAdminClick(e) {
         return;
     }
 
-    if (act === 'deleteSource') {
+    if (act === 'rejectRequest') {
         btn.disabled = false;
-        deleteSourceAction(id, btn);
+        openRejectRequestModal(id, () => reloadAdmin());
+        return;
+    }
+
+    if (act === 'newBenefit') {
+        btn.disabled = false;
+        openBenefitFormModal(null, null, [], () => reloadAdmin(), { admin: true });
+        return;
+    }
+
+    if (act === 'editBenefit') {
+        btn.disabled = false;
+        const rule = adminBenefitsState.rules.find(item => String(item.id) === String(id)) || null;
+        openBenefitFormModal(null, rule, [], () => reloadAdmin(), { admin: true });
         return;
     }
 
@@ -341,9 +343,7 @@ async function handleAdminClick(e) {
         unban: () => api.unbanUser(id),
         archive: () => api.archiveOlympiad(id, true),
         restore: () => api.archiveOlympiad(id, false),
-        confirmBvi: () => api.moderateBvi(btn.dataset.university, id, 'confirm'),
-        rejectBvi: () => api.moderateBvi(btn.dataset.university, id, 'reject'),
-        revokeBvi: () => api.moderateBvi(btn.dataset.university, id, 'revoke'),
+        approveRequest: () => api.approveEntityRequest(id),
         newUniversity: () => openUniversityFormModal(null, () => reloadAdmin()),
         editUniversity: () => editUniversityAction(id),
         archiveUniversity: () => api.archiveUniversity(id, true),
@@ -369,7 +369,6 @@ async function handleAdminClick(e) {
         newImport: () => openUploadModal(),
         runImport: () => runImportAction(id, btn),
         previewImport: () => navigate(`#/admin/imports/${id}`),
-        confirmAllBvi: () => confirmAllBviLinks(btn.dataset.university),
         pauseImport: () => pauseImportAction(id, btn),
         resumeImport: () => resumeImportAction(id, btn),
         loadMoreUsers: () => loadMoreUsers(),
@@ -380,7 +379,8 @@ async function handleAdminClick(e) {
         loadMoreBenefits: () => loadMoreBenefits(),
         searchDocs: () => searchDocs(),
         loadMoreDocs: () => loadMoreDocs(),
-        newSource: () => openSourceFormModal(() => reloadAdmin()),
+        searchRequests: () => searchRequests(),
+        loadMoreRequests: () => loadMoreRequests(),
         importJobRecords: () => openImportJobModal(id),
         loadMoreAudit: () => loadMoreAudit(),
         approveRepApp: () => api.reviewRepresentativeApplication(id, { status: 'approved' }),
@@ -391,9 +391,7 @@ async function handleAdminClick(e) {
         unban: 'Пользователь разблокирован',
         archive: 'Олимпиада исключена из актуального каталога',
         restore: 'Олимпиада возвращена в актуальный каталог',
-        confirmBvi: 'Связь БВИ подтверждена',
-        rejectBvi: 'Заявка отклонена, связь удалена',
-        revokeBvi: 'Подтверждение отозвано, связь удалена',
+        approveRequest: 'Запрос одобрен, сущность создана',
         archiveUniversity: 'Университет архивирован',
         restoreUniversity: 'Университет возвращён из архива',
         archiveProgram: 'Программа архивирована',
@@ -824,124 +822,175 @@ async function editOlympiadAction(id) {
     openOlympiadFormModal(res.data, () => reloadAdmin());
 }
 
-/* --------------------------------- БВИ ------------------------------------ */
+/* ------------------------- Запросы в каталог ------------------------------ */
 
-/** Скачать всю очередь БВИ постранично: группировка по вузам требует полного списка. */
-async function fetchAllBviLinks() {
-    const all = [];
-    let total = Infinity;
-    while (all.length < total) {
-        const res = await api.adminBviLinks(null, { limit: BVI_PAGE_SIZE, offset: all.length });
-        if (!res.ok) throw new Error(errorText(res));
-        const batch = res.data.links || [];
-        all.push(...batch);
-        total = res.data.total != null ? res.data.total : all.length;
-        if (!batch.length) break;
+const ENTITY_REQUEST_TYPE_LABELS = {
+    OLYMPIAD: 'Олимпиада',
+    SEASON: 'Сезон',
+    PROFILE: 'Профиль',
+};
+
+const ENTITY_REQUEST_STATUS_LABELS = {
+    pending: 'На рассмотрении',
+    approved: 'Одобрен',
+    rejected: 'Отклонён',
+};
+
+function entityRequestStatusBadge(status) {
+    if (status === 'approved') {
+        return `<span class="${UI.badge} ${UI.badgeSuccess}">Одобрен</span>`;
     }
-    return all;
+    if (status === 'rejected') {
+        return `<span class="${UI.badge} ${UI.badgeDanger}">Отклонён</span>`;
+    }
+    return `<span class="${UI.badge} ${UI.badgePending}">На рассмотрении</span>`;
 }
 
-/** Сгруппировать связи по университету и разложить на заявки и подтверждённые. */
-function groupBviLinksByUniversity(links) {
-    const groups = new Map();
-    for (const link of links) {
-        const key = String(link.university_id || 'unknown');
-        if (!groups.has(key)) {
-            groups.set(key, {
-                university_id: link.university_id,
-                university_name: link.university_name || 'Университет',
-                pending: [],
-                confirmed: [],
-            });
+/** Строка очереди: что просят, кто просит, к чему привязано и действия. */
+function adminRequestRowHtml(request) {
+    const typeLabel = ENTITY_REQUEST_TYPE_LABELS[request.entity_type] || request.entity_type;
+    const status = request.status || 'pending';
+    const payload = request.payload || {};
+    const details = [];
+    if (request.parent_id) details.push(`родитель: ${escHtml(String(request.parent_id))}`);
+    if (payload.rsosh_level) details.push(`уровень РСОШ: ${escHtml(String(payload.rsosh_level))}`);
+    if (payload.organizer) details.push(`организатор: ${escHtml(String(payload.organizer))}`);
+    if (payload.official_url) details.push(`сайт: ${escHtml(String(payload.official_url))}`);
+
+    return `<div class="${UI.card} px-8 py-6">
+        <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
+            <div class="flex-1 min-w-0">
+                <p class="text-xs font-semibold uppercase tracking-wide text-ink-faint">${escHtml(typeLabel)}</p>
+                <p class="mt-2 font-bold text-ink leading-snug">${escHtml(request.name || '—')}</p>
+                ${request.description ? `<p class="mt-2 text-sm text-ink-soft leading-relaxed">${escHtml(request.description)}</p>` : ''}
+                ${details.length ? `<p class="mt-2 text-xs text-ink-faint">${details.join(' · ')}</p>` : ''}
+                ${status === 'rejected' && request.rejection_reason
+                    ? `<p class="mt-3 text-sm text-danger">Причина отказа: ${escHtml(request.rejection_reason)}</p>`
+                    : ''}
+                ${status === 'approved' && request.created_entity_id
+                    ? `<p class="mt-3 text-sm text-ink-soft">Создана запись: ${escHtml(String(request.created_entity_id))}</p>`
+                    : ''}
+            </div>
+            <div class="shrink-0 flex flex-wrap lg:flex-col items-start gap-2">
+                ${entityRequestStatusBadge(status)}
+                ${status === 'pending' ? `
+                    <button type="button" data-act="approveRequest" data-id="${escAttr(request.id)}"
+                            class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Одобрить и создать</button>
+                    <button type="button" data-act="rejectRequest" data-id="${escAttr(request.id)}"
+                            class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Отклонить</button>` : ''}
+            </div>
+        </div>
+    </div>`;
+}
+
+function adminRequestsHtml() {
+    const { requests, total, status } = adminRequestsState;
+    const filter = `
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-8">
+        <form class="flex flex-wrap items-end gap-3" onsubmit="return false;">
+            <div>
+                <label class="block text-xs font-semibold text-ink-faint mb-1" for="admin-requests-status">Статус</label>
+                <select id="admin-requests-status" class="${UI.input}" data-request-status>
+                    ${[
+                        { value: '', label: 'Все запросы' },
+                        { value: 'pending', label: 'На рассмотрении' },
+                        { value: 'approved', label: 'Одобренные' },
+                        { value: 'rejected', label: 'Отклонённые' },
+                    ].map(opt => `<option value="${opt.value}"${opt.value === status ? ' selected' : ''}>${opt.label}</option>`).join('')}
+                </select>
+            </div>
+            <button type="button" data-act="searchRequests" class="${UI.btn} ${UI.btnSecondary}">Показать</button>
+        </form>
+        <p class="text-sm text-ink-faint">Всего: ${total}</p>
+    </div>`;
+
+    if (!requests.length) {
+        return filter + emptyHtml('Запросов нет',
+            'Представители университетов пока не просили добавить олимпиаду, сезон или профиль.');
+    }
+
+    return filter + `<div class="space-y-4">${requests.map(adminRequestRowHtml).join('')}</div>
+    ${requests.length < total
+        ? `<div class="mt-8 text-center"><button type="button" data-act="loadMoreRequests"
+                class="${UI.btn} ${UI.btnSecondary}">Показать ещё</button></div>`
+        : ''}`;
+}
+
+async function searchRequests() {
+    const select = document.querySelector('[data-request-status]');
+    const status = select ? select.value : '';
+    try {
+        const res = await api.adminEntityRequests({
+            limit: ADMIN_LIST_PAGE_SIZE,
+            offset: 0,
+            status: status || undefined,
+        });
+        if (!res.ok) { showToast(errorText(res), 'error'); return; }
+        adminRequestsState = {
+            requests: res.data.requests || [],
+            total: res.data.total != null ? res.data.total : 0,
+            status,
+        };
+        renderRequestsBox();
+    } catch {
+        showToast('Сетевая ошибка', 'error');
+    }
+}
+
+async function loadMoreRequests() {
+    try {
+        const res = await api.adminEntityRequests({
+            limit: ADMIN_LIST_PAGE_SIZE,
+            offset: adminRequestsState.requests.length,
+            status: adminRequestsState.status || undefined,
+        });
+        if (!res.ok) { showToast(errorText(res), 'error'); return; }
+        const batch = res.data.requests || [];
+        adminRequestsState.requests = adminRequestsState.requests.concat(batch);
+        if (res.data.total != null) adminRequestsState.total = res.data.total;
+        renderRequestsBox();
+    } catch {
+        showToast('Сетевая ошибка', 'error');
+    }
+}
+
+function renderRequestsBox() {
+    const box = document.getElementById('admin-content');
+    if (box) box.innerHTML = adminRequestsHtml();
+}
+
+/** Отказ требует непустой причины: администратор объясняет, чего не хватает. */
+function openRejectRequestModal(id, onDone) {
+    const overlay = openModal('Отклонить запрос', `
+        <p class="text-sm text-ink-soft leading-relaxed">
+            Опишите, почему запрос отклонён. Причина сохранится в истории и будет
+            видна представителю университета.
+        </p>
+        ${textareaField({ id: 'request-reject-reason', name: 'reason', label: 'Причина отказа', rows: 3, required: true })}
+        <div class="mt-6 flex flex-wrap gap-3">
+            <button type="button" id="request-reject-submit" class="${UI.btn} ${UI.btnDanger}">Отклонить запрос</button>
+            <button type="button" class="${UI.btn} ${UI.btnGhost}" data-close-modal>Отмена</button>
+        </div>`);
+
+    const submit = overlay.querySelector('#request-reject-submit');
+    submit.addEventListener('click', async () => {
+        const reason = (overlay.querySelector('#request-reject-reason').value || '').trim();
+        if (!reason) {
+            showModalError(overlay, { data: { detail: 'Причина отказа обязательна' } });
+            return;
         }
-        const group = groups.get(key);
-        if (link.status === 'CONFIRMED') group.confirmed.push(link);
-        else group.pending.push(link);
-    }
-    return [...groups.values()];
-}
-
-/** Одна связь внутри группы: олимпиада и действия по её статусу. */
-function bviLinkRowHtml(link) {
-    return `<div class="rounded bg-mist px-5 py-4 flex flex-col lg:flex-row lg:items-center gap-4">
-        <div class="flex-1 min-w-0">
-            <p class="text-ink leading-snug">${escHtml(link.olympiad_name || 'Олимпиада')}</p>
-            ${link.olympiad_status === 'ARCHIVED' ? '<p class="mt-1 text-xs text-ink-faint">Олимпиада в архиве</p>' : ''}
-        </div>
-        <div class="flex items-center gap-3 flex-wrap shrink-0">
-            ${bviStatusBadge(link.status)}
-            ${link.status === 'CONFIRMED'
-                ? `<button data-act="revokeBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отозвать подтверждение</button>`
-                : `<button data-act="rejectBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Отклонить</button>
-                   <button data-act="confirmBvi" data-university="${escAttr(link.university_id)}" data-id="${escAttr(link.olympiad_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить</button>`}
-        </div>
-    </div>`;
-}
-
-/** Раскрывающийся раздел одного университета: заявки и подтверждённые отдельно. */
-function bviUniversityGroupHtml(group) {
-    const pendingCount = group.pending.length;
-    const confirmedCount = group.confirmed.length;
-    const open = pendingCount > 0 ? ' open' : '';
-    const badge = (cls, text) => `<span class="${UI.badge} ${cls}">${text}</span>`;
-    return `<details class="${UI.card} px-8 py-6"${open}>
-        <summary class="flex flex-wrap items-center justify-between gap-4 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-            <span class="font-bold text-ink leading-snug">${escHtml(group.university_name)}</span>
-            <span class="flex flex-wrap items-center gap-3 text-sm">
-                ${pendingCount ? badge(UI.badgePending, `Ждут подтверждения: ${pendingCount}`) : ''}
-                ${confirmedCount ? badge(UI.badgeSuccess, `Подтверждено: ${confirmedCount}`) : ''}
-            </span>
-        </summary>
-        <div class="mt-6 space-y-8">
-            ${pendingCount ? `<div>
-                <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
-                    <p class="text-sm font-semibold text-ink-soft">Ожидают подтверждения · ${pendingCount}</p>
-                    <button type="button" data-act="confirmAllBvi" data-university="${escAttr(group.university_id)}" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Подтвердить все</button>
-                </div>
-                <div class="space-y-3">${group.pending.map(bviLinkRowHtml).join('')}</div>
-            </div>` : ''}
-            ${confirmedCount ? `<div>
-                <p class="text-sm font-semibold text-ink-soft mb-4">Подтверждённые · ${confirmedCount}</p>
-                <div class="space-y-3">${group.confirmed.map(bviLinkRowHtml).join('')}</div>
-            </div>` : ''}
-        </div>
-    </details>`;
-}
-
-function adminBviHtml(links) {
-    if (!links.length) {
-        return emptyHtml('Заявок нет', 'Представители университетов ещё не заявляли связи БВИ.');
-    }
-    const groups = groupBviLinksByUniversity(links);
-    return `<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <p class="text-sm text-ink-faint">Университетов: ${groups.length} · связей: ${links.length}</p>
-    </div>
-    <div class="space-y-4">
-        ${groups.map(bviUniversityGroupHtml).join('')}
-    </div>`;
-}
-
-/** Подтвердить разом все ожидающие заявки одного университета. */
-async function confirmAllBviLinks(universityId) {
-    const pending = bviState.links.filter(
-        link => String(link.university_id) === String(universityId) && link.status !== 'CONFIRMED'
-    );
-    if (!pending.length) return;
-    let confirmed = 0;
-    let failed = 0;
-    for (const link of pending) {
+        submit.disabled = true;
         try {
-            const res = await api.moderateBvi(link.university_id, link.olympiad_id, 'confirm');
-            if (res.ok) confirmed += 1; else failed += 1;
+            const res = await api.rejectEntityRequest(id, reason);
+            if (!res.ok) { showModalError(overlay, res); submit.disabled = false; return; }
+            overlay.remove();
+            showToast('Запрос отклонён', 'success');
+            if (onDone) await onDone();
         } catch {
-            failed += 1;
+            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
+            submit.disabled = false;
         }
-    }
-    if (confirmed) {
-        showToast(confirmed === 1 ? 'Связь БВИ подтверждена' : `Подтверждено связей: ${confirmed}`, 'success');
-    }
-    if (failed) showToast(`Не удалось подтвердить: ${failed}`, 'error');
-    await reloadAdmin();
+    });
 }
 
 /* ------------------------------ Импорт РСОШ ------------------------------- */
@@ -991,7 +1040,9 @@ function adminImportsHtml(data) {
                         Статус документа: ${escHtml(item.status)} ·
                         ${escHtml(IMPORT_STATE_LABELS[state] || state)}
                         ${state === 'processing' && stage ? ` · этап: ${escHtml(stage)}` : ''}
-                        ${summary.total ? ` · найдено: ${summary.total} (новых: ${summary.new || 0}, объединений: ${summary.merge || 0}, на проверку: ${summary.review || 0})` : ''}
+                        ${summary.mode === 'official_list'
+                            ? ` · официальный перечень: строк ${summary.rows || 0}, олимпиад ${summary.olympiads || 0}, новых ${summary.create || 0}, в каталоге ${summary.use || 0}`
+                            : (summary.total ? ` · найдено: ${summary.total} (новых: ${summary.new || 0}, объединений: ${summary.merge || 0}, на проверку: ${summary.review || 0})` : '')}
                     </p>
                     ${item.error ? `<p class="mt-3 text-sm text-danger">${escHtml(item.error)}</p>` : ''}
                 </div>
@@ -1268,6 +1319,461 @@ function openAddImportCandidateModal(importId, onDone) {
     });
 }
 
+/* ---------------------- Официальный перечень РСОШ ------------------------- */
+
+const PLAN_MATCH_LABELS = {
+    create: 'Новая олимпиада',
+    use: 'Есть в каталоге',
+    review: 'Нужно выбрать',
+    skip: 'Пропустить',
+};
+
+const PLAN_LEVEL_LABELS = [
+    { value: '', label: '—' },
+    { value: '1', label: 'I' },
+    { value: '2', label: 'II' },
+    { value: '3', label: 'III' },
+];
+
+const HISTORY_ACTION_LABELS = {
+    olympiad_created: 'Олимпиада создана',
+    olympiad_restored: 'Олимпиада возвращена из архива',
+    olympiad_renamed: 'Олимпиада переименована',
+    olympiad_absent: 'Олимпиада отсутствует в перечне',
+    season_created: 'Создан сезон',
+    season_restored: 'Сезон возвращён из архива',
+    profile_created: 'Создан профиль',
+    profile_absent: 'Профиль отсутствует в перечне',
+    profile_level_changed: 'Изменён уровень профиля',
+};
+
+function planActionBadge(action) {
+    const tones = {
+        create: 'bg-brand/10 text-brand-strong',
+        use: 'bg-mist text-ink-soft',
+        review: 'bg-amber-100 text-amber-800',
+        skip: 'bg-danger/10 text-danger',
+    };
+    const tone = tones[action] || 'bg-mist text-ink-soft';
+    return `<span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold ${tone}">${escHtml(PLAN_MATCH_LABELS[action] || action || '—')}</span>`;
+}
+
+function planMatchOptions(item) {
+    const match = item.match || {};
+    const current = match.olympiad_id || '';
+    const candidates = (match.candidates || []).slice();
+    const options = [
+        `<option value="create" ${match.action === 'create' ? 'selected' : ''}>Создать новую</option>`,
+        `<option value="skip" ${match.action === 'skip' ? 'selected' : ''}>Пропустить</option>`,
+    ];
+    // Пока совпадение не выбрано, «Создать новую» нельзя показывать выбранной:
+    // иначе сохранение формы молча превратит спорную строку в новую запись.
+    if (match.action === 'review') {
+        options.unshift(
+            '<option value="" selected disabled>— нужно выбрать —</option>'
+        );
+    }
+    for (const candidate of candidates) {
+        options.push(
+            `<option value="use:${escAttr(candidate.olympiad_id)}" ${match.action === 'use' && current === candidate.olympiad_id ? 'selected' : ''}>В каталоге: ${escHtml(candidate.name)} (${Math.round((candidate.score || 0) * 100)}%)</option>`
+        );
+    }
+    if (match.action === 'use' && current && !candidates.some(c => c.olympiad_id === current)) {
+        options.push(
+            `<option value="use:${escAttr(current)}" selected>Текущая запись каталога</option>`
+        );
+    }
+    return options.join('');
+}
+
+function planOlympiadHtml(item, index) {
+    const match = item.match || {};
+    const action = match.action || 'create';
+    const profiles = item.profiles || [];
+    const createCount = profiles.filter(p => (p.match || {}).action === 'create').length;
+    const updateCount = profiles.filter(p => (p.match || {}).action === 'update').length;
+    const rows = profiles.map(profile => {
+        const pmatch = profile.match || {};
+        const level = profile.level || '';
+        const skipped = pmatch.action === 'skip';
+        return `
+        <tr class="${skipped ? 'opacity-50' : ''}" data-profile data-olympiad="${escAttr(item.name_norm)}" data-row="${escAttr(String(profile.source_row))}">
+            <td class="px-2 py-1 align-top">
+                <input class="${UI.input} !py-1 text-sm w-full" data-field="profile-name"
+                       value="${escAttr(profile.name || '')}" aria-label="Название профиля">
+            </td>
+            <td class="px-2 py-1 align-top w-24">
+                <select class="${UI.input} !py-1 text-sm" data-field="profile-level" aria-label="Уровень профиля">
+                    ${PLAN_LEVEL_LABELS.map(o => `<option value="${o.value}" ${o.value === level ? 'selected' : ''}>${o.label}</option>`).join('')}
+                </select>
+                ${profile.previous_level ? `<p class="mt-1 text-xs text-ink-faint">было ${escHtml(PLAN_LEVEL_LABELS.find(o => o.value === profile.previous_level)?.label || profile.previous_level)}</p>` : ''}
+            </td>
+            <td class="px-2 py-1 align-top w-20 text-center">
+                <input type="checkbox" data-field="profile-skip" ${skipped ? 'checked' : ''} aria-label="Пропустить профиль">
+            </td>
+            <td class="px-2 py-1 align-top text-xs text-ink-faint">
+                стр. ${escHtml(String(profile.page || '—'))}
+                ${(profile.issues || []).length ? `<span class="block text-danger">${escHtml(profile.issues[0])}</span>` : ''}
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <details class="${UI.card} px-4 py-3" data-olympiad="${escAttr(item.name_norm)}" ${(item.issues || []).length || action === 'review' ? 'open' : ''}>
+        <summary class="cursor-pointer flex flex-wrap items-center gap-3">
+            <span class="font-semibold text-ink">${escHtml(item.number ? `№ ${item.number} · ` : '')}${escHtml(item.name)}</span>
+            ${planActionBadge(action)}
+            <span class="text-xs text-ink-faint">
+                профилей: ${profiles.length}${createCount ? ` · новых: ${createCount}` : ''}${updateCount ? ` · изменится: ${updateCount}` : ''}
+            </span>
+        </summary>
+        <div class="mt-4 grid gap-3 md:grid-cols-2">
+            <label class="block">
+                <span class="text-xs text-ink-faint">Название</span>
+                <input class="${UI.input} !py-1 text-sm w-full" data-field="olympiad-name"
+                       value="${escAttr(item.name)}" aria-label="Название олимпиады">
+            </label>
+            <label class="block">
+                <span class="text-xs text-ink-faint">Сопоставление с каталогом</span>
+                <select class="${UI.input} !py-1 text-sm w-full" data-field="olympiad-match" aria-label="Сопоставление с каталогом">
+                    ${planMatchOptions(item)}
+                </select>
+            </label>
+            <label class="block md:col-span-2">
+                <span class="text-xs text-ink-faint">Организатор</span>
+                <textarea class="${UI.input} !py-1 text-sm w-full" rows="2" data-field="olympiad-organizer" aria-label="Организатор">${escHtml(item.organizer || '')}</textarea>
+            </label>
+        </div>
+        ${(item.issues || []).length ? `<ul class="mt-3 text-xs text-danger list-disc pl-5 space-y-1">${item.issues.map(issue => `<li>${escHtml(issue)}</li>`).join('')}</ul>` : ''}
+        <div class="mt-4 overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-xs text-ink-faint">
+                        <th class="px-2 py-1 font-semibold">Профиль</th>
+                        <th class="px-2 py-1 font-semibold">Уровень</th>
+                        <th class="px-2 py-1 font-semibold text-center">Пропуск</th>
+                        <th class="px-2 py-1 font-semibold">Источник</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </details>`;
+}
+
+function planSummaryHtml(plan) {
+    const summary = plan.summary || {};
+    const chips = [
+        ['Строк', summary.profiles],
+        ['Олимпиад', summary.olympiads],
+        ['Новых', summary.create],
+        ['В каталоге', summary.use],
+        ['На проверку', summary.review],
+        ['Новых профилей', summary.profiles_create],
+        ['Отсутствуют', summary.missing],
+    ].filter(([, value]) => value !== undefined && value !== null && value !== 0);
+    return chips.map(([label, value]) => `
+        <span class="inline-flex items-baseline gap-1 rounded bg-mist px-3 py-1 text-sm">
+            <span class="text-ink-faint">${escHtml(label)}:</span>
+            <span class="font-semibold text-ink">${escHtml(String(value))}</span>
+        </span>`).join('');
+}
+
+function planIssuesHtml(plan) {
+    const warnings = plan.warnings || [];
+    const errors = plan.errors || [];
+    if (!warnings.length && !errors.length) return '';
+    return `
+    <div class="space-y-3">
+        ${errors.length ? `<div class="rounded border border-danger/30 bg-danger/5 px-5 py-4">
+            <p class="font-semibold text-danger mb-2">Нужно исправить до применения</p>
+            <ul class="text-sm text-ink space-y-1 list-disc pl-5">${errors.map(e => `<li>${escHtml(e)}</li>`).join('')}</ul>
+        </div>` : ''}
+        ${warnings.length ? `<div class="rounded bg-mist px-5 py-4">
+            <p class="font-semibold text-ink mb-2">Предупреждения</p>
+            <ul class="text-sm text-ink-soft space-y-1 list-disc pl-5">${warnings.map(w => `<li>${escHtml(w)}</li>`).join('')}</ul>
+        </div>` : ''}
+    </div>`;
+}
+
+function planMissingHtml(plan) {
+    const missing = plan.missing || [];
+    if (!missing.length) return '';
+    return `
+    <section class="${UI.card} px-6 py-5">
+        <h2 class="text-lg font-extrabold">Нет в документе</h2>
+        <p class="mt-2 text-sm text-ink-soft leading-relaxed">
+            Эти олимпиады есть в каталоге за ${escHtml(plan.season_label || 'этот сезон')}, но не найдены в перечне.
+            При применении их можно пометить отсутствующими: профили потеряют уровень,
+            а олимпиады уйдут в архив. Записи не удаляются.
+        </p>
+        <ul class="mt-3 text-sm space-y-1">${missing.map(item => `<li>${escHtml(item.name)}</li>`).join('')}</ul>
+        <label class="mt-4 inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" id="apply-missing" ${plan.missing_allowed ? '' : 'disabled'}>
+            <span>Зафиксировать отсутствие при применении</span>
+        </label>
+        ${plan.missing_allowed ? '' : `<p class="mt-2 text-xs text-danger">Перечень прочитан не полностью: фиксировать отсутствие нельзя.</p>`}
+    </section>`;
+}
+
+async function renderOfficialList(importId, imp) {
+    const page = document.getElementById('page');
+    const planRes = await api.importPlan(importId);
+    if (!planRes.ok) {
+        page.innerHTML = `
+        <div class="max-w-content mx-auto pt-4 pb-12">
+            ${alertHtml(errorText(planRes), 'error')}
+            <a href="#/admin/imports" class="${UI.btn} ${UI.btnGhost}">К списку импортов</a>
+        </div>`;
+        return;
+    }
+    const plan = planRes.data.plan;
+    const applied = Boolean(imp.applied_at) || imp.state === 'approved';
+    const state = { tab: 'plan', offset: 0, search: '', sheet: 'list', table: null, history: null };
+
+    function headerHtml() {
+        return `
+        <a href="#/admin/imports" class="text-sm text-ink-soft hover:text-ink">← К списку импортов</a>
+        <div class="mt-4 flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-extrabold tracking-tight">Официальный перечень</h1>
+                <p class="mt-2 text-sm text-ink-soft">
+                    ${escHtml(plan.title || 'Перечень олимпиад школьников')}
+                    ${plan.season_label ? ` · учебный год: ${escHtml(plan.season_label)}` : ''}
+                    · ${escHtml(IMPORT_STATE_LABELS[imp.state] || imp.state || '')}
+                </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="${api.docFileUrl(importId)}" target="_blank" rel="noopener" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">PDF</a>
+                ${imp.table && imp.table.doc_id ? `<a href="${api.docFileUrl(imp.table.doc_id)}" target="_blank" rel="noopener" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">XLSX</a>` : ''}
+                ${imp.html && imp.html.doc_id ? `<a href="${api.docFileUrl(imp.html.doc_id)}" target="_blank" rel="noopener" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">HTML-таблица</a>` : ''}
+            </div>
+        </div>
+        <div class="mt-5 flex flex-wrap gap-2">${planSummaryHtml(plan)}</div>`;
+    }
+
+    function tabsHtml() {
+        const tabs = [
+            ['plan', 'План импорта'],
+            ['table', 'Таблица'],
+            ['history', 'История'],
+        ];
+        return `<div class="mt-8 flex gap-2 border-b border-ink/10">
+            ${tabs.map(([key, label]) => `<button type="button" data-tab="${key}"
+                class="px-4 py-2 text-sm font-semibold ${state.tab === key ? 'text-brand-strong border-b-2 border-brand' : 'text-ink-soft hover:text-ink'}">${escHtml(label)}</button>`).join('')}
+        </div>`;
+    }
+
+    function planHtml() {
+        return `
+        <div class="mt-6 space-y-4">
+            ${planIssuesHtml(plan)}
+            ${(plan.olympiads || []).map(planOlympiadHtml).join('')}
+            ${planMissingHtml(plan)}
+        </div>
+        ${applied ? '' : `<div class="sticky bottom-4 mt-8 flex flex-wrap items-center justify-end gap-3 rounded bg-white shadow-elev-2 px-5 py-4">
+            <button type="button" data-list-act="savePlan" class="${UI.btn} ${UI.btnSecondary}">Сохранить правки</button>
+            <button type="button" data-list-act="applyPlan" ${(plan.errors || []).length ? 'disabled' : ''} class="${UI.btn} ${UI.btnPrimary}">Применить импорт</button>
+        </div>`}`;
+    }
+
+    function tableHtml() {
+        const table = state.table;
+        if (!table) return `<div class="mt-6">${loadingHtml('Загружаем таблицу…')}</div>`;
+        const rows = table.rows || [];
+        return `
+        <div class="mt-6 flex flex-wrap items-end gap-3">
+            <label class="text-sm">
+                <span class="sr-only">Лист</span>
+                <select id="table-sheet" class="${UI.input} !py-2 text-sm">
+                    <option value="list" ${state.sheet === 'list' ? 'selected' : ''}>Перечень</option>
+                    <option value="summary" ${state.sheet === 'summary' ? 'selected' : ''}>Сводка</option>
+                </select>
+            </label>
+            <label class="text-sm flex-1 min-w-48">
+                <span class="sr-only">Поиск по таблице</span>
+                <input id="table-search" type="search" value="${escAttr(state.search)}" placeholder="Поиск по таблице" class="${UI.input} !py-2 text-sm w-full">
+            </label>
+            <button type="button" data-list-act="tableSearch" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Найти</button>
+        </div>
+        <p class="mt-3 text-sm text-ink-faint">
+            ${escHtml(table.title || '')} · показано ${rows.length} из ${table.total}
+        </p>
+        <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="bg-brand text-white">${(table.headers || []).map(h => `<th class="px-2 py-2 text-left font-semibold">${escHtml(h)}</th>`).join('')}</tr></thead>
+                <tbody>${rows.map(row => `<tr class="border-b border-ink/5">${row.map((cell, i) => `<td class="px-2 py-1 align-top ${i === 0 || i === row.length - 1 ? 'text-center whitespace-nowrap' : ''}">${escHtml(String(cell ?? '')).replace(/\n/g, '<br>')}</td>`).join('')}</tr>`).join('')}</tbody>
+            </table>
+        </div>
+        <div class="mt-4 flex items-center justify-between gap-3">
+            <button type="button" data-list-act="tablePrev" ${state.offset <= 0 ? 'disabled' : ''} class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Назад</button>
+            <span class="text-sm text-ink-faint">${state.offset + 1}–${Math.min(state.offset + (table.limit || 50), table.total)} из ${table.total}</span>
+            <button type="button" data-list-act="tableNext" ${state.offset + (table.limit || 50) >= table.total ? 'disabled' : ''} class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Вперёд</button>
+        </div>`;
+    }
+
+    function historyHtml() {
+        const history = state.history;
+        if (!history) return `<div class="mt-6">${loadingHtml('Загружаем историю…')}</div>`;
+        if (!history.length) {
+            return `<p class="mt-6 text-sm text-ink-soft">Изменений пока нет: импорт ещё не применён.</p>`;
+        }
+        return `<ul class="mt-6 space-y-2">${history.map(entry => `
+            <li class="${UI.card} px-5 py-3 text-sm">
+                <span class="font-semibold">${escHtml(HISTORY_ACTION_LABELS[entry.action] || entry.action)}</span>
+                ${entry.name ? ` · ${escHtml(entry.name)}` : ''}
+                ${entry.profile ? ` · профиль «${escHtml(entry.profile)}»` : ''}
+                ${entry.previous_level || entry.level ? ` · уровень ${escHtml(entry.previous_level || '—')} → ${escHtml(entry.level || '—')}` : ''}
+                <span class="block mt-1 text-xs text-ink-faint">${escHtml(entry.at || '')}</span>
+            </li>`).join('')}</ul>`;
+    }
+
+    function render() {
+        page.innerHTML = `
+        <section class="pt-4 pb-24 max-w-content mx-auto">
+            ${headerHtml()}
+            ${tabsHtml()}
+            ${state.tab === 'plan' ? planHtml() : state.tab === 'table' ? tableHtml() : historyHtml()}
+        </section>`;
+        bind();
+    }
+
+    function bind() {
+        page.querySelectorAll('[data-tab]').forEach(button => {
+            button.addEventListener('click', () => {
+                state.tab = button.dataset.tab;
+                render();
+                if (state.tab === 'table' && !state.table) loadTable();
+                if (state.tab === 'history' && !state.history) loadHistory();
+            });
+        });
+        page.querySelectorAll('[data-list-act]').forEach(button => {
+            button.addEventListener('click', () => {
+                const action = button.dataset.listAct;
+                if (action === 'savePlan') savePlan();
+                if (action === 'applyPlan') applyPlan();
+                if (action === 'tableSearch') {
+                    state.search = (document.getElementById('table-search') || {}).value || '';
+                    state.offset = 0;
+                    loadTable();
+                }
+                if (action === 'tablePrev') {
+                    state.offset = Math.max(0, state.offset - 50);
+                    loadTable();
+                }
+                if (action === 'tableNext') {
+                    state.offset += 50;
+                    loadTable();
+                }
+            });
+        });
+        const sheet = document.getElementById('table-sheet');
+        if (sheet) sheet.addEventListener('change', () => {
+            state.sheet = sheet.value;
+            state.offset = 0;
+            loadTable();
+        });
+    }
+
+    async function loadTable() {
+        const res = await api.importTable(importId, {
+            sheet: state.sheet,
+            offset: state.offset,
+            search: state.search,
+            limit: 50,
+        });
+        if (!res.ok) { showToast(errorText(res), 'error'); return; }
+        state.table = res.data;
+        render();
+    }
+
+    async function loadHistory() {
+        const res = await api.importHistory(importId);
+        if (!res.ok) { showToast(errorText(res), 'error'); return; }
+        state.history = res.data.history || [];
+        render();
+    }
+
+    function collectPlan() {
+        const olympiads = [];
+        const profiles = [];
+        page.querySelectorAll('[data-olympiad]').forEach(card => {
+            if (!card.querySelector('[data-field="olympiad-name"]')) return;
+            const norm = card.dataset.olympiad;
+            const matchValue = card.querySelector('[data-field="olympiad-match"]').value;
+            const change = {
+                name_norm: norm,
+                name: card.querySelector('[data-field="olympiad-name"]').value.trim(),
+                organizer: card.querySelector('[data-field="olympiad-organizer"]').value.trim(),
+            };
+            if (matchValue.startsWith('use:')) {
+                change.action = 'use';
+                change.olympiad_id = matchValue.slice(4);
+            } else if (matchValue) {
+                change.action = matchValue;
+            }
+            // Пустое значение — «нужно выбрать»: действие не отправляется, и
+            // сервер оставляет строку в состоянии review (применить нельзя).
+            olympiads.push(change);
+        });
+        page.querySelectorAll('[data-profile]').forEach(row => {
+            const skip = row.querySelector('[data-field="profile-skip"]').checked;
+            profiles.push({
+                olympiad: row.dataset.olympiad,
+                source_row: Number(row.dataset.row),
+                name: row.querySelector('[data-field="profile-name"]').value.trim(),
+                level: row.querySelector('[data-field="profile-level"]').value,
+                action: skip ? 'skip' : undefined,
+            });
+        });
+        return { olympiads, profiles };
+    }
+
+    async function savePlan() {
+        const button = page.querySelector('[data-list-act="savePlan"]');
+        if (button) button.disabled = true;
+        try {
+            const res = await api.updateImportPlan(importId, collectPlan());
+            if (!res.ok) { showToast(errorText(res), 'error'); return; }
+            showToast('План сохранён', 'success');
+            await renderOfficialList(importId, (res.data.import) || imp);
+            return;
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    async function applyPlan() {
+        const missingBox = document.getElementById('apply-missing');
+        const markMissing = Boolean(missingBox && missingBox.checked);
+        const ok = window.confirm(
+            'Применить перечень к каталогу? Олимпиады и профили будут созданы или обновлены, '
+            + 'а документ получит статус «Применён». Повторно применить этот же перечень нельзя.'
+        );
+        if (!ok) return;
+        const button = page.querySelector('[data-list-act="applyPlan"]');
+        if (button) button.disabled = true;
+        try {
+            // Правки из формы уходят до применения: план на сервере — это то,
+            // что действительно попадёт в каталог.
+            const saved = await api.updateImportPlan(importId, collectPlan());
+            if (!saved.ok) { showToast(errorText(saved), 'error'); return; }
+            const res = await api.applyImportPlan(importId, { mark_missing: markMissing });
+            if (!res.ok) { showToast(errorText(res), 'error'); return; }
+            const result = res.data.result || {};
+            showToast(
+                `Применено: создано ${result.created || 0}, использовано ${result.used || 0}, профилей ${result.profiles_created || 0}`,
+                'success'
+            );
+            await renderImportReview(importId);
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
+    render();
+}
+
 async function renderImportReview(importId) {
     const page = document.getElementById('page');
     page.innerHTML = `<section class="pt-4 pb-32">${loadingHtml('Загружаем результаты импорта…')}</section>`;
@@ -1279,6 +1785,12 @@ async function renderImportReview(importId) {
         preview = await api.importPreview(importId);
         if (!preview.ok) throw new Error(errorText(preview));
         data = preview.data;
+        // Официальный перечень проверяется не карточками кандидатов, а планом
+        // импорта: у него своя страница с таблицей, сопоставлением и сезоном.
+        if ((data.import || {}).mode === 'official_list') {
+            await renderOfficialList(importId, data.import || {});
+            return;
+        }
         const list = await api.adminOlympiads();
         if (list.ok) {
             for (const o of (list.data.olympiads || [])) olympiadMap.set(o.id, o);
@@ -1927,12 +2439,17 @@ function adminBenefitsHtml() {
         <form class="flex flex-wrap items-end gap-3" onsubmit="return false;">
             <label class="sr-only" for="admin-benefits-search">Поиск по льготам</label>
             <input id="admin-benefits-search" type="search" value="${escAttr(adminBenefitsState.search)}"
-                   placeholder="Предмет, условие, требования"
+                   placeholder="Олимпиада, вуз, профиль, сезон"
                    class="${UI.input} sm:!w-72 !py-2 text-sm">
             <label class="sr-only" for="admin-benefits-status">Статус проверки</label>
             <select id="admin-benefits-status" data-benefit-status class="${UI.input} sm:!w-56 !py-2 text-sm">
                 ${statusOptions.map(o => `<option value="${escAttr(o.value)}" ${o.value === adminBenefitsState.status ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
             </select>
+            <label class="inline-flex items-center gap-2 text-sm text-ink-soft pb-2">
+                <input type="checkbox" data-benefit-needs-review class="w-4 h-4"
+                       ${adminBenefitsState.needsReview ? 'checked' : ''}>
+                Только требующие уточнения
+            </label>
             <button type="button" data-act="searchBenefits" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Найти</button>
         </form>
         <div class="flex items-center gap-3">
@@ -1940,14 +2457,16 @@ function adminBenefitsHtml() {
             ${rules.length < total
                 ? `<button type="button" data-act="loadMoreBenefits" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Показать ещё</button>`
                 : ''}
+            <button type="button" data-act="newBenefit" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Добавить правило</button>
         </div>
     </div>`;
 
     if (!rules.length) {
-        return toolbar + (adminBenefitsState.search || adminBenefitsState.status
+        return toolbar + (adminBenefitsState.search || adminBenefitsState.status || adminBenefitsState.needsReview
             ? emptyHtml('Ничего не найдено', 'По этим условиям правил льгот нет.')
             : emptyHtml('Правил льгот нет',
-                'Представители университетов добавляют правила в своём кабинете.'));
+                'Представители добавляют правила в своём кабинете, администратор — здесь.',
+                `<button data-act="newBenefit" class="${UI.btn} ${UI.btnPrimary}">Добавить правило</button>`));
     }
 
     return toolbar + `
@@ -1955,36 +2474,45 @@ function adminBenefitsHtml() {
         ${rules.map(item => {
             const university = adminEntityName(adminBenefitsState.universities, item.university_id, 'университет не найден');
             const olympiad = adminEntityName(adminBenefitsState.olympiads, item.olympiad_id, 'олимпиада не найдена');
-            const canVerify = !!(item.doc_id && item.source_url);
-            const missing = [
-                !item.doc_id ? 'документ-основание' : '',
-                !item.source_url ? 'ссылка на источник' : '',
-            ].filter(Boolean).join(' и ');
-            const typeLabel = (typeof BENEFIT_TYPE_LABELS !== 'undefined'
-                ? BENEFIT_TYPE_LABELS[item.benefit_type] : null) || item.benefit_type;
+            const canVerify = !!item.doc_id;
+            const typeLabel = benefitTypeLabel(item.benefit_type);
+            const result = benefitResultText(item);
+            const context = [
+                item.season_label ? `сезон ${item.season_label}` : '',
+                item.profile_name
+                    ? `${item.profile_name}${item.profile_rsosh_level ? ` · уровень РСОШ ${item.profile_rsosh_level}` : ''}`
+                    : '',
+            ].filter(Boolean).join(' · ');
+            const ege = benefitEgeLine(item);
             return `
-        <div class="${UI.card} px-8 py-6 flex flex-col lg:flex-row lg:items-center gap-5">
+        <div class="${UI.card} px-8 py-6 flex flex-col lg:flex-row lg:items-start gap-5">
             <div class="flex-1 min-w-0">
-                <p class="font-bold text-ink leading-snug">${escHtml(typeLabel || 'Правило льготы')}${item.subject ? ` · ${escHtml(item.subject)}` : ''}</p>
+                <p class="font-bold text-ink leading-snug">
+                    ${escHtml(typeLabel || 'Правило льготы')}${result ? ` · ${escHtml(result)}` : ''}
+                </p>
                 <p class="mt-2 text-sm text-ink-soft">${escHtml(university)} · ${escHtml(olympiad)}</p>
-                <p class="mt-2 text-sm text-ink-soft">Условие: ${escHtml(item.required_result || 'не указано')}</p>
-                ${item.additional_requirements ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(item.additional_requirements)}</p>` : ''}
+                ${context ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(context)}</p>` : '<p class="mt-2 text-sm text-danger">Сезон и профиль не указаны</p>'}
+                ${ege ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(ege)}</p>` : ''}
                 <p class="mt-3 text-xs text-ink-faint flex flex-wrap items-center gap-x-4 gap-y-2">
                     ${item.doc_id
-                        ? `<a href="${api.docFileUrl(item.doc_id)}" target="_blank" rel="noopener" class="underline">Документ-основание</a>`
+                        ? `<a href="${api.docFileUrl(item.doc_id)}" target="_blank" rel="noopener" class="underline">${escHtml((item.doc && item.doc.name) || 'Документ-основание')}</a>`
                         : '<span class="text-danger">Документ-основание не приложен</span>'}
-                    ${item.source_url
-                        ? `<a href="${escAttr(item.source_url)}" target="_blank" rel="noopener noreferrer" class="underline">Ссылка на источник</a>`
-                        : '<span class="text-danger">Ссылка на источник не указана</span>'}
+                    ${item.ege_requirement
+                        ? '<span>Требование ЕГЭ заполнено</span>'
+                        : '<span>Без требования ЕГЭ</span>'}
                 </p>
                 ${item.rejection_reason ? `<p class="mt-2 text-xs text-ink-faint">Причина отклонения: ${escHtml(item.rejection_reason)}</p>` : ''}
             </div>
             <div class="flex items-center gap-3 flex-wrap shrink-0">
                 ${benefitStatusBadge(item.verification_status)}
+                ${item.needs_review
+                    ? `<span class="${UI.badge} ${UI.badgeDanger}">Требует уточнения</span>` : ''}
+                <button data-act="editBenefit" data-id="${escAttr(item.id)}"
+                        class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Изменить</button>
                 ${item.verification_status !== 'verified'
                     ? `<button data-act="verifyBenefit" data-id="${escAttr(item.id)}"
                                class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}"
-                               ${canVerify ? '' : `disabled title="Для подтверждения нужны ${escAttr(missing)}"`}>Подтвердить</button>` : ''}
+                               ${canVerify ? '' : 'disabled title="Для подтверждения нужен документ-основание университета"'}>Подтвердить</button>` : ''}
                 ${item.verification_status !== 'rejected'
                     ? `<button data-act="rejectBenefit" data-id="${escAttr(item.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Отклонить</button>` : ''}
             </div>
@@ -1998,33 +2526,25 @@ function adminSeasonsHtml() {
     const total = adminSeasonsState.total > seasons.length ? adminSeasonsState.total : seasons.length;
     if (!seasons.length) {
         return emptyHtml('Сезонов нет',
-            'Сезон задаёт год и сроки проведения олимпиады. Создайте первый сезон, '
-            + 'чтобы привязывать к нему правила льгот.',
-            `<button data-act="newSeason" class="${UI.btn} ${UI.btnPrimary}">Создать сезон</button>`);
+            'Сезон добавляется в окне правки олимпиады: откройте олимпиаду в '
+            + 'каталоге и добавьте метку года. Профили и уровни задаются внутри сезона.',
+            `<a href="#/admin/olympiads" class="${UI.btn} ${UI.btnPrimary}">Открыть олимпиады</a>`);
     }
     return `
     <div class="flex flex-wrap items-center justify-between gap-6 mb-10">
         <p class="text-sm text-ink-faint">Сезонов: ${total}</p>
-        <button data-act="newSeason" class="${UI.btn} ${UI.btnPrimary}">Создать сезон</button>
+        <a href="#/admin/olympiads" class="${UI.btn} ${UI.btnSecondary}">Добавить через олимпиаду</a>
     </div>
     <div class="space-y-4">${seasons.map(item => {
         const olympiad = adminEntityName(adminSeasonsState.olympiads, item.olympiad_id, 'олимпиада не найдена');
-        const dates = [
-            item.registration_start || item.registration_end
-                ? `Регистрация: ${formatDate(item.registration_start)} — ${formatDate(item.registration_end)}`
-                : '',
-            item.event_start || item.event_end
-                ? `Проведение: ${formatDate(item.event_start)} — ${formatDate(item.event_end)}`
-                : '',
-        ].filter(Boolean);
         return `
         <div class="${UI.card} px-8 py-6 flex flex-col lg:flex-row lg:items-center gap-5">
             <div class="flex-1 min-w-0">
                 <p class="font-bold text-ink">${escHtml(item.season_label)}</p>
-                <p class="mt-2 text-sm text-ink-soft">${escHtml(olympiad)} · уровень РСОШ: ${escHtml(item.rsosh_level || '—')}</p>
-                ${dates.length ? `<p class="mt-2 text-sm text-ink-soft">${dates.map(escHtml).join(' · ')}</p>` : ''}
-                ${item.availability && item.availability !== 'unknown'
-                    ? `<p class="mt-2 text-sm text-ink-soft">Доступность: ${escHtml(item.availability)}</p>` : ''}
+                <p class="mt-2 text-sm text-ink-soft">${escHtml(olympiad)}</p>
+                ${item.source_doc_id
+                    ? `<p class="mt-2 text-xs text-ink-faint">Документ РСОШ: ${escHtml(String(item.source_doc_id))}</p>`
+                    : ''}
                 ${item.is_archived ? `<div class="mt-2"><span class="${UI.badge} ${UI.badgeNeutral}">В архиве</span></div>` : ''}
             </div>
             <div class="flex items-center gap-3 flex-wrap shrink-0">
@@ -2043,8 +2563,8 @@ function adminProgramsHtml() {
     const total = adminProgramsState.total > programs.length ? adminProgramsState.total : programs.length;
     if (!programs.length) {
         return emptyHtml('Программ нет',
-            'Программа — направление подготовки, к которому привязываются правила '
-            + 'льгот. Создайте первую программу.',
+            'Программа — самостоятельная запись справочника вуза: направление '
+            + 'подготовки, код и описание. Создайте первую программу.',
             `<button data-act="newProgram" class="${UI.btn} ${UI.btnPrimary}">Создать программу</button>`);
     }
     return `
@@ -2094,6 +2614,8 @@ function adminDocsHtml() {
         { value: 'RSOSH_LIST', label: 'Перечень РСОШ' },
         { value: 'UNIVERSITY_ORDER', label: 'Приказ университета' },
         { value: 'OTHER', label: 'Другой документ' },
+        { value: 'RSOSH_TABLE', label: 'Таблица перечня (XLSX)' },
+        { value: 'RSOSH_HTML', label: 'Таблица перечня (HTML)' },
     ];
     const statuses = [
         { value: '', label: 'Все статусы' },
@@ -2129,20 +2651,35 @@ function adminDocsHtml() {
             ? emptyHtml('Документов не найдено', 'Измените запрос или сбросьте фильтры.')
             : emptyHtml('Документов нет', 'Документы загружают администратор и представители вузов.'));
     }
-    return filter + `<div class="space-y-4">${docs.map(item => `
+    return filter + `<div class="space-y-4">${docs.map(item => {
+        const meta = item.metadata || {};
+        const rsosh = meta.rsosh || {};
+        const plan = rsosh.plan || {};
+        const season = rsosh.season_label || plan.season_label || '';
+        const author = rsosh.author || item.uploaded_by || '';
+        const created = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ru-RU') : '';
+        const isHtml = item.type === 'RSOSH_HTML';
+        return `
         <div class="${UI.card} px-8 py-6 flex flex-col lg:flex-row lg:items-center gap-5">
             <div class="flex-1 min-w-0">
                 <p class="font-bold text-ink">${escHtml(item.name)}</p>
                 <p class="mt-2 text-sm text-ink-soft">
                     ${escHtml(docTypeLabel(item.type))} ·
                     ${escHtml(ADMIN_DOC_STATUS_LABELS[item.status] || item.status)}
+                    ${season ? ` · учебный год: ${escHtml(season)}` : ''}
                 </p>
-                <p class="mt-1 text-xs text-ink-faint">${item.university_id ? 'Документ университета' : 'Общий источник'}</p>
+                <p class="mt-1 text-xs text-ink-faint">
+                    ${item.university_id ? 'Документ университета' : 'Общий источник'}
+                    ${created ? ` · загружен ${escHtml(created)}` : ''}
+                    ${author ? ` · автор: ${escHtml(String(author).slice(0, 8))}` : ''}
+                </p>
             </div>
-            <div class="shrink-0">
+            <div class="shrink-0 flex flex-wrap gap-2">
+                ${isHtml ? `<a href="${api.docFileUrl(item.id)}" target="_blank" rel="noopener" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Открыть таблицу</a>` : ''}
                 <a href="${api.docFileUrl(item.id)}" target="_blank" rel="noopener" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Скачать</a>
             </div>
-        </div>`).join('')}</div>`;
+        </div>`;
+    }).join('')}</div>`;
 }
 
 async function searchDocs() {
@@ -2194,146 +2731,6 @@ async function loadMoreDocs() {
     }
 }
 
-/* ------------------------------- Источники -------------------------------- */
-
-const SOURCE_KIND_LABELS = {
-    RSOSH_LIST: 'Перечень РСОШ',
-    UNIVERSITY_ORDER: 'Приказ университета',
-    WEBSITE: 'Страница на сайте',
-    OTHER: 'Другой источник',
-};
-
-function adminSourcesHtml() {
-    const { sources, total, universities } = adminSourcesState;
-    const universityNames = new Map((universities || []).map(item => [String(item.id), item]));
-    const toolbar = `
-    <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
-        <p class="text-sm text-ink-faint">Источников: ${total}</p>
-        <button type="button" data-act="newSource" class="${UI.btn} ${UI.btnPrimary}">Добавить источник</button>
-    </div>`;
-
-    if (!sources.length) {
-        return toolbar + emptyHtml('Источников нет',
-            'Источник — ссылка на документ или страницу, откуда взято правило льготы. '
-            + 'Один источник можно использовать в нескольких правилах.');
-    }
-
-    return toolbar + `<div class="space-y-4">${sources.map(item => {
-        const university = item.university_id ? universityNames.get(String(item.university_id)) : null;
-        return `
-        <div class="${UI.card} px-8 py-6 flex flex-col lg:flex-row lg:items-center gap-5">
-            <div class="flex-1 min-w-0">
-                <p class="font-bold text-ink leading-snug">${escHtml(item.name)}</p>
-                <p class="mt-2 text-sm text-ink-soft">
-                    ${escHtml(SOURCE_KIND_LABELS[item.kind] || item.kind || 'Источник')} ·
-                    ${university
-                        ? `вуз: ${escHtml(university.short_name || university.name)}`
-                        : 'общий источник'}
-                </p>
-                ${item.note ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(item.note)}</p>` : ''}
-                ${item.url
-                    ? `<p class="mt-2 text-sm"><a href="${escAttr(item.url)}" target="_blank" rel="noopener noreferrer" class="underline break-all">${escHtml(item.url)}</a></p>`
-                    : ''}
-            </div>
-            <div class="shrink-0">
-                <button type="button" data-act="deleteSource" data-id="${escAttr(item.id)}"
-                        class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Удалить</button>
-            </div>
-        </div>`;
-    }).join('')}</div>`;
-}
-
-function openSourceFormModal(onDone) {
-    let dirty = false;
-    const universities = adminSourcesState.universities || [];
-    const kinds = Object.entries(SOURCE_KIND_LABELS)
-        .map(([value, label]) => ({ value, label }));
-    const body = `
-        <div id="modal-alert"></div>
-        <form id="source-form">
-            ${inputField({ id: 'source-name', name: 'name', label: 'Название', required: true, placeholder: 'Приказ МФТИ о льготах 2026' })}
-            ${inputField({ id: 'source-url', name: 'url', label: 'Ссылка', type: 'url', placeholder: 'https://…' })}
-            ${selectField({
-                id: 'source-kind',
-                name: 'kind',
-                label: 'Тип источника',
-                options: kinds,
-                value: 'OTHER',
-            })}
-            ${selectField({
-                id: 'source-university',
-                name: 'university_id',
-                label: 'Университет (пусто — общий источник)',
-                options: [{ value: '', label: 'Общий источник' }, ...universities.map(item => ({
-                    value: item.id,
-                    label: item.short_name || item.name,
-                }))],
-                value: '',
-            })}
-            ${textareaField({ id: 'source-note', name: 'note', label: 'Примечание', value: '' })}
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
-                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
-                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Добавить источник</button>
-            </div>
-        </form>`;
-    const { overlay, close } = openModal('Новый источник', body, { isDirty: () => dirty });
-    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
-    overlay.querySelector('[data-cancel]').addEventListener('click', close);
-
-    overlay.querySelector('#source-form').addEventListener('submit', async e => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        const payload = {
-            name: (fd.get('name') || '').trim(),
-            url: (fd.get('url') || '').trim() || null,
-            kind: fd.get('kind') || 'OTHER',
-            university_id: (fd.get('university_id') || '') || null,
-            note: (fd.get('note') || '').trim() || null,
-        };
-        if (!payload.name) {
-            showModalError(overlay, { data: { detail: 'Укажите название источника' } });
-            return;
-        }
-        const btn = e.target.querySelector('button[type="submit"]');
-        btn.disabled = true;
-        try {
-            const res = await api.createSource(payload);
-            if (res.ok) {
-                dirty = false;
-                close();
-                showToast('Источник добавлен', 'success');
-                if (onDone) onDone();
-                return;
-            }
-            showModalError(overlay, res);
-        } catch {
-            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
-        }
-        btn.disabled = false;
-    });
-}
-
-async function deleteSourceAction(id, btn) {
-    const source = adminSourcesState.sources.find(item => String(item.id) === String(id));
-    const name = source ? source.name : 'источник';
-    if (!window.confirm(`Удалить «${name}»?\n\nПравила льгот, ссылавшиеся на него, сохранятся — исчезнет только ссылка на источник.`)) {
-        return;
-    }
-    btn.disabled = true;
-    try {
-        const res = await api.deleteSource(id);
-        if (res.ok) {
-            showToast('Источник удалён', 'success');
-            await reloadAdmin();
-            return;
-        }
-        showToast(errorText(res), 'error');
-    } catch {
-        showToast('Сетевая ошибка', 'error');
-    }
-    btn.disabled = false;
-}
-
 /* --------------------------- Льготы: фильтры и модерация --------------------------- */
 
 function renderBenefitsBox() {
@@ -2344,14 +2741,17 @@ function renderBenefitsBox() {
 async function searchBenefits() {
     const input = document.getElementById('admin-benefits-search');
     const statusSelect = document.querySelector('[data-benefit-status]');
+    const needsReviewBox = document.querySelector('[data-benefit-needs-review]');
     const search = (input ? input.value : '').trim();
     const status = statusSelect ? statusSelect.value : '';
+    const needsReview = !!(needsReviewBox && needsReviewBox.checked);
     try {
         const res = await api.adminBenefits({
             limit: ADMIN_LIST_PAGE_SIZE,
             offset: 0,
             search: search || undefined,
             verification_status: status || undefined,
+            needs_review: needsReview || undefined,
         });
         if (!res.ok) {
             showToast(errorText(res), 'error');
@@ -2362,6 +2762,7 @@ async function searchBenefits() {
         adminBenefitsState.total = res.data.total != null ? res.data.total : rules.length;
         adminBenefitsState.search = search;
         adminBenefitsState.status = status;
+        adminBenefitsState.needsReview = needsReview;
         renderBenefitsBox();
     } catch {
         showToast('Не удалось загрузить правила льгот', 'error');
@@ -2375,6 +2776,7 @@ async function loadMoreBenefits() {
             offset: adminBenefitsState.rules.length,
             search: adminBenefitsState.search || undefined,
             verification_status: adminBenefitsState.status || undefined,
+            needs_review: adminBenefitsState.needsReview || undefined,
         });
         if (!res.ok) {
             showToast(errorText(res), 'error');
@@ -2413,12 +2815,15 @@ function openRejectBenefitModal(id, onDone) {
     overlay.querySelector('#reject-benefit-form').addEventListener('submit', async e => {
         e.preventDefault();
         const fd = new FormData(e.target);
+        const reason = (fd.get('reason') || '').trim();
         const btn = e.target.querySelector('button[type="submit"]');
+        if (!reason) {
+            showModalError(overlay, { data: { detail: 'Укажите причину отклонения' } });
+            return;
+        }
         btn.disabled = true;
         try {
-            const res = await api.rejectBenefit(id, {
-                reason: (fd.get('reason') || '').trim() || null,
-            });
+            const res = await api.rejectBenefit(id, { reason });
             if (res.ok) {
                 dirty = false;
                 close();
@@ -2435,20 +2840,6 @@ function openRejectBenefitModal(id, onDone) {
 }
 
 /* ----------------------------- Сезоны и профили ----------------------------- */
-
-function datetimeInputValue(iso) {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return '';
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function isoFromLocal(value) {
-    if (!value) return null;
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? null : d.toISOString();
-}
 
 async function openSeasonFormModal(season, onDone) {
     const isEdit = !!season;
@@ -2498,32 +2889,14 @@ async function openSeasonFormModal(season, onDone) {
                 value: (season || {}).season_label || '',
                 placeholder: '2025/2026',
             })}
-            ${inputField({
-                id: 'season-level',
-                name: 'rsosh_level',
-                label: 'Уровень РСОШ',
-                value: (season || {}).rsosh_level || '',
-                placeholder: '1, 2, 3…',
-            })}
-            <div class="grid sm:grid-cols-2 gap-x-4">
-                ${inputField({ id: 'season-reg-start', name: 'registration_start', label: 'Начало регистрации', type: 'datetime-local', value: datetimeInputValue((season || {}).registration_start) })}
-                ${inputField({ id: 'season-reg-end', name: 'registration_end', label: 'Конец регистрации', type: 'datetime-local', value: datetimeInputValue((season || {}).registration_end) })}
-            </div>
-            <div class="grid sm:grid-cols-2 gap-x-4">
-                ${inputField({ id: 'season-event-start', name: 'event_start', label: 'Начало проведения', type: 'datetime-local', value: datetimeInputValue((season || {}).event_start) })}
-                ${inputField({ id: 'season-event-end', name: 'event_end', label: 'Конец проведения', type: 'datetime-local', value: datetimeInputValue((season || {}).event_end) })}
-            </div>
-            ${inputField({
-                id: 'season-availability',
-                name: 'availability',
-                label: 'Доступность',
-                value: (season || {}).availability && (season || {}).availability !== 'unknown' ? (season || {}).availability : '',
-                placeholder: 'unknown / free / paid',
-            })}
+            <p class="mt-2 mb-4 text-sm text-ink-soft">
+                Уровень РСОШ указывается у профиля сезона: у одной олимпиады
+                в одном сезоне бывает несколько профилей с разными уровнями.
+            </p>
             ${selectField({
                 id: 'season-source',
                 name: 'source_doc_id',
-                label: 'Документ-основание',
+                label: 'Документ РСОШ (необязательно)',
                 options: docOptions,
                 value: (season || {}).source_doc_id || '',
             })}
@@ -2551,12 +2924,6 @@ async function openSeasonFormModal(season, onDone) {
         }
         const payload = {
             season_label: seasonLabel,
-            rsosh_level: (fd.get('rsosh_level') || '').trim() || null,
-            registration_start: isoFromLocal(fd.get('registration_start')),
-            registration_end: isoFromLocal(fd.get('registration_end')),
-            event_start: isoFromLocal(fd.get('event_start')),
-            event_end: isoFromLocal(fd.get('event_end')),
-            availability: (fd.get('availability') || '').trim() || null,
             source_doc_id: (fd.get('source_doc_id') || '') || null,
         };
         const olympiadId = isEdit ? season.olympiad_id : fd.get('olympiad_id');
@@ -2584,27 +2951,53 @@ async function openSeasonFormModal(season, onDone) {
     });
 }
 
-async function openSeasonProfilesModal(seasonId) {
+async function openSeasonProfilesModal(seasonId, onChange) {
     const season = adminSeasonsState.seasons.find(item => String(item.id) === String(seasonId));
     const title = season ? `Профили сезона «${season.season_label}»` : 'Профили сезона';
     const body = `
         <div id="season-profiles-list">${loadingHtml('Загружаем профили…')}</div>
         <div class="mt-10 pt-8 border-t border-mist">
-            <h3 class="text-lg font-bold tracking-tight">Новый профиль</h3>
+            <h3 id="profile-form-title" class="text-lg font-bold tracking-tight">Новый профиль</h3>
             <form id="profile-form" class="mt-6">
                 <div id="modal-alert"></div>
-                <div class="grid sm:grid-cols-2 gap-x-4">
-                    ${inputField({ id: 'profile-discipline', name: 'discipline', label: 'Дисциплина', placeholder: 'Математика' })}
-                    ${inputField({ id: 'profile-subject', name: 'subject', label: 'Предмет', placeholder: 'Алгебра' })}
-                </div>
-                ${inputField({ id: 'profile-name', name: 'profile_name', label: 'Название профиля', placeholder: 'Профиль «Математика»' })}
+                <input type="hidden" name="profile_id" value="">
+                ${inputField({ id: 'profile-name', name: 'name', label: 'Название профиля', required: true, placeholder: 'Математика' })}
+                ${selectField({
+                    id: 'profile-level',
+                    name: 'rsosh_level',
+                    label: 'Уровень РСОШ',
+                    options: [
+                        { value: '', label: 'Не указан' },
+                        { value: '1', label: 'Уровень 1' },
+                        { value: '2', label: 'Уровень 2' },
+                        { value: '3', label: 'Уровень 3' },
+                    ],
+                    value: '',
+                })}
                 ${textareaField({ id: 'profile-description', name: 'description', label: 'Описание', rows: 2 })}
-                <div class="flex justify-end">
+                <div class="flex flex-wrap justify-end gap-3">
+                    <button type="button" data-profile-reset class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Сбросить</button>
                     <button type="submit" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Добавить профиль</button>
                 </div>
             </form>
         </div>`;
     const { overlay, close } = openModal(title, body, { wide: true });
+
+    let profiles = [];
+    const form = overlay.querySelector('#profile-form');
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const titleEl = overlay.querySelector('#profile-form-title');
+    let editing = null;
+
+    function resetForm() {
+        editing = null;
+        form.reset();
+        form.querySelector('[name="profile_id"]').value = '';
+        submitBtn.textContent = 'Добавить профиль';
+        titleEl.textContent = 'Новый профиль';
+    }
+
+    overlay.querySelector('[data-profile-reset]').addEventListener('click', resetForm);
 
     async function refreshProfiles() {
         const box = overlay.querySelector('#season-profiles-list');
@@ -2614,51 +3007,89 @@ async function openSeasonProfilesModal(seasonId) {
             box.innerHTML = alertHtml(errorText(res), 'error');
             return;
         }
-        const profiles = (res.data && res.data.profiles) || [];
+        profiles = (res.data && res.data.profiles) || [];
         if (!profiles.length) {
-            box.innerHTML = '<p class="text-sm text-ink-soft">Профилей пока нет. Профиль уточняет, к какому направлению относится льгота.</p>';
+            box.innerHTML = '<p class="text-sm text-ink-soft">Профилей пока нет. Профиль — это название и уровень РСОШ, причём уровень принадлежит конкретному сезону.</p>';
             return;
         }
-        box.innerHTML = `<div class="space-y-3">${profiles.map(item => {
-            const meta = [item.discipline, item.subject, item.profile_name].filter(Boolean);
-            return `
-            <div class="bg-mist rounded px-5 py-4">
-                <p class="font-semibold text-ink">${escHtml(meta[0] || 'Профиль')}</p>
-                ${meta.length > 1 ? `<p class="mt-1 text-sm text-ink-soft">${meta.slice(1).map(escHtml).join(' · ')}</p>` : ''}
-                ${item.description ? `<p class="mt-2 text-sm text-ink-soft">${escHtml(item.description)}</p>` : ''}
-            </div>`;
-        }).join('')}</div>`;
+        box.innerHTML = `<div class="space-y-3">${profiles.map(item => `
+            <div class="bg-mist rounded px-5 py-4 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div class="min-w-0">
+                    <p class="font-semibold text-ink">${escHtml(item.name)}</p>
+                    <p class="mt-1 text-sm text-ink-soft">${item.rsosh_level ? `Уровень РСОШ: ${escHtml(item.rsosh_level)}` : 'Уровень РСОШ не указан'}</p>
+                    ${item.description ? `<p class="mt-1 text-sm text-ink-soft">${escHtml(item.description)}</p>` : ''}
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" data-profile-edit="${escAttr(item.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Изменить</button>
+                    <button type="button" data-profile-delete="${escAttr(item.id)}" class="${UI.btn} ${UI.btnDanger} ${UI.btnSmall}">Удалить</button>
+                </div>
+            </div>`).join('')}</div>`;
+
+        box.querySelectorAll('[data-profile-edit]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = profiles.find(p => String(p.id) === btn.dataset.profileEdit);
+                if (!item) return;
+                editing = item;
+                form.querySelector('[name="profile_id"]').value = item.id;
+                form.querySelector('[name="name"]').value = item.name || '';
+                form.querySelector('[name="rsosh_level"]').value = item.rsosh_level || '';
+                form.querySelector('[name="description"]').value = item.description || '';
+                submitBtn.textContent = 'Сохранить профиль';
+                titleEl.textContent = `Профиль «${item.name}»`;
+                form.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            });
+        });
+        box.querySelectorAll('[data-profile-delete]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const item = profiles.find(p => String(p.id) === btn.dataset.profileDelete);
+                if (!item) return;
+                if (!window.confirm(`Удалить профиль «${item.name}»?\n\nПравила, привязанные к нему, останутся и будут отмечены как требующие уточнения.`)) return;
+                btn.disabled = true;
+                const res = await api.deleteProfile(item.id);
+                if (!res.ok) {
+                    showModalError(overlay, res);
+                    btn.disabled = false;
+                    return;
+                }
+                if (editing && String(editing.id) === String(item.id)) resetForm();
+                showToast('Профиль удалён', 'success');
+                await refreshProfiles();
+                if (onChange) onChange();
+            });
+        });
     }
 
-    overlay.querySelector('#profile-form').addEventListener('submit', async e => {
+    form.addEventListener('submit', async e => {
         e.preventDefault();
-        const form = e.target;
         const fd = new FormData(form);
-        const btn = form.querySelector('button[type="submit"]');
-        const payload = {
-            discipline: (fd.get('discipline') || '').trim() || null,
-            subject: (fd.get('subject') || '').trim() || null,
-            profile_name: (fd.get('profile_name') || '').trim() || null,
-            description: (fd.get('description') || '').trim() || null,
-        };
-        if (!payload.discipline && !payload.subject && !payload.profile_name) {
-            showModalError(overlay, { data: { detail: 'Укажите дисциплину, предмет или название профиля' } });
+        const name = (fd.get('name') || '').trim();
+        if (!name) {
+            showModalError(overlay, { data: { detail: 'Укажите название профиля' } });
             return;
         }
-        btn.disabled = true;
+        const payload = {
+            name,
+            rsosh_level: (fd.get('rsosh_level') || '').trim() || null,
+            description: (fd.get('description') || '').trim() || null,
+        };
+        submitBtn.disabled = true;
         try {
-            const res = await api.createProfile(seasonId, payload);
+            const wasEdit = !!editing;
+            const res = editing
+                ? await api.updateProfile(editing.id, { ...payload, version: editing.version })
+                : await api.createProfile(seasonId, payload);
             if (res.ok) {
-                form.reset();
-                showToast('Профиль добавлен', 'success');
+                resetForm();
+                showToast(wasEdit ? 'Профиль обновлён' : 'Профиль добавлен', 'success');
                 await refreshProfiles();
+                if (onChange) onChange();
             } else {
                 showModalError(overlay, res);
             }
         } catch {
             showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
         }
-        btn.disabled = false;
+        submitBtn.disabled = false;
     });
 
     await refreshProfiles();

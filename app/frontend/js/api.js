@@ -119,6 +119,7 @@ const api = {
 
     get(path, options) { return this.request('GET', path, null, false, options); },
     put(path, body, options) { return this.request('PUT', path, body, false, options); },
+    patch(path, body, options) { return this.request('PATCH', path, body, false, options); },
     post(path, body, options) { return this.post_(path, body, false, options); },
     postForm(path, formData, options) { return this.post_(path, formData, true, options); },
     post_(path, body, isFormData, options) {
@@ -142,18 +143,8 @@ const api = {
         return this.get(`/universities${query}`, { skipAuthRedirect: true });
     },
     getUniversity(id) { return this.get(`/universities/${id}`, { skipAuthRedirect: true }); },
-    getUniversityOlympiads(id, includePending) {
-        const query = includePending ? '?include_pending=true' : '';
-        return this.get(`/universities/${id}/olympiads${query}`, { skipAuthRedirect: true });
-    },
     addUniversity(d)     { return this.post('/universities/add_university', d); },
     editUniversity(id, d) { return this.post(`/universities/edit_university/${id}`, d); },
-    requestBvi(universityId, olympiadId) {
-        return this.post(`/universities/${universityId}/bvi`, { olympiad_id: olympiadId });
-    },
-    removeBvi(universityId, olympiadId) {
-        return this.post(`/universities/${universityId}/bvi/remove`, { olympiad_id: olympiadId });
-    },
 
     listOlympiads(search, includeArchived) {
         const params = new URLSearchParams();
@@ -175,18 +166,30 @@ const api = {
     editOlympiad(id, d)  { return this.post(`/olympiads/edit_olympiad/${id}`, d); },
 
     /* Сезоны и профили */
-    listSeasons(olympiadId) { return this.get(`/olympiads/${olympiadId}/seasons`, { skipAuthRedirect: true }); },
+    listSeasons(olympiadId, opts) {
+        const params = new URLSearchParams();
+        if (opts && opts.include_archived) params.set('include_archived', 'true');
+        if (opts && opts.profiles) params.set('profiles', 'true');
+        const q = params.toString();
+        return this.get(`/olympiads/${olympiadId}/seasons${q ? `?${q}` : ''}`, { skipAuthRedirect: true });
+    },
     createSeason(olympiadId, d) { return this.post(`/olympiads/${olympiadId}/seasons`, d); },
     getSeason(id) { return this.get(`/seasons/${id}`, { skipAuthRedirect: true }); },
     updateSeason(id, d) { return this.put(`/seasons/${id}`, d); },
+    deleteSeason(id) { return this.request('DELETE', `/seasons/${id}`); },
     listProfiles(seasonId) { return this.get(`/seasons/${seasonId}/profiles`, { skipAuthRedirect: true }); },
     createProfile(seasonId, d) { return this.post(`/seasons/${seasonId}/profiles`, d); },
+    updateProfile(id, d) { return this.put(`/profiles/${id}`, d); },
+    deleteProfile(id) { return this.request('DELETE', `/profiles/${id}`); },
 
     /* Программы */
     listPrograms(universityId) { return this.get(`/universities/${universityId}/programs`, { skipAuthRedirect: true }); },
     createProgram(universityId, d) { return this.post(`/universities/${universityId}/programs`, d); },
     getProgram(id) { return this.get(`/programs/${id}`, { skipAuthRedirect: true }); },
     updateProgram(id, d) { return this.put(`/programs/${id}`, d); },
+    archiveUniversityProgram(universityId, programId, archived) {
+        return this.post(`/universities/${universityId}/programs/${programId}/archive?archived=${archived === false ? 'false' : 'true'}`);
+    },
 
     /* Правила льгот */
     listBenefits(params) {
@@ -210,7 +213,12 @@ const api = {
     rejectBenefit(id, d) { return this.post(`/benefits/${id}/reject`, d || {}); },
     benefitVersions(id) { return this.get(`/benefits/${id}/versions`, { skipAuthRedirect: true }); },
     benefitVersionsManage(id) { return this.get(`/benefits/${id}/versions/manage`); },
-    rollbackBenefit(id, version) { return this.post(`/benefits/${id}/rollback`, { version }); },
+    rollbackBenefit(id, version, expectedVersion) {
+        return this.post(`/benefits/${id}/rollback`, {
+            version,
+            expected_version: expectedVersion,
+        });
+    },
     benefitStatusHistory(id) { return this.get(`/benefits/${id}/status-history`, { skipAuthRedirect: true }); },
     benefitStatusHistoryManage(id) { return this.get(`/benefits/${id}/status-history/manage`); },
 
@@ -224,8 +232,24 @@ const api = {
     updateUniversityDoc(universityId, docId, d) {
         return this.request('PATCH', `/universities/${universityId}/docs/${docId}`, d);
     },
-    listUniversitySources(universityId) {
-        return this.get(`/universities/${universityId}/sources`);
+
+    /* Запросы на отсутствующие олимпиады, сезоны и профили */
+    listEntityRequests(universityId, params) {
+        const q = cleanQuery(params);
+        return this.get(`/universities/${universityId}/entity-requests${q ? `?${q}` : ''}`);
+    },
+    createEntityRequest(universityId, d) {
+        return this.post(`/universities/${universityId}/entity-requests`, d);
+    },
+    adminEntityRequests(params) {
+        const q = cleanQuery(params);
+        return this.get(`/admin/entity-requests${q ? `?${q}` : ''}`);
+    },
+    approveEntityRequest(id) {
+        return this.post(`/admin/entity-requests/${id}/approve`);
+    },
+    rejectEntityRequest(id, reason) {
+        return this.post(`/admin/entity-requests/${id}/reject`, { reason });
     },
 
     /* Заявки представителей */
@@ -254,6 +278,20 @@ const api = {
     listImports()             { return this.get('/imports'); },
     startRsoshImport(docId)   { return this.post('/imports/rsosh', { doc_id: docId }); },
     importPreview(id)         { return this.get(`/imports/${id}/preview`); },
+    /* Официальный перечень: план импорта, его правка, применение, история и
+       постраничный просмотр таблицы. */
+    importPlan(id)            { return this.get(`/imports/${id}/plan`); },
+    updateImportPlan(id, body) { return this.patch(`/imports/${id}/plan`, body || {}); },
+    applyImportPlan(id, body) { return this.post(`/imports/${id}/apply`, body || {}); },
+    importHistory(id)         { return this.get(`/imports/${id}/history`); },
+    importTable(id, opts = {}) {
+        const params = new URLSearchParams();
+        params.set('sheet', opts.sheet === 'summary' ? 'summary' : 'list');
+        params.set('offset', String(Math.max(0, opts.offset || 0)));
+        params.set('limit', String(opts.limit || 50));
+        if (opts.search) params.set('search', opts.search);
+        return this.get(`/imports/${id}/table?${params.toString()}`);
+    },
     confirmImport(id, body)   { return this.post(`/imports/${id}/confirm`, body || {}); },
     rejectImport(id)          { return this.post(`/imports/${id}/reject`); },
     pauseImport(id)           { return this.post(`/imports/${id}/pause`); },
@@ -274,14 +312,6 @@ const api = {
     adminOlympiads(opts) {
         return this.get(`/admin/olympiads${adminQuery(opts)}`);
     },
-    adminBviLinks(status, opts) {
-        const params = new URLSearchParams();
-        if (status) params.set('status', status);
-        if (opts && opts.limit != null) params.set('limit', opts.limit);
-        if (opts && opts.offset != null) params.set('offset', opts.offset);
-        const query = params.toString();
-        return this.get(`/admin/bvi${query ? `?${query}` : ''}`);
-    },
     banUser(id)      { return this.post(`/admin/ban/${id}`); },
     unbanUser(id)    { return this.post(`/admin/unban/${id}`); },
     /* Единственный способ назначить, снять или повысить роль: роль и
@@ -292,16 +322,6 @@ const api = {
             role,
             university_id: universityId || null,
         });
-    },
-    /** Модерация заявки БВИ.
-     *
-     * Действия явные: 'confirm' (подтвердить), 'reject' (отклонить заявку) и
-     * 'revoke' (отозвать подтверждение). Произвольной смены статуса нет:
-     * отзыв подтверждения — это удаление связи, а не возврат в PENDING.
-     */
-    moderateBvi(universityId, olympiadId, action) {
-        return this.post(
-            `/universities/${universityId}/bvi/${olympiadId}/moderation`, { action });
     },
     archiveOlympiad(id, archived) {
         return this.post(`/admin/archive_olympiad/${id}?archived=${archived === false ? 'false' : 'true'}`);
@@ -347,12 +367,6 @@ const api = {
     adminImportJob(id) {
         return this.get(`/admin/imports/${id}`);
     },
-    adminSources(params) {
-        const q = cleanQuery(params);
-        return this.get(`/admin/sources${q ? `?${q}` : ''}`);
-    },
-    createSource(d) { return this.post('/admin/sources', d); },
-    deleteSource(id) { return this.request('DELETE', `/admin/sources/${id}`); },
     adminBenefits(params) {
         /* undefined/null/пустые значения не должны попадать в query:
            URLSearchParams превращает undefined в строку "undefined", и фильтр

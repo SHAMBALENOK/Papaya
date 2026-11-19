@@ -1,1 +1,14 @@
-from . import audit, bvi, benefits, docs, imports, olympiads, programs, representative, seasons, sources, universities, users
+from . import (
+    audit,
+    benefits,
+    docs,
+    entity_requests,
+    imports,
+    migration,
+    olympiads,
+    programs,
+    representative,
+    seasons,
+    universities,
+    users,
+)
