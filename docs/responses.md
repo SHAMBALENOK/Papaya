@@ -122,21 +122,30 @@
 
 ---
 
-## GET /universities/{university_id}/olympiads
+## GET/POST /universities/{university_id}/programs
 
-**Query:** `include_pending` (требует входа и прав на этот вуз).
+**GET — публично.** Образовательные программы университета: самостоятельный
+справочник вуза, не привязанный к правилам льгот.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Олимпиады с БВИ | `{"olympiads": [{"id", "name", "description", "official_url", "preview_image", "image", "status", "bvi_status": "CONFIRMED"｜"PENDING", "is_historical": bool}]}` |
-| 401 | `include_pending` без входа | `{"detail": "Access token required to view pending requests"}` |
-| 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
+| 200 | Список программ | `{"programs": [{"id", "university_id", "name", "code", "description", "is_archived", "version"}]}` |
 | 404 | Вуз не найден | `{"detail": "University not found"}` |
 
-Публично видны только подтверждённые (`CONFIRMED`) связи.
+**POST — представитель своего вуза или администратор.**
 
-`is_historical` — олимпиада осталась в перечне РСОШ, но связи с архивной
-олимпиадой; такие показываются отдельным историческим блоком.
+**Request body:** `{"name": str, "code"?, "description"?}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200/201 | Программа создана | `{"id", "university_id", "name", "code", "description", "is_archived", "version"}` |
+| 403 | Чужой вуз | `{"detail": "You can only manage your own university"}` |
+| 404 | Вуз не найден | `{"detail": "University not found"}` |
+| 409 | Программа с таким названием уже есть | `{"detail": "Program already exists"}` |
+
+`PUT /programs/{program_id}` обновляет программу и требует актуальную
+`version` (иначе `409`). `POST /universities/{university_id}/programs/{program_id}/archive?archived=true|false`
+переводит программу в архив и обратно; физического удаления нет.
 
 ---
 
@@ -167,99 +176,88 @@
 
 ---
 
-## POST /universities/{university_id}/bvi
+## GET/POST /olympiads/{olympiad_id}/seasons
 
-Заявка: «этот университет даёт БВИ за эту олимпиаду». Связь создаётся в
-статусе `PENDING`; повторная заявка возвращает существующую связь.
+Сезон — это олимпиада и метка года (`season_label`). Дат регистрации и
+проведения, уровня РСОШ и флага доступности у сезона нет: уровень относится к
+профилю конкретного сезона, а состояние приёмной кампании Papaya не хранит.
 
-Заявка возможна только по актуальной олимпиаде: архивная запись сохраняет
-прежние связи, но новых не получает. Уже подтверждённые связи при архивации
-остаются на месте.
-
-**Request body:** `{"olympiad_id": str}`
+**GET — публично.** Query: `include_archived` (показать архивные сезоны),
+`profiles` (вложить профили в ответ одним запросом).
 
 | Code | Description | Body |
 |------|-------------|------|
-| 201 | Заявка создана или уже существует | `{"id", "university_id", "olympiad_id", "status": "PENDING"｜"CONFIRMED", "is_historical": bool}` |
-| 403 | Не администратор и не представитель этого вуза | `{"detail": "You can only manage your own university"}` |
-| 404 | Вуз или олимпиада не найдены | `{"detail": "University not found"}` / `{"detail": "Olympiad not found"}` |
-| 409 | Олимпиада архивирована | `{"detail": "Олимпиада архивирована: её нет в актуальном перечне РСОШ, новые заявки БВИ за неё не принимаются. Подтверждённые ранее связи сохраняются."}` |
+| 200 | Список сезонов | `{"seasons": [{"id", "olympiad_id", "season_label", "is_archived", "version", "profiles"?}]}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
-Кто подтвердил заявку и когда она создана — служебные поля: представителю
-университета они не нужны, поэтому в ответ не отдаются. Полная карточка связи
-(`confirmedBy`, `createdAt`, `updatedAt`) доступна только администратору в
-очереди модерации `GET /admin/bvi`.
-
-Повторный запрос той же пары «вуз — олимпиада» не создаёт вторую связь:
-возвращается существующая заявка, поэтому 201 приходит в обоих случаях.
-Архивная олимпиада проверяется до этой проверки: для неё 409 даже при
-повторном запросе.
-
----
-
-## GET /universities/{university_id}/olympiads, GET /olympiads/{olympiad_id}/universities
-
-Публичные списки связей БВИ. Видны только подтверждённые связи.
+**POST — администратор.** **Request body:** `{"season_label": str}`
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список связей | `{"olympiads": [BviOlympiadItem]}` / `{"universities": [BviUniversityItem]}` |
-| 401 | Запрошены неподтверждённые заявки без входа | `{"detail": "Access token required to view pending requests"}` |
-| 403 | Чужие заявки | `{"detail": "You can only view pending requests of your own university"}` |
-| 404 | Университет или олимпиада не найдены | `{"detail": "..."}` |
-
-`BviOlympiadItem`: `id`, `name`, `description`, `official_url`,
-`preview_image`, `image`, `status`, `bvi_status`,
-`is_historical`.
-
-`BviUniversityItem`: `id`, `name`, `short_name`, `description`, `website`,
-`preview_image`, `image`, `bvi_status`, `is_historical`.
-
-`is_historical` — подтверждённая связь с архивной олимпиадой. Такая связь
-сохранена (архив не отменяет историю), но интерфейс показывает
-«Архивная олимпиада» / «Историческая связь» вместо «БВИ».
-
----
-
-## POST /universities/{university_id}/bvi/remove
-
-**Request body:** `{"olympiad_id": str}`
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Связь удалена | `{"status": "removed", "olympiad_id": str}` |
-| 401 | Нет токена | `{"detail": "..."}` |
-| 403 | Нет прав на этот вуз | `{"detail": "You can only manage your own university"}` |
-| 404 | Связи нет | `{"detail": "BVI link not found"}` |
-| 409 | Подтверждённую связь снимает только администратор | `{"detail": "Связь подтверждена администратором: снять подтверждение может только администратор"}` |
-
-Проверка статуса и удаление выполняются под одной блокировкой строки: между
-чтением «заявка ещё PENDING» и удалением нельзя подсунуть подтверждение,
-которое удаление перетёрло бы.
-
----
-
-## POST /universities/{university_id}/bvi/{olympiad_id}/moderation
-
-Административное действие над заявкой. Произвольной смены статуса нет.
-
-**Request body:** `{"action": "confirm"｜"reject"｜"revoke"}`
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Подтверждена или удалена | `{"result": "CONFIRMED"｜"removed", "university_id", "olympiad_id", "status"}` |
-| 401 | Нет токена | `{"detail": "..."}` |
+| 200/201 | Сезон создан | `{"id", "olympiad_id", "season_label", "is_archived", "version"}` |
 | 403 | Не администратор | `{"detail": "Permission denied"}` |
-| 404 | Связи нет | `{"detail": "BVI link not found"}` |
-| 409 | Действие не применимо к текущему состоянию | `{"detail": "..."}` — например, отклонить уже подтверждённую связь |
-| 422 | Неизвестное действие | `{"detail": [...]}` |
+| 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
+| 409 | Сезон с такой меткой у олимпиады уже есть | `{"detail": "..."}` |
 
-- `confirm` — `PENDING` → `CONFIRMED`; поле `confirmedBy` заполняется.
-- `reject` — заявка отклонена, связь удаляется.
-- `revoke` — подтверждение отозвано, связь удаляется.
+## GET/PUT/DELETE /seasons/{season_id}
 
-Перехода `CONFIRMED → PENDING` не существует: это не состояние заявки, а
-отзыв публичного факта.
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Сезон | `{"id", "olympiad_id", "season_label", "is_archived", "version"}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Сезон не найден | `{"detail": "Season not found"}` |
+| 409 | Конфликт версий или у сезона есть правила | `{"detail": "Version conflict"}` / `{"detail": "Season has benefit rules; archive it instead of deleting"}` |
+
+**PUT** принимает `{"version", "season_label"?, "is_archived"?}`. `version`
+обязательна при правке: устаревшая версия — `409`, данные не перезаписываются.
+**DELETE** физически удаляет только сезон без правил; сезон с историей
+архивируется (`is_archived: true`) и сохраняет профили и правила.
+
+## GET/POST /seasons/{season_id}/profiles, PUT/DELETE /profiles/{profile_id}
+
+Профиль принадлежит конкретному сезону. Уровень РСОШ (`1`, `2`, `3` или `null`)
+— свойство профиля сезона, а не олимпиады: в перечне могут быть только
+отдельные профили, и в следующем сезоне их набор и уровни меняются.
+
+**Request body:** `{"name": str, "rsosh_level"?: "1"｜"2"｜"3"｜null, "description"?}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200/201 | Профиль создан или обновлён | `{"id", "season_id", "name", "rsosh_level", "description", "version"}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Сезон или профиль не найден | `{"detail": "Season not found"}` / `{"detail": "Profile not found"}` |
+| 409 | Дубль профиля в сезоне или конфликт версий | `{"detail": "..."}` |
+| 422 | Уровень не `1`, `2`, `3` и не пустой | `{"detail": [...]}` |
+
+`PUT /profiles/{profile_id}` принимает `version` и те же поля; устаревшая
+версия — `409`. Профиль с правилами не удаляется: `409` с требованием
+архивировать сезон.
+
+## GET/POST /universities/{university_id}/entity-requests
+
+**Представитель своего вуза.** Запрос на отсутствующую в каталоге сущность:
+олимпиаду, сезон или профиль. Представитель не создаёт их напрямую.
+
+**Request body:** `{"entity_type": "OLYMPIAD"｜"SEASON"｜"PROFILE", "name": str, "parent_id"?: str, "comment"?}`
+
+- `OLYMPIAD` — `parent_id` не нужен;
+- `SEASON` — `parent_id` = id олимпиады;
+- `PROFILE` — `parent_id` = id сезона.
+
+| Code | Description | Body |
+|------|-------------|------|
+| 201 | Запрос создан | `{"id", "university_id", "entity_type", "name", "parent_id", "status": "PENDING", "createdAt"}` |
+| 403 | Чужой вуз | `{"detail": "You can only manage your own university"}` |
+| 404 | Родительская сущность не найдена | `{"detail": "..."}` |
+| 409 | Такой запрос уже есть | `{"detail": "..."}` |
+
+Администратор видит очередь в `GET /admin/entity-requests` (фильтры `status`,
+`limit`, `offset`, `total`), одобряет
+`POST /admin/entity-requests/{request_id}/approve` и отклоняет
+`POST /admin/entity-requests/{request_id}/reject` с обязательным
+`{"reason"}`. Одобрение создаёт сущность один раз: повторное одобрение — `409`.
+При создании проверяется дубль по имени, чтобы в каталоге не появилось две
+одинаковые олимпиады, сезона или профиля.
 
 ---
 
@@ -308,16 +306,16 @@
 
 ## GET /olympiads/{olympiad_id}/universities
 
-Вузы, дающие БВИ за олимпиаду (обратная сторона связи). Публично, только
-подтверждённые связи.
+Вузы, у которых есть опубликованные правила льгот по этой олимпиаде. Список
+строится по правилам, поэтому не может разойтись с каталогом.
 
 | Code | Description | Body |
 |------|-------------|------|
-| 200 | Список вузов | `{"universities": [{"id", "name", "short_name", "description", "website", "preview_image", "image", "bvi_status": "CONFIRMED", "is_historical": bool}]}` |
+| 200 | Список вузов | `{"universities": [{"id", "name", "short_name", "description", "website", "preview_image", "image"}]}` |
 | 404 | Олимпиада не найдена | `{"detail": "Olympiad not found"}` |
 
-`is_historical` равен `true`, если олимпиада архивная: такие вузы показываются
-отдельным историческим блоком и не подписаны как «даёт БВИ».
+Если олимпиада архивная, её правила остаются доступными в истории: архив
+меняет актуальность, а не удаляет данные.
 
 ---
 
@@ -457,6 +455,10 @@
 В фоновом режиме сразу после ответа `state` = `processing`: состояние нужно
 полярно опрашивать до `review` или `failed`.
 
+Если скан распознан как официальный перечень РСОШ, поле `mode` в состоянии
+импорта равно `official_list`: документ проходит через таблицу, план и
+`POST /imports/{import_id}/apply`, а не через `preview` + `confirm`.
+
 ---
 
 ## GET /imports/{import_id}
@@ -524,6 +526,10 @@
 | 404 | Импорт не найден | `{"detail": "Import not found"}` |
 | 409 | Перечень устарел или уже применён | `{"detail": "Этот перечень устарел: он загружен раньше уже подтверждённого документа ..."}` |
 
+Если документ обработан конвейером официального перечня (`mode: "official_list"`),
+подтверждение кандидатов не применяется: ответ 409 с указанием применить план
+через `POST /imports/{import_id}/apply`.
+
 Поле верхнего уровня `skipped` — то, что администратор снял в preview.
 Снятый кандидат не пишется в каталог **и не считается отсутствующим** в
 перечне: иначе ошибка распознавания одной строки архивировала бы
@@ -557,6 +563,147 @@
 | строки перечня не распознаны или сопоставление подозрительно | каталог нельзя считать полным: олимпиада могла просто не распознаться |
 | в `errors` есть хотя бы одна строка | часть перечня не записана, судить по нему о «ком больше нет» нельзя |
 | `archive_missing=false` | администратор сознательно оставил каталог без архивирования |
+
+---
+
+## Официальный перечень: план, применение, история
+
+Скан официального перечня РСОШ обрабатывается отдельным конвейером: из PDF
+строится таблица (XLSX), по ней — план импорта, и только утверждённый план
+пишется в каталог. Признак этого режима — `mode: "official_list"` в состоянии
+импорта; прежний конвейер (`preview` + `confirm`) работает как раньше для
+остальных документов.
+
+Порядок шагов:
+
+```text
+PDF сохраняется в docs (UUID-имя)
+    ↓ фоновая задача Celery (RSOSH_EXECUTION=auto|celery|inline)
+Распознавание перечня (OCR, ориентация страниц, шапка года)
+    ↓
+Таблица XLSX (лист «Перечень <сезон>» + лист «Сводка») и HTML-версия
+    ↓ производные документы RSOSH_TABLE / RSOSH_HTML, серверные файлы
+План импорта: создать / использовать / требует решения / пропустить
+    ↓ правка плана администратором (PATCH …/plan)
+Применение одной транзакцией (POST …/apply)
+    ↓
+Записи ImportJob/ImportRecord и история решений в docs.metadata['rsosh']
+```
+
+Производные таблицы создаёт только сервер: типы `RSOSH_TABLE` и `RSOSH_HTML`
+нельзя выбрать при загрузке документа, они не принимаются и в
+`POST /docs/upload`. Файлы лежат рядом с исходным PDF под именем
+`<doc_id>.xlsx` / `<doc_id>.html`, отдаются через `GET /docs/{doc_id}/file` и
+скачиваются только администратором. Повторный разбор того же PDF переиспользует
+существующие записи, а не создаёт вторые.
+
+### GET /imports/{import_id}/plan
+
+План импорта официального перечня. **Администратор.**
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | План | `{"import": {...}, "plan": {"season_label", "complete", "olympiads": [{"name", "name_norm", "organizer", "page", "source_rows", "match": {"action": "create｜use｜review｜skip", "confidence", "olympiad_id", "candidates"}, "season": {"season_label", "action", "season_id"}, "profiles": [{"source_row", "name", "level", "match", "issues"}], "issues", "duplicate"}], "missing", "missing_pool", "missing_allowed", "duplicates", "summary", "warnings", "errors"}}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | План ещё не построен | `{"detail": "План импорта ещё не построен: документ не разобран"}` |
+
+План отдаётся целиком вместе со строками исходного документа: администратор
+должен видеть каждую строку, иначе потерянную при OCR олимпиаду не заметить.
+
+`match.action`: `create` — новой олимпиады в каталоге нет; `use` — точное
+совпадение с существующей; `review` — есть похожие записи, но автоматически
+объединять нельзя, решение принимает администратор; `skip` — строку не
+переносить. Нечёткие совпадения никогда не применяются сами.
+
+`summary` считает строки плана: олимпиады (`create`/`use`/`review`/`skip`),
+профили (`profiles_create`/`profiles_update`/`profiles_skip`), отсутствующие
+(`missing`) и число нерешённых `errors`.
+
+`missing` заполняется только для полного перечня: если `complete=false`, в
+документе нет сезона или остались ошибки, список отсутствующих пуст, а
+`missing_allowed=false`. `missing_pool` — кандидаты на «олимпиады нет в этом
+перечне».
+
+### PATCH /imports/{import_id}/plan
+
+Исправить план, не применяя его. **Администратор.**
+
+**Request body:** `{"season_label"?, "olympiads": [{"name_norm", "name"?, "organizer"?, "action"?, "olympiad_id"?}], "profiles": [{"olympiad", "source_row", "action"?, "name"?, "level"?}]}`
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | План обновлён | `{"import": {...}, "plan": {...}}` |
+| 400 | Некорректная правка | `{"detail": "..."}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | План не построен или импорт уже применён | `{"detail": "Импорт уже применён: план больше не редактируется"}` |
+
+Правки меняют только план, каталог не затрагивается. Строка, которую OCR не
+прочитал, остаётся ошибкой и блокирует применение; пропустить её можно лишь
+явным действием `action: "skip"` для профиля — это решение администратора, а не
+молчаливая потеря данных.
+
+### POST /imports/{import_id}/apply
+
+Применить утверждённый план. **Администратор.**
+
+**Request body:** `{"mark_missing": bool}` (по умолчанию `false`).
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Применено | `{"import": {...}, "result": {"created", "used", "profiles_created", "profiles_updated", "profiles_absent", "archived", "missing"}, "records": [...], "history": [...], "missing_profiles": [...]}` |
+| 400 | План неполон или документ не `official_list` | `{"detail": "Строка 25: профиль не распознан — укажите название и уровень"}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | Импорт уже применён | `{"detail": "..."}` |
+
+Запись идёт одной транзакцией под блокировкой применения перечней: частично
+применённого перечня не бывает, при ошибке откатывается всё. Один документ
+применяется один раз; повторный вызов возвращает 409, а не создаёт дубли.
+
+Сезон берётся из документа (`season_label`), а не из года запуска. Олимпиада не
+дублируется между сезонами: профили и уровни принадлежат сезону, изменение
+уровня записывается в историю.
+
+`mark_missing=true` фиксирует отсутствие: профили, которых нет в перечне,
+получают `rsosh_level = null`, а олимпиады уходят в архив с причиной
+`RSOSH_ABSENT`. Это возможно только при `missing_allowed=true` — отсутствие
+нельзя зафиксировать по неполному или непрочитанному перечню.
+
+### GET /imports/{import_id}/history
+
+История решений по документу. **Администратор.**
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | История | `{"import": {...}, "history": [{"action", "name", "source_row", "before", "after", "at"}], "confirm", "jobs": [...]}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+
+Необязательный параметр `limit` (1–1000, по умолчанию 100) ограничивает
+размер ответа. История описывает решения по этому перечню (создание,
+переименование, смена уровня, отсутствие), а не общий журнал аудита.
+
+### GET /imports/{import_id}/table
+
+Постраничный просмотр таблицы перечня. **Администратор.**
+
+| Code | Description | Body |
+|------|-------------|------|
+| 200 | Страница таблицы | `{"sheet": "list｜summary", "title", "headers": [...], "rows": [[...]], "total", "offset", "limit"}` |
+| 401 | Нет токена | `{"detail": "..."}` |
+| 403 | Не администратор | `{"detail": "Permission denied"}` |
+| 404 | Импорт не найден | `{"detail": "Import not found"}` |
+| 409 | Таблица ещё не собрана | `{"detail": "..."}` |
+
+Параметры: `sheet` (`list`|`summary`), `offset` (от 0), `limit` (1–200, по
+умолчанию 50), `search` (до 100 символов, фильтр по всем колонкам). Пагинация
+серверная: в перечне бывает 300+ строк.
 
 ---
 
@@ -664,16 +811,17 @@
 
 ---
 
-## GET /admin/users, /admin/olympiads, /admin/bvi
+## GET /admin/users, /admin/olympiads, /admin/benefits, /admin/entity-requests
 
 **Администратор.** Списки для панели: пользователи (с ролью и привязкой к
-вузу), полный каталог олимпиад включая архивные, очередь заявок БВИ.
+вузу), полный каталог олимпиад включая архивные, очередь модерации правил
+льгот и запросы представителей.
 
-`/admin/users` и `/admin/olympiads` поддерживают query-параметры `search`
-(подстрока по имени/фамилии/email для пользователей и по названию/описанию для
-олимпиад), `limit` и `offset`. В ответе есть `total` — сколько записей под
-фильтром всего, чтобы панель показывала «Показано N из M» и догружала
-следующую страницу. Без `limit` возвращается весь список.
+`/admin/users`, `/admin/olympiads`, `/admin/benefits` и
+`/admin/entity-requests` поддерживают `search`, `limit` и `offset`. В ответе
+есть `total` — сколько записей под фильтром всего, чтобы панель показывала
+«Показано N из M» и догружала следующую страницу. Без `limit` возвращается
+весь список.
 
 ---
 
@@ -682,17 +830,29 @@
 **Публичная выдача:** `GET /benefits`, `GET /benefits/{id}`,
 `GET /benefits/{id}/versions`, `GET /benefits/{id}/status-history`,
 `GET /universities/{university_id}/benefits`,
-`GET /olympiads/{olympiad_id}/benefits`.
+`GET /benefits/olympiad/{olympiad_id}`.
 
-Публично отдаются только правила с `verification_status: "verified"` и
-`is_published: true`. Черновики и отклонённые записи не видны даже по прямому
-id. Список поддерживает `university_id`, `olympiad_id`, `season_id`,
-`program_id`, `benefit_type`, `subject`, `search`, `limit` и `offset`; в
-ответе есть `total`.
+Публично отдаются опубликованные правила: `is_published: true` и
+`verification_status != "rejected"`. Непроверенное правило видно с честным
+статусом `unverified` и предупреждением «Не проверено Papaya». Черновики
+(`is_published: false`) и отклонённые записи не видны даже по прямому id.
+Список поддерживает `university_id`, `olympiad_id`, `season_id`,
+`profile_id`, `benefit_type`, `level` (уровень РСОШ профиля), `search`,
+`limit` и `offset`; в ответе есть `total` под фильтром.
 
 ```json
 {"rules": [...], "total": 12, "limit": 50, "offset": 0}
 ```
+
+Правило описывает: университет, олимпиаду, сезон, профиль, тип льготы
+(`BVI`｜`EGE_100`｜`DVI_100`｜`OTHER`), требуемый результат (`WINNER`｜
+`PRIZE`｜`WINNER_OR_PRIZE`), документ университета-основание и необязательное
+требование ЕГЭ (`{"subject", "min_score"}`). Предмет ЕГЭ — отдельная
+структура и не смешивается с профилем олимпиады.
+
+Поля правила в ответе: `id`, `university_id`, `olympiad_id`, `season_id`,
+`profile_id`, `benefit_type`, `required_result_type`, `ege_requirement`,
+`doc_id`, `needs_review`, `verification_status`, `is_published`, `version`.
 
 **Кабинет представителя** (только свой вуз):
 
@@ -703,30 +863,39 @@ id. Список поддерживает `university_id`, `olympiad_id`, `seaso
 - `GET /benefits/{id}/versions/manage`,
   `GET /benefits/{id}/status-history/manage` — история;
 - `POST /universities/{university_id}/benefits`,
-  `PUT|PATCH /benefits/{id}`, `POST /benefits/{id}/rollback`.
+  `PUT|PATCH /benefits/{id}`,
+  `POST /benefits/{id}/rollback`.
 
 Созданное правило всегда `unverified`: `verification_status` из клиента
-игнорируется. Любая содержательная правка проверенного правила (включая смену
-набора программ) снова делает его `unverified`. Параллельная правка со старой
-`version` возвращает `409 {"detail": "Version conflict"}`.
+игнорируется. Сезон обязан принадлежать олимпиаде, профиль — сезону, документ
+— тому же университету; иначе `422`. Любая содержательная правка проверенного
+правила снова делает его `unverified`. Параллельная правка со старой `version`
+возвращает `409 {"detail": "Version conflict"}`.
 
-`is_published` — не содержание правила: представитель может скрыть проверенную
-льготу из каталога и вернуть её, не теряя `verified`. Версия при этом растёт,
-поэтому переключение тоже передаёт актуальную `version`.
+`POST /benefits/{id}/rollback` принимает `{"version": int, "expected_version": int}`.
+Откат атомарен (строка блокируется `FOR UPDATE`), при несовпадении текущей
+версии — `409`, при успехе создаётся новая версия, правило становится
+`unverified`, а изменение попадает в историю статусов.
 
-**Проверка — только администратор:** `POST /benefits/{id}/verify` требует
-непустые `doc_id` и `source_url`; `POST /benefits/{id}/reject` принимает
-`{"reason"}`. Администратору доступны
-`GET /admin/benefits`, `GET /admin/benefits/{id}` и
-`GET /admin/benefits/{id}/versions`.
+`is_published` — не содержание правила: представитель может скрыть правило из
+каталога и вернуть его, не теряя `verified`. Версия при этом растёт, поэтому
+переключение тоже передаёт актуальную `version`.
+
+**Проверка — только администратор.** `POST /benefits/{id}/verify` требует
+приложенный документ типа `UNIVERSITY_ORDER` того же университета.
+`POST /benefits/{id}/reject` принимает непустой `{"reason"}` и снимает правило
+с публикации. Администратору доступны `GET /admin/benefits`,
+`GET /admin/benefits/{id}` и `GET /admin/benefits/{id}/versions`; фильтр
+`needs_review=true` показывает правила, которым не хватает сезона или профиля.
 
 | Code | Description | Body |
 |------|-------------|------|
 | 200/201 | Успех | правило или `{"rules", "total", "limit", "offset"}` |
-| 400 | Ссылки не принадлежат вузу/олимпиаде, нет сезона или источника | `{"detail": "..."}` |
-| 403 | Чужой вуз, попытка подтвердить правило или изменить статус проверки | `{"detail": "..."}` |
-| 404 | Правило не найдено или не опубликовано | `{"detail": "Benefit rule not found"}` |
+| 400 | Пустая причина отклонения | `{"detail": "..."}` |
+| 403 | Чужой вуз, попытка подтвердить правило | `{"detail": "..."}` |
+| 404 | Правило, сезон, профиль или документ не найдены | `{"detail": "..."}` |
 | 409 | Конфликт версий | `{"detail": "Version conflict"}` |
+| 422 | Ссылки не согласованы, нет сезона/профиля, архивная олимпиада | `{"detail": "..."}` |
 
 ---
 
@@ -769,40 +938,26 @@ id. Список поддерживает `university_id`, `olympiad_id`, `seaso
 
 ---
 
-## GET /admin/sources, POST /admin/sources, DELETE /admin/sources/{source_id}
+## Документы: РСОШ и университета
 
-**Администратор.** Справочник источников: смысловых ссылок на документ или
-страницу, откуда взято правило льготы. Один источник можно использовать в
-нескольких правилах.
+Отдельной сущности «Источник» нет. Есть два вида документов:
 
-| `GET` | `/api/v1/admin/sources` | Query: `university_id`, `kind`, `limit`, `offset`; ответ `{"sources": [...], "total"}` |
-| `POST` | `/api/v1/admin/sources` | **Request body:** `{"name": str, "url"?, "kind"?: "RSOSH_LIST"｜"UNIVERSITY_ORDER"｜"WEBSITE"｜"OTHER", "university_id"?, "doc_id"?, "note"?}`; ответ 201 — источник |
-| `DELETE` | `/api/v1/admin/sources/{source_id}` | Ответ `{"deleted": true, "id": str}` |
+- **документ РСОШ** — `type: "RSOSH_LIST"`, загружается администратором в
+  `POST /docs/upload` и привязывается к импорту (`docs.source_url` — ссылка на
+  оригинал);
+- **документ университета** — `type: "UNIVERSITY_ORDER"｜"OTHER"`, загружается
+  представителем своего вуза в `POST /universities/{university_id}/docs` и
+  служит основанием правила льготы.
 
-| Code | Description | Body |
-|------|-------------|------|
-| 200/201 | Успех | источник или `{"sources", "total"}` |
-| 400 | Университет или документ не найден, пустое имя, неизвестный `kind` | `{"detail": "..."}` |
-| 403 | Не администратор | `{"detail": "Permission denied"}` |
-| 404 | Источник не найден | `{"detail": "Source not found"}` |
+`GET /docs`, `GET /docs/{doc_id}`, `GET /docs/{doc_id}/file` — администратор.
+`GET /universities/{university_id}/docs`,
+`POST /universities/{university_id}/docs`,
+`PATCH /universities/{university_id}/docs/{doc_id}` — представитель своего вуза
+или администратор. Скачивание проверяет права и отдаёт файл только владельцу
+или администратору.
 
-Удаление источника не удаляет правила: внешний ключ `benefit_rules.source_id`
-обнуляется (`ON DELETE SET NULL`), а документ-основание и `source_url` правила
-остаются.
-
----
-
-## GET /universities/{university_id}/sources
-
-**Представитель своего вуза или администратор.** Источники, доступные в форме
-правила льготы: общие (`university_id: null`) и источники этого университета.
-
-| Code | Description | Body |
-|------|-------------|------|
-| 200 | Список источников | `{"sources": [{"id", "name", "url", "kind", "university_id", "doc_id", "note"}]}` |
-| 403 | Чужой вуз или нет прав | `{"detail": "You can only manage your own university"}` |
-
----
+Удаления документов нет: документ-основание подтверждённого правила должно
+оставаться доступным.
 
 ## GET /admin/audit
 

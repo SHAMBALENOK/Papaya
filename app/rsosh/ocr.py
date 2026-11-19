@@ -22,6 +22,15 @@ LANG = 'rus+eng'
 # где tesseract не может понять структуру колонок, но строки читает верно.
 DEFAULT_PSM = 6
 
+#: Предел на один вызов распознавания, секунды. Полная страница перечня
+#: читается десятки секунд, поэтому запас большой; предел нужен не для
+#: скорости, а против зависания: tesseract на отдельных сканах не
+#: завершается, и без него импорт стоит на одной странице бесконечно.
+OCR_TIMEOUT = 90
+#: OSD дешевле распознавания, но на бедных страницах именно он умеет
+#: считаться минутами. По истечении вызывающий код переходит к пробному OCR.
+OSD_TIMEOUT = 30
+
 
 class OcrUnavailable(RsoshError):
     """Tesseract недоступен в окружении."""
@@ -77,6 +86,7 @@ def ocr_words(
             lang=LANG,
             config=f'--psm {psm}',
             output_type=Output.DICT,
+            timeout=OCR_TIMEOUT,
         )
     except Exception as exc:  # noqa: BLE001 - причина в тексте исключения tesseract
         raise RsoshError(f'OCR failed: {exc}') from exc
@@ -132,6 +142,7 @@ def osd_rotation(image: np.ndarray) -> tuple[int, float] | None:
         data = pytesseract.image_to_osd(
             image,
             output_type=pytesseract.Output.DICT,
+            timeout=OSD_TIMEOUT,
         )
     except Exception:  # noqa: BLE001 - OSD отказывает на бедных страницах
         return None

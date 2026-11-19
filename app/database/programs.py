@@ -14,6 +14,10 @@ from app.database.search import normalize_name
 from app.models.programs import UniversityProgram
 
 
+class VersionConflict(Exception):
+    """Программа изменилась между чтением и записью."""
+
+
 def _as_uuid(value):
     return value if isinstance(value, uuid_mod.UUID) else uuid_mod.UUID(str(value))
 
@@ -92,19 +96,28 @@ async def create_program(data: dict):
         return program_to_dict(p)
 
 
-async def update_program(program_id, data: dict):
+async def update_program(program_id, data: dict, *, expected_version=None):
+    """Обновить программу под блокировкой строки.
+
+    Проверка версии и запись идут в одной транзакции: иначе два параллельных
+    PATCH оба видели старую версию и второй молча перезаписывал первый.
+    """
     data = dict(data)
     if 'name' in data and 'name_norm' not in data:
         data['name_norm'] = normalize_name(data['name'])
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(UniversityProgram).where(
-                UniversityProgram.id == _as_uuid(program_id)
-            )
+            select(UniversityProgram)
+            .where(UniversityProgram.id == _as_uuid(program_id))
+            .with_for_update()
         )
         p = result.scalar_one_or_none()
         if not p:
             return None
+        if expected_version is not None and int(expected_version) != int(
+            p.version or 1
+        ):
+            raise VersionConflict('Version conflict')
         for k, v in data.items():
             setattr(p, k, v)
         p.version = (p.version or 1) + 1

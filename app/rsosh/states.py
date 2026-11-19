@@ -98,6 +98,12 @@ def start_section(doc: dict | None) -> dict:
         'pause_requested': False,
         'records': None,
         'selection': None,
+        # План официального перечня относится к прежнему прогону: документ
+        # будет разобран заново, и старый план показывать нельзя. Ссылки на
+        # XLSX/HTML остаются — повторный разбор перезаписывает те же файлы, а
+        # не создаёт вторые копии таблицы.
+        'plan': None,
+        'mode': None,
         # Олимпиады, добавленные администратором вручную прямо в меню документа
         # (см. persist.add_manual_candidate). Новый прогон начинается без них:
         # они относятся к прежнему результату.
@@ -190,6 +196,65 @@ def review_section(
         'pages': pages,
         'warnings': warnings,
         'candidates': candidates,
+    }
+
+
+def list_review_section(
+    doc: dict | None,
+    *,
+    plan: dict,
+    pages: list[dict],
+    warnings: list[str],
+    summary: dict,
+    table_doc_id: str | None,
+    html_doc_id: str | None,
+    title: str | None,
+) -> dict:
+    """Раздел «готов к проверке» для официального перечня РСОШ.
+
+    Отличается от ``review_section`` тем, что результат — не список
+    кандидатов, а план импорта: документ прочитан целиком, таблица собрана,
+    строки сопоставлены с каталогом. Администратор правит план, а не набор
+    карточек, поэтому здесь же лежат ссылки на производные документы (XLSX и
+    HTML-таблица), чтобы их можно было открыть на той же странице.
+    """
+    return {
+        **rsosh_section(doc),
+        'state': 'review',
+        'finished_at': _now(),
+        'error': None,
+        'progress': {'stage': 'done'},
+        'pause_requested': False,
+        'records': None,
+        'candidates': [],
+        # Режим отличает официальный перечень от прежнего конвейера: панель
+        # показывает план и таблицу, а не карточки кандидатов.
+        'mode': 'official_list',
+        'title': title,
+        'plan': plan,
+        'table': {'doc_id': table_doc_id, 'format': 'xlsx'},
+        'html': {'doc_id': html_doc_id, 'format': 'html'},
+        'summary': summary,
+        'pages': pages,
+        'warnings': warnings,
+    }
+
+
+def plan_section(doc: dict | None, plan: dict) -> dict:
+    """Раздел с исправленным планом; состояние прогона не меняется."""
+    return {**rsosh_section(doc), 'plan': plan}
+
+
+def apply_section(doc: dict | None, *, result: dict, history: list[dict]) -> dict:
+    """Раздел «импорт применён» с итогами и историей изменений."""
+    section = rsosh_section(doc)
+    return {
+        **section,
+        'state': 'approved',
+        'finished_at': _now(),
+        'applied_at': _now(),
+        'confirm': result,
+        'history': (list(section.get('history') or []) + list(history))[-1000:],
     }
 
 

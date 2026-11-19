@@ -123,7 +123,7 @@ const AUDIT_ENTITY_TYPES = [
     { value: 'university', label: 'Университеты' },
     { value: 'olympiad_season', label: 'Сезоны' },
     { value: 'program', label: 'Программы' },
-    { value: 'source', label: 'Источники' },
+    { value: 'entity_request', label: 'Запросы в каталог' },
     { value: 'doc', label: 'Документы' },
     { value: 'import', label: 'Импорт' },
     { value: 'representative_application', label: 'Заявки представителей' },

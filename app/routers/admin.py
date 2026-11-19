@@ -4,7 +4,10 @@
 
 - пользователи: блокировка, роли, привязка представителя к университету;
 - олимпиады: архивирование/возврат из архива, ручное создание и правка;
-- заявки БВИ: подтверждение и снятие связей университет ↔ олимпиада.
+- сводка: реальные показатели каталога и очередей.
+
+Льготы модерируются в ``/admin/benefits``: отдельной очереди БВИ нет, потому
+что БВИ — это тип правила льготы.
 
 Все маршруты требуют роль ``ADMIN``: проверка общая и живёт в
 ``app.core.deps.require_admin``.
@@ -73,30 +76,6 @@ class AdminOlympiadListItem(BaseModel):
 class AdminOlympiadsResponse(BaseModel):
     olympiads: List[AdminOlympiadListItem]
     # Всего олимпиад под фильтром — для постраничной выдачи панели.
-    total: int = 0
-
-
-class AdminBviListItem(BaseModel):
-    id: str | None = None
-    university_id: str | None = None
-    university_name: str | None = None
-    olympiad_id: str | None = None
-    olympiad_name: str | None = None
-    status: str | None = None
-    # Авторы решения: кто заявил и кто подтвердил. Без этого очередь модерации
-    # не отвечает на вопрос «это точно тот вуз? и кто это подтвердил?».
-    createdBy: str | None = None
-    confirmedBy: str | None = None
-    # Актуальна ли олимпиада: по архивной новая заявка невозможна, и
-    # администратор должен видеть это до нажатия кнопок.
-    olympiad_status: str | None = None
-    createdAt: str | None = None
-
-
-class AdminBviResponse(BaseModel):
-    links: List[AdminBviListItem]
-    # Всего связей под фильтром — сколько бы ни вернула страница. Нужно панели,
-    # чтобы отличить «связей нет» от «показана только первая страница».
     total: int = 0
 
 
@@ -226,44 +205,6 @@ async def list_olympiads(
             ],
             'total': total,
         }
-    except Exception:
-        logger.exception('Unhandled error')
-        raise HTTPException(status_code=500, detail='Internal server error')
-
-
-@admin_page.get(
-    '/bvi',
-    response_model=AdminBviResponse,
-    responses={
-        200: {'description': 'Заявки и подтверждённые связи БВИ'},
-        401: {'description': 'Access token missing'},
-        403: {'description': 'Admin role required'},
-        500: {'description': 'Internal server error'},
-    },
-)
-async def list_bvi_links(
-    status: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    current_user: deps.AdminUser = None,
-):
-    """Очередь модерации: заявки университетов на связи БВИ.
-
-    Для каждой связи видно авторов решения (кто заявил, кто подтвердил) и
-    актуальность олимпиады: по архивной заявку уже нельзя подать, но
-    подтверждение администратора по ней может быть и историческим, и
-    осмысленным.
-
-    Страница ограничена ``limit``/``offset``, а названия вуза и олимпиады
-    подтягиваются одним JOIN-ом: очередь не должна замедляться линейно с ростом
-    каталога. ``total`` отвечает, сколько связей есть под фильтром всего.
-    """
-    try:
-        links = await database.bvi.list_links_enriched(
-            status=status, limit=limit, offset=offset
-        )
-        total = await database.bvi.count_links(status=status)
-        return {'links': links, 'total': total}
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -599,7 +540,6 @@ class AdminSeasonListItem(BaseModel):
     id: str | None = None
     olympiad_id: str | None = None
     season_label: str | None = None
-    rsosh_level: str | None = None
     is_archived: bool | None = None
     createdAt: str | None = None
     updatedAt: str | None = None

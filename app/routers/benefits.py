@@ -1,22 +1,30 @@
 """API правил льгот.
 
-Публичная часть каталога отдаёт только проверенные опубликованные правила.
-Представитель может создавать и править правила своего университета, но не
-может подтверждать их: ``verified`` выставляется исключительно администратором
-через ``/verify``. Любая содержательная правка проверенного правила снимает
-проверку.
+Публичная часть каталога отдаёт опубликованные правила, включая непроверенные
+(они помечаются предупреждением «Не проверено Papaya»); отклонённые и
+черновики не видны. Представитель может создавать и править правила своего
+университета, но не может подтверждать их: ``verified`` выставляется
+исключительно администратором через ``/verify``. Любая содержательная правка
+проверенного правила снимает проверку.
+
+Правило больше не хранит свободный текст условий: тип льготы, требуемый
+результат и требование ЕГЭ — структурированные поля.
 """
 
 import logging
 import uuid
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 
 from app import database
 from app.core import deps
-from app.schemas.urls import ExternalUrl
+from app.models.benefits import (
+    BENEFIT_TYPES,
+    REQUIRED_RESULT_TYPES,
+    VERIFICATION_STATUSES,
+)
 
 benefits_page = APIRouter(prefix='/benefits', tags=['benefits'])
 benefit_rules_page = APIRouter(prefix='/benefit-rules', tags=['benefits'])
@@ -26,9 +34,6 @@ admin_benefits_page = APIRouter(prefix='/admin/benefits', tags=['benefits'])
 
 logger = logging.getLogger('papaya.benefits')
 
-BENEFIT_TYPES = ('BVI', 'EGE_100', 'DVI_100', 'OTHER')
-RESULT_TYPES = ('WINNER', 'PRIZE', 'SCORE', 'OTHER')
-VERIFICATION_STATUSES = ('unverified', 'verified', 'rejected')
 MAX_PAGE_SIZE = 200
 
 
@@ -42,44 +47,60 @@ def _check_benefit_type(v):
 
 
 def _check_result_type(v):
+    """Требуемый результат — только структурированное значение.
+
+    Свободный текст вида «победитель или призёр» раньше молча превращался в
+    ``WINNER_OR_PRIZE`` алиасом миграции. На границе API это недопустимо:
+    клиент должен присылать одно из ``REQUIRED_RESULT_TYPES``, иначе ``422``.
+    """
     if v is None:
         return v
-    if v not in RESULT_TYPES:
-        raise ValueError('required_result_type must be one of ' + ', '.join(RESULT_TYPES))
+    if isinstance(v, str) and v.strip().upper() in REQUIRED_RESULT_TYPES:
+        return v.strip().upper()
+    raise ValueError(
+        'required_result_type must be one of '
+        + ', '.join(REQUIRED_RESULT_TYPES)
+    )
+
+
+def _check_status(v):
+    if v is not None and v not in VERIFICATION_STATUSES:
+        raise ValueError(
+            'verification_status must be one of ' + ', '.join(VERIFICATION_STATUSES)
+        )
     return v
+
+
+class EgeRequirement(BaseModel):
+    """Необязательное подтверждение результата ЕГЭ."""
+
+    subject: str
+    min_score: int | None = Field(default=None, ge=0, le=100)
+
+    @field_validator('subject')
+    @classmethod
+    def _check_subject(cls, v):
+        v = (v or '').strip()
+        if not v:
+            raise ValueError('subject is required')
+        return v
 
 
 class BenefitCreate(BaseModel):
     olympiad_id: uuid.UUID
-    season_id: uuid.UUID | None = None
-    profile_id: uuid.UUID | None = None
+    season_id: uuid.UUID
+    profile_id: uuid.UUID
     benefit_type: str = 'BVI'
-    required_result: str | None = None
-    required_result_type: str | None = None
-    required_result_value: str | None = None
-    subject: str | None = None
-    additional_requirements: str | None = None
-    program_ids: List[uuid.UUID] | None = None
-    doc_id: uuid.UUID | None = None
-    source_id: uuid.UUID | None = None
-    source_url: ExternalUrl = None
-    # Поле принимается для совместимости, но игнорируется: подтверждение —
-    # отдельное действие администратора.
-    verification_status: str | None = None
+    required_result_type: str
+    doc_id: uuid.UUID
+    ege_requirement: EgeRequirement | None = None
     is_published: bool | None = None
+    # Подтверждение приходит только от администратора отдельным действием.
+    verification_status: str | None = None
 
     _benefit_type = field_validator('benefit_type')(_check_benefit_type)
     _required_result_type = field_validator('required_result_type')(_check_result_type)
-
-    @field_validator('verification_status')
-    @classmethod
-    def _check_status(cls, v):
-        if v is not None and v not in VERIFICATION_STATUSES:
-            raise ValueError(
-                'verification_status must be one of '
-                + ', '.join(VERIFICATION_STATUSES)
-            )
-        return v
+    _verification_status = field_validator('verification_status')(_check_status)
 
 
 class BenefitUpdate(BaseModel):
@@ -87,31 +108,17 @@ class BenefitUpdate(BaseModel):
     season_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
     benefit_type: str | None = None
-    required_result: str | None = None
     required_result_type: str | None = None
-    required_result_value: str | None = None
-    subject: str | None = None
-    additional_requirements: str | None = None
-    program_ids: List[uuid.UUID] | None = None
     doc_id: uuid.UUID | None = None
-    source_id: uuid.UUID | None = None
-    source_url: ExternalUrl = None
+    ege_requirement: EgeRequirement | None = None
     verification_status: str | None = None
     is_published: bool | None = None
+    needs_review: bool | None = None
     change_reason: str | None = None
 
     _benefit_type = field_validator('benefit_type')(_check_benefit_type)
     _required_result_type = field_validator('required_result_type')(_check_result_type)
-
-    @field_validator('verification_status')
-    @classmethod
-    def _check_status(cls, v):
-        if v is not None and v not in VERIFICATION_STATUSES:
-            raise ValueError(
-                'verification_status must be one of '
-                + ', '.join(VERIFICATION_STATUSES)
-            )
-        return v
+    _verification_status = field_validator('verification_status')(_check_status)
 
 
 class StatusChange(BaseModel):
@@ -128,8 +135,26 @@ class StatusChange(BaseModel):
         return v
 
 
+class RejectRequest(BaseModel):
+    """Отклонение правила: причина обязательна.
+
+    Отдельная модель, а не ``StatusChange``: отказ — это не «смена статуса на
+    rejected», а действие с объяснением, которое увидит автор правила. Клиенту
+    не нужно присылать ``status``, достаточно непустой причины. Поле объявлено
+    необязательным, чтобы пустой запрос получал понятный ``422`` от обработчика,
+    а не техническое «Field required» от валидатора.
+    """
+
+    reason: str | None = None
+
+
 class RollbackRequest(BaseModel):
-    version: int = Field(ge=1)
+    version: int = Field(ge=1, description='Номер восстанавливаемой версии')
+    expected_version: int | None = Field(
+        default=None,
+        ge=1,
+        description='Текущая версия правила, которую видел клиент',
+    )
 
 
 async def _ensure_manage(rule, current_user):
@@ -147,10 +172,11 @@ async def _get_rule_or_404(rule_id, *, public_only=False):
 
 
 async def _validate_refs(university_id, data, current_user, existing=None):
-    """Проверить, что сезон/профиль/программы/документ принадлежат вузу.
+    """Проверить согласованность связей правила.
 
     Внешние ключи в БД не выражают эти инварианты: ``season_id`` может
-    относиться к другой олимпиаде, а ``program_id`` — к другому университету.
+    относиться к другой олимпиаде, ``profile_id`` — к другому сезону, а
+    документ — к другому университету.
     """
     olympiad_id = data.get('olympiad_id') or (existing or {}).get('olympiad_id')
     season_id = data.get('season_id', (existing or {}).get('season_id'))
@@ -159,86 +185,68 @@ async def _validate_refs(university_id, data, current_user, existing=None):
     if olympiad_id:
         olympiad = await database.olympiads.get_olympiad(olympiad_id)
         if not olympiad:
-            raise HTTPException(status_code=400, detail='Olympiad not found')
+            raise HTTPException(status_code=404, detail='Olympiad not found')
         # Архивированная олимпиада не принимает новых правил, но уже
-        # существующее правило остаётся редактируемым: история и источник
-        # связи важнее актуальности каталога.
+        # существующее правило остаётся редактируемым.
         if existing is None and olympiad.get('status') == 'ARCHIVED':
             raise HTTPException(
-                status_code=400,
+                status_code=422,
                 detail='Olympiad is archived and accepts no new benefit rules',
+            )
+
+    if existing is None:
+        if not season_id:
+            raise HTTPException(
+                status_code=422, detail='Season is required for a benefit rule'
+            )
+        if not profile_id:
+            raise HTTPException(
+                status_code=422, detail='Profile is required for a benefit rule'
             )
 
     if season_id:
         season = await database.seasons.get_season(season_id)
         if not season:
-            raise HTTPException(status_code=400, detail='Season not found')
+            raise HTTPException(status_code=404, detail='Season not found')
         if olympiad_id and str(season.get('olympiad_id')) != str(olympiad_id):
             raise HTTPException(
-                status_code=400,
+                status_code=422,
                 detail='Season does not belong to the selected olympiad',
             )
 
     if profile_id:
         if not season_id:
             raise HTTPException(
-                status_code=400,
-                detail='Profile requires a season',
+                status_code=422, detail='Profile requires a season'
             )
         profile = await database.seasons.get_profile(profile_id)
         if not profile:
-            raise HTTPException(status_code=400, detail='Profile not found')
+            raise HTTPException(status_code=404, detail='Profile not found')
         if str(profile.get('season_id')) != str(season_id):
             raise HTTPException(
-                status_code=400,
+                status_code=422,
                 detail='Profile does not belong to the selected season',
             )
 
-    program_ids = data.get('program_ids')
-    if program_ids is not None:
-        for program_id in program_ids:
-            program = await database.programs.get_program(program_id)
-            if not program:
-                raise HTTPException(
-                    status_code=400, detail=f'Program {program_id} not found'
-                )
-            if str(program.get('university_id')) != str(university_id):
-                raise HTTPException(
-                    status_code=400,
-                    detail='Program does not belong to the university',
-                )
-
-    doc_id = data.get('doc_id')
+    doc_id = data.get('doc_id', (existing or {}).get('doc_id'))
     if doc_id:
         doc = await database.docs.get_doc(doc_id)
         if not doc:
-            raise HTTPException(status_code=400, detail='Document not found')
-        doc_university = doc.get('university_id')
-        is_admin = current_user.get('role') == deps.ROLE_ADMIN
-        if doc_university and str(doc_university) != str(university_id):
+            raise HTTPException(status_code=404, detail='Document not found')
+        if str(doc.get('university_id') or '') != str(university_id):
             raise HTTPException(
-                status_code=400,
-                detail='Document belongs to another university',
+                status_code=422,
+                detail='Document must belong to the same university',
             )
-        if not is_admin and doc_university is None:
-            # Общий документ (например, перечень РСОШ) может приложить
-            # администратор; представитель прикладывает только свой приказ.
+        if doc.get('type') != 'UNIVERSITY_ORDER':
             raise HTTPException(
-                status_code=400,
-                detail='Representative can attach only a document of own university',
+                status_code=422,
+                detail='Only a university order can be the basis of a benefit',
             )
-
-    source_id = data.get('source_id')
-    if source_id:
-        source = await database.sources.get_source(source_id)
-        if not source:
-            raise HTTPException(status_code=400, detail='Source not found')
-        source_university = source.get('university_id')
-        if source_university and str(source_university) != str(university_id):
-            raise HTTPException(
-                status_code=400,
-                detail='Source belongs to another university',
-            )
+    elif existing is None:
+        raise HTTPException(
+            status_code=422, detail='University document is required'
+        )
 
 
 def _page_params(limit, offset):
@@ -247,31 +255,34 @@ def _page_params(limit, offset):
     return min(max(1, int(limit)), MAX_PAGE_SIZE), max(0, int(offset or 0))
 
 
-async def _list_handler(
+def _list_kwargs(
     university_id=None,
     olympiad_id=None,
     benefit_type=None,
-    subject=None,
-    program_id=None,
-    verification_status=None,
-    search=None,
     season_id=None,
-    limit=50,
-    offset=0,
+    profile_id=None,
+    level=None,
+    verification_status=None,
+    needs_review=None,
+    search=None,
 ):
+    return {
+        'university_id': university_id,
+        'olympiad_id': olympiad_id,
+        'benefit_type': benefit_type,
+        'season_id': season_id,
+        'profile_id': profile_id,
+        'level': level,
+        'verification_status': verification_status,
+        'needs_review': needs_review,
+        'search': search,
+    }
+
+
+async def _list_handler(limit=50, offset=0, **filters):
     limit, offset = _page_params(limit, offset)
     rules, total = await database.benefits.list_rules(
-        university_id=university_id,
-        olympiad_id=olympiad_id,
-        benefit_type=benefit_type,
-        subject=subject,
-        program_id=program_id,
-        verification_status=verification_status,
-        search=search,
-        season_id=season_id,
-        public_only=True,
-        limit=limit,
-        offset=offset,
+        public_only=True, limit=limit, offset=offset, **filters
     )
     return {
         'rules': rules,
@@ -284,31 +295,47 @@ async def _list_handler(
 # ---------------------------------------------------------------- public list
 
 
+def _public_query_params():
+    """Повторяющийся набор query-параметров публичного каталога."""
+
+    return {
+        'university_id': Query(default=None),
+        'olympiad_id': Query(default=None),
+        'benefit_type': Query(default=None),
+        'season_id': Query(default=None),
+        'profile_id': Query(default=None),
+        'level': Query(default=None, pattern='^[123]$'),
+        'search': Query(default=None),
+        'limit': Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+        'offset': Query(default=0, ge=0),
+    }
+
+
 @benefits_page.get('')
 async def list_benefits(
-    university_id: uuid.UUID | None = Query(default=None),
-    olympiad_id: uuid.UUID | None = Query(default=None),
-    benefit_type: str | None = Query(default=None),
-    subject: str | None = Query(default=None),
-    program_id: uuid.UUID | None = Query(default=None),
-    season_id: uuid.UUID | None = Query(default=None),
-    verification_status: str | None = Query(default=None),
-    search: str | None = Query(default=None),
-    limit: int | None = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+    university_id: uuid.UUID | None = None,
+    olympiad_id: uuid.UUID | None = None,
+    benefit_type: str | None = None,
+    season_id: uuid.UUID | None = None,
+    profile_id: uuid.UUID | None = None,
+    level: str | None = Query(default=None, pattern='^[123]$'),
+    search: str | None = None,
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
 ):
     try:
         return await _list_handler(
-            university_id=university_id,
-            olympiad_id=olympiad_id,
-            benefit_type=benefit_type,
-            subject=subject,
-            program_id=program_id,
-            season_id=season_id,
-            verification_status=verification_status,
-            search=search,
             limit=limit,
             offset=offset,
+            **_list_kwargs(
+                university_id=university_id,
+                olympiad_id=olympiad_id,
+                benefit_type=benefit_type,
+                season_id=season_id,
+                profile_id=profile_id,
+                level=level,
+                search=search,
+            ),
         )
     except HTTPException:
         raise
@@ -319,25 +346,23 @@ async def list_benefits(
 
 @benefit_rules_page.get('')
 async def list_benefit_rules(
-    university_id: uuid.UUID | None = Query(default=None),
-    olympiad_id: uuid.UUID | None = Query(default=None),
-    benefit_type: str | None = Query(default=None),
-    subject: str | None = Query(default=None),
-    program_id: uuid.UUID | None = Query(default=None),
-    season_id: uuid.UUID | None = Query(default=None),
-    verification_status: str | None = Query(default=None),
-    search: str | None = Query(default=None),
-    limit: int | None = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+    university_id: uuid.UUID | None = None,
+    olympiad_id: uuid.UUID | None = None,
+    benefit_type: str | None = None,
+    season_id: uuid.UUID | None = None,
+    profile_id: uuid.UUID | None = None,
+    level: str | None = Query(default=None, pattern='^[123]$'),
+    search: str | None = None,
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
 ):
     return await list_benefits(
         university_id=university_id,
         olympiad_id=olympiad_id,
         benefit_type=benefit_type,
-        subject=subject,
-        program_id=program_id,
         season_id=season_id,
-        verification_status=verification_status,
+        profile_id=profile_id,
+        level=level,
         search=search,
         limit=limit,
         offset=offset,
@@ -347,30 +372,31 @@ async def list_benefit_rules(
 @university_benefits_page.get('/universities/{university_id}/benefits')
 async def list_university_benefits(
     university_id: uuid.UUID,
-    benefit_type: str | None = Query(default=None),
-    subject: str | None = Query(default=None),
-    program_id: uuid.UUID | None = Query(default=None),
-    season_id: uuid.UUID | None = Query(default=None),
-    limit: int | None = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+    benefit_type: str | None = None,
+    olympiad_id: uuid.UUID | None = None,
+    season_id: uuid.UUID | None = None,
+    profile_id: uuid.UUID | None = None,
+    level: str | None = Query(default=None, pattern='^[123]$'),
+    search: str | None = None,
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
 ):
     try:
-        rules, total = await database.benefits.list_rules(
-            university_id=str(university_id),
-            benefit_type=benefit_type,
-            subject=subject,
-            program_id=program_id,
-            season_id=season_id,
-            public_only=True,
+        return await _list_handler(
             limit=limit,
             offset=offset,
+            **_list_kwargs(
+                university_id=str(university_id),
+                olympiad_id=olympiad_id,
+                benefit_type=benefit_type,
+                season_id=season_id,
+                profile_id=profile_id,
+                level=level,
+                search=search,
+            ),
         )
-        return {
-            'rules': rules,
-            'total': total,
-            'limit': limit,
-            'offset': offset,
-        }
+    except HTTPException:
+        raise
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -379,7 +405,7 @@ async def list_university_benefits(
 @university_benefits_page.get('/universities/{university_id}/benefit-rules')
 async def list_university_benefit_rules(
     university_id: uuid.UUID,
-    limit: int | None = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
 ):
     return await list_university_benefits(
@@ -392,21 +418,24 @@ async def list_managed_university_benefit_rules(
     university_id: uuid.UUID,
     verification_status: str | None = Query(default=None),
     search: str | None = Query(default=None),
-    limit: int | None = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+    needs_review: bool | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
     current_user: dict = Depends(deps.require_manage_university),
 ):
     """Рабочий список правил своего университета, включая черновики.
 
-    Публичный список отдаёт только ``verified + is_published``. Представителю
-    нужны и непроверенные правила: без этого он не смог бы продолжить работу
-    над черновиком или увидеть причину отказа.
+    Публичный список показывает опубликованные правила (в том числе
+    непроверенные). Представителю нужны ещё черновики и отклонённые правила:
+    без этого он не смог бы продолжить работу над черновиком или увидеть
+    причину отказа.
     """
     try:
         rules, total = await database.benefits.list_rules(
             university_id=str(university_id),
             verification_status=verification_status,
             search=search,
+            needs_review=needs_review,
             public_only=False,
             limit=limit,
             offset=offset,
@@ -417,6 +446,8 @@ async def list_managed_university_benefit_rules(
             'limit': limit,
             'offset': offset,
         }
+    except HTTPException:
+        raise
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -425,12 +456,20 @@ async def list_managed_university_benefit_rules(
 @benefits_page.get('/olympiad/{olympiad_id}')
 async def list_olympiad_benefits(
     olympiad_id: uuid.UUID,
-    limit: int | None = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+    season_id: uuid.UUID | None = None,
+    profile_id: uuid.UUID | None = None,
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
 ):
     try:
         return await _list_handler(
-            olympiad_id=olympiad_id, limit=limit, offset=offset
+            limit=limit,
+            offset=offset,
+            **_list_kwargs(
+                olympiad_id=olympiad_id,
+                season_id=season_id,
+                profile_id=profile_id,
+            ),
         )
     except HTTPException:
         raise
@@ -442,10 +481,14 @@ async def list_olympiad_benefits(
 @olympiad_benefits_page.get('/olympiads/{olympiad_id}/benefits')
 async def list_olympiad_benefits_alias(
     olympiad_id: uuid.UUID,
-    limit: int | None = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
+    season_id: uuid.UUID | None = None,
+    profile_id: uuid.UUID | None = None,
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
 ):
-    return await list_olympiad_benefits(olympiad_id, limit, offset)
+    return await list_olympiad_benefits(
+        olympiad_id, season_id, profile_id, limit, offset
+    )
 
 
 # ------------------------------------------------------------------- create
@@ -461,17 +504,13 @@ async def _create_handler(university_id, body, current_user):
     # правило создаётся непроверенным.
     data.pop('verification_status', None)
     data['university_id'] = str(university_id)
-    if isinstance(data.get('source_url'), str):
-        data['source_url'] = data['source_url'].strip()
     try:
         university = await database.universities.get_university(university_id)
         if not university:
             raise HTTPException(status_code=404, detail='University not found')
         await _validate_refs(university_id, data, current_user)
         rule = await database.benefits.create_rule(
-            data,
-            program_ids=data.pop('program_ids', None),
-            user_id=current_user['id'],
+            data, user_id=current_user['id']
         )
         await database.audit.log_action(
             'benefit_rule', rule['id'], 'create',
@@ -480,6 +519,13 @@ async def _create_handler(university_id, body, current_user):
         return rule
     except HTTPException:
         raise
+    except database.benefits.InvalidReference as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail='Benefit rule for this university, olympiad, season and profile already exists',
+        ) from exc
     except Exception:
         logger.exception('Unhandled error')
         raise HTTPException(status_code=500, detail='Internal server error')
@@ -540,16 +586,13 @@ async def _update_handler(rule_id, body, current_user):
     data = body.model_dump(exclude_unset=True)
     expected = data.pop('version', None)
     reason = data.pop('change_reason', None)
-    program_ids = data.pop('program_ids', None)
-    data['program_ids'] = program_ids
     try:
         await _validate_refs(
             rule['university_id'], data, current_user, existing=rule
         )
         updated = await database.benefits.update_rule(
             rule_id,
-            {k: v for k, v in data.items() if k != 'program_ids'},
-            program_ids=program_ids,
+            data,
             user_id=current_user['id'],
             reason=reason,
             expected_version=expected,
@@ -561,6 +604,8 @@ async def _update_handler(rule_id, body, current_user):
             user_id=current_user['id'], before=rule, after=updated,
         )
         return updated
+    except database.benefits.InvalidReference as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
     except database.benefits.VersionConflict as exc:
         raise HTTPException(status_code=409, detail='Version conflict') from exc
     except HTTPException:
@@ -617,14 +662,17 @@ async def change_status(
 ):
     rule = await _get_rule_or_404(rule_id)
     await _ensure_manage(rule, current_user)
-    if body.status == 'verified' and current_user.get('role') != deps.ROLE_ADMIN:
-        raise HTTPException(status_code=403, detail='Only admin can verify')
-    if body.status == 'verified':
-        if not rule.get('doc_id') or not rule.get('source_url'):
-            raise HTTPException(
-                status_code=400,
-                detail='Document and source URL required for verification',
-            )
+    is_admin = current_user.get('role') == deps.ROLE_ADMIN
+    if not is_admin and body.status != 'unverified':
+        raise HTTPException(
+            status_code=403,
+            detail='Only admin can verify or reject a benefit rule',
+        )
+    if body.status == 'rejected' and not (body.reason or '').strip():
+        raise HTTPException(
+            status_code=422,
+            detail='Rejection reason is required',
+        )
     try:
         updated = await database.benefits.set_status(
             rule_id, body.status,
@@ -636,6 +684,8 @@ async def change_status(
             user_id=current_user['id'], before=rule, after=updated,
         )
         return updated
+    except database.benefits.InvalidReference as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
     except database.benefits.VersionConflict as exc:
         raise HTTPException(status_code=409, detail='Version conflict') from exc
     except Exception:
@@ -661,17 +711,14 @@ async def verify_benefit(
     current_user: dict = Depends(deps.require_admin),
 ):
     rule = await _get_rule_or_404(rule_id)
-    if not rule.get('doc_id') or not rule.get('source_url'):
-        raise HTTPException(
-            status_code=400,
-            detail='Document and source URL required for verification',
-        )
     try:
         updated = await database.benefits.set_status(
             rule_id, 'verified',
             user_id=current_user['id'], reason='verified by admin',
             expected_version=rule['version'],
         )
+    except database.benefits.InvalidReference as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
     except database.benefits.VersionConflict as exc:
         raise HTTPException(status_code=409, detail='Version conflict') from exc
     await database.audit.log_action(
@@ -684,11 +731,16 @@ async def verify_benefit(
 @benefits_page.post('/{rule_id}/reject')
 async def reject_benefit(
     rule_id: uuid.UUID,
-    body: StatusChange | None = None,
+    body: RejectRequest | None = None,
     current_user: dict = Depends(deps.require_admin),
 ):
     rule = await _get_rule_or_404(rule_id)
-    reason = body.reason if body else None
+    reason = ((body.reason if body else '') or '').strip()
+    if not reason:
+        raise HTTPException(
+            status_code=422,
+            detail='Укажите причину отклонения',
+        )
     try:
         updated = await database.benefits.set_status(
             rule_id, 'rejected', user_id=current_user['id'], reason=reason,
@@ -760,9 +812,17 @@ async def rollback_benefit(
 ):
     rule = await _get_rule_or_404(rule_id)
     await _ensure_manage(rule, current_user)
-    updated = await database.benefits.rollback(
-        rule_id, body.version, user_id=current_user['id']
-    )
+    try:
+        updated = await database.benefits.rollback(
+            rule_id,
+            body.version,
+            user_id=current_user['id'],
+            expected_version=body.expected_version,
+        )
+    except database.benefits.InvalidReference as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
+    except database.benefits.VersionConflict as exc:
+        raise HTTPException(status_code=409, detail='Version conflict') from exc
     if not updated:
         raise HTTPException(status_code=404, detail='Version not found')
     await database.audit.log_action(
@@ -825,10 +885,14 @@ async def status_history_manage(
 
 @admin_benefits_page.get('')
 async def admin_list_benefits(
-    university_id: uuid.UUID | None = Query(default=None),
-    olympiad_id: uuid.UUID | None = Query(default=None),
-    verification_status: str | None = Query(default=None),
-    search: str | None = Query(default=None),
+    university_id: uuid.UUID | None = None,
+    olympiad_id: uuid.UUID | None = None,
+    verification_status: str | None = None,
+    season_id: uuid.UUID | None = None,
+    profile_id: uuid.UUID | None = None,
+    level: str | None = Query(default=None, pattern='^[123]$'),
+    needs_review: bool | None = None,
+    search: str | None = None,
     limit: int = Query(default=50, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
     current_user: deps.AdminUser = None,
@@ -838,6 +902,10 @@ async def admin_list_benefits(
             university_id=university_id,
             olympiad_id=olympiad_id,
             verification_status=verification_status,
+            season_id=season_id,
+            profile_id=profile_id,
+            level=level,
+            needs_review=needs_review,
             search=search,
             public_only=False,
             limit=limit,

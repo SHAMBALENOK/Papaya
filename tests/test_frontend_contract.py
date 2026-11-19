@@ -12,18 +12,6 @@ def _read(*parts: str) -> str:
     return FRONTEND.joinpath(*parts).read_text(encoding='utf-8')
 
 def _entity_title_body() -> str:
-    """╨в╨╡╨╗╨╛ ``entityTitleHtml`` тАФ ╨╛╨▒╤Й╨╕╨╣ ╨║╨╛╨╝╨┐╨╛╨╜╨╡╨╜╤В ╨╖╨░╨│╨╛╨╗╨╛╨▓╨║╨░ ╨║╨░╤А╤В╨╛╤З╨║╨╕."""
-    source = _read('pages', 'home.js')
-    match = re.search(
-        r'function entityTitleHtml\(entity\) \{(.*?)\n\}',
-        source,
-        re.S,
-    )
-    assert match, 'entityTitleHtml ╨╜╨╡ ╨╜╨░╨╣╨┤╨╡╨╜ ╨▓ pages/home.js'
-    return match.group(1)
-
-
-def _entity_title_body() -> str:
     """Тело ``entityTitleHtml`` — общий компонент заголовка карточки."""
     source = _read('pages', 'home.js')
     match = re.search(
@@ -166,8 +154,8 @@ def test_home_does_not_say_universities_come_from_rsosh():
 def test_universities_are_the_main_catalog():
     """Главная: университеты — главный раздел, олимпиады — вторичный."""
     home = _read('pages', 'home.js')
-    assert 'Каталог БВИ университетов' in home
-    universities_pos = home.index('Каталог БВИ университетов')
+    assert 'Каталог университетов' in home
+    universities_pos = home.index('Каталог университетов')
     olympiads_pos = home.index('Перечень олимпиад РСОШ')
     assert universities_pos < olympiads_pos
 
@@ -211,23 +199,35 @@ def test_frontend_file_exists(filename):
     """Файлы фронтенда на месте: страница падает на отсутствующем скрипте."""
     assert FRONTEND.joinpath(filename).exists()
 
-def test_frontend_uses_moderation_endpoint():
-    """Клиент вызывает /moderation, а не произвольную смену статуса."""
+def test_frontend_uses_benefit_verification_endpoints():
+    """Клиент подтверждает и отклоняет правило через явные маршруты.
+
+    Отдельного процесса модерации БВИ больше нет: льгота создаётся правилом,
+    представитель оставляет её непроверенной, а подтверждение и отклонение —
+    действия администратора по документу-основанию.
+    """
     api = _read('api.js')
-    assert 'moderateBvi' in api
-    assert '/moderation' in api
+    assert 'verifyBenefit' in api
+    assert 'rejectBenefit' in api
+    assert '/verify' in api
+    assert '/reject' in api
+    assert 'moderateBvi' not in api
     assert 'setBviStatus' not in api
-    assert '/bvi/${olympiadId}/status' not in api
+    assert '/bvi' not in api
+    assert '/admin/sources' not in api
 
 
-def test_admin_panel_offers_explicit_moderation_actions():
-    """В панели есть подтвердить, отклонить и отозвать — по отдельности."""
+def test_admin_panel_offers_verify_and_reject_with_reason():
+    """В панели есть подтверждение и отклонение правила, отказ объясняется."""
     admin = _read('pages', 'admin.js')
-    for action in ('confirmBvi', 'rejectBvi', 'revokeBvi'):
-        assert action in admin, action
+    assert 'verifyBenefit' in admin
+    assert 'rejectBenefit' in admin
+    assert 'openRejectBenefitModal' in admin
+    assert 'Причина отклонения' in admin
     assert 'dropBvi' not in admin
-    for action in ('confirm', 'reject', 'revoke'):
-        assert f"'{action}'" in admin, action
+    assert 'confirmBvi' not in admin
+    assert 'rejectBvi' not in admin
+    assert 'revokeBvi' not in admin
 
 
 # ----------------------------------------------
@@ -285,62 +285,83 @@ def test_archived_page_has_explicit_notice():
     assert 'сохранены' in notice
 
 
-def test_bvi_cards_distinguish_historical_links():
-    """Карточки БВИ различают действующую и историческую связь."""
+def test_university_benefit_cards_show_season_and_profile():
+    """Карточка льготы отвечает на вопрос «за какой сезон и профиль»."""
     universities = _read('pages', 'universities.js')
     body = re.search(
-        r'function bviOlympiadCardHtml\(olympiad\) \{(.*?)\n\}',
+        r'function benefitCardsHtml\(rules\) \{(.*?)\n\}',
         universities,
         re.S,
     )
-    assert body, 'bviOlympiadCardHtml не найден'
+    assert body, 'benefitCardsHtml не найден'
     card = body.group(1)
-    assert 'isHistoricalBvi' in card, 'карточка должна использовать общий предикат'
-    assert 'Архивная олимпиада' in card
-    assert 'Историческая связь' in card
-    # Зелёное «БВИ» остаётся только для актуальных олимпиад.
-    assert 'historical' in card
+    assert 'season_label' in card, 'карточка должна показывать сезон'
+    assert 'profile_name' in card, 'карточка должна показывать профиль'
+    assert 'profile_rsosh_level' in card, 'уровень РСОШ относится к профилю'
+    assert 'benefitEgeLine' in card, 'требование ЕГЭ показывается отдельно'
+    assert 'benefitStatusBadge' in card, 'статус проверки обязателен'
+    assert 'needs_review' in card, 'неполное правило помечается'
 
 
-def test_olympiad_page_splits_current_and_historical_universities():
-    """Страница олимпиады делит университеты на действующие и исторические.
+def test_university_programs_are_independent_reference():
+    """Программы — справочник вуза, а не привязка правила к программам."""
+    universities = _read('pages', 'universities.js')
+    assert 'Образовательные программы' in universities
+    assert 'programs.map' in universities
+    assert 'program_ids' not in universities
 
-    Один общий список смешивал льготу, которой сейчас нет, с историей, и
-    страница переставала отвечать на вопрос «кто учитывает эту олимпиаду
-    для БВИ сейчас».
+
+def test_olympiad_page_splits_actual_and_archived_seasons():
+    """Страница олимпиады переключает актуальные и архивные сезоны.
+
+    Один общий список смешивал сезоны, и страница переставала отвечать на
+    вопрос «что действует сейчас». Архив сохраняет профили и правила.
     """
     source = _read('pages', 'olympiads.js')
-    assert 'isArchived' in source
-    assert 'currentUniversities' in source, 'нет разделения на актуальные'
-    assert 'historicalUniversities' in source, 'нет раздела исторических'
-    assert 'Исторические связи' in source
-    assert 'Историческая связь' in source
-    # Вузы не выбрасываются: исторические только помечаются.
-    assert 'historicalUniversities.map' in source
-    # Исторический блок вставлен в разметку, а не объявлен и забыт.
-    assert '${historicalHtml}' in source
+    assert 'include_archived: true' in source, 'архив запрашивается явно'
+    assert "mode === 'actual'" in source, 'нет режима актуальных сезонов'
+    assert 'archived' in source
+    assert 'Актуальные (' in source and 'Архивные (' in source
+    assert 'season.profiles' in source, 'профили берутся из выбранного сезона'
+    assert 'Архивный сезон' in source
 
 
-def test_university_page_splits_current_and_historical_olympiads():
-    """Страница университета: основной блок — актуальные, история — отдельно."""
-    source = _read('pages', 'universities.js')
-    assert 'isHistoricalBvi' in source
-    assert 'historical' in source
-    assert 'Исторические связи' in source
-    assert '${historicalHtml}' in source
+def test_olympiad_page_does_not_mix_season_rules():
+    """Правила загружаются только для выбранного сезона."""
+    source = _read('pages', 'olympiads.js')
+    assert 'loadOlympiadSeasonBenefits(olympiadId, seasonId)' in source
+    assert 'season_id: seasonId' in source
+    assert 'api.listOlympiadBenefits(olympiadId)' not in source
 
 
-def test_bvi_count_excludes_historical():
-    """Счётчик «Олимпиад с БВИ сейчас» не включает исторические связи.
+def test_benefit_statuses_have_text_not_only_color():
+    """Статус проверки читается словами, а не только цветом."""
+    app = _read('app.js')
+    body = re.search(r'function benefitStatusBadge\(status\) \{(.*?)\n\}', app, re.S)
+    assert body, 'benefitStatusBadge не найден'
+    function = body.group(1)
+    assert 'Не проверено Papaya' in function
+    assert 'Проверено' in function
+    assert 'Отклонено' in function
 
-    Иначе страница отвечала бы на главный вопрос завышенным числом.
-    """
-    source = _read('pages', 'universities.js')
-    # Счётчик берётся из отфильтрованного списка актуальных, а не всего.
-    match = re.search(r'\$\{current\.length\}', source)
-    assert match, 'счётчик считает не current.length'
-    assert '${olympiads.length}' not in source, 'счётчик использует общий список'
-    assert '${all.length}' not in source, 'счётчик использует общий список'
+
+def test_rep_cabinet_shows_rule_versions_and_history():
+    """В кабинете представителя есть история версий и откат."""
+    source = _read('pages', 'myuniversity.js')
+    assert 'data-rollback' in source
+    assert 'rollbackBenefit' in source
+    assert 'benefitVersionsManage' in source
+    assert 'benefitStatusHistoryManage' in source
+    assert 'Версия ${' in source
+
+
+def test_rep_cabinet_can_request_missing_entities():
+    """Отсутствующие олимпиады, сезоны и профили запрашиваются из кабинета."""
+    source = _read('pages', 'myuniversity.js')
+    assert 'createEntityRequest' in source
+    assert 'listEntityRequests' in source
+    assert 'entity_type' in source
+    assert 'parent_id' in source
 
 
 def test_no_false_bvi_claims():
@@ -360,37 +381,20 @@ def test_no_false_bvi_claims():
             assert phrase not in source, f'{path.name}: {phrase}'
 
 
-def test_historical_rule_has_single_source():
-    """Правило «связь историческая» не дублируется по страницам."""
-    source = _read('pages', 'home.js')
-    body = re.search(
-        r'function isHistoricalBvi\(item\) \{(.*?)\n\}', source, re.S
-    )
-    assert body, 'isHistoricalBvi не найден'
-    assert 'is_historical' in body.group(1)
-    # На страницах не должно быть собственных копий правила.
-    for name in ('pages/universities.js', 'pages/olympiads.js'):
-        page = _read(*name.split('/'))
-        own = re.findall(r'\.is_historical\s*\|\|', page)
-        assert not own, f'{name}: правило продублировано'
+def test_archived_seasons_are_requested_explicitly():
+    """Архивные сезоны не смешиваются с актуальными в общем запросе."""
+    source = _read('pages', 'olympiads.js')
+    assert 'include_archived: true' in source
+    assert "filter(item => !item.is_archived)" in source
+    assert "filter(item => item.is_archived)" in source
 
 
-def test_archived_not_in_count_but_kept_in_history():
-    """Архивная олимпиада не попадает в основной ответ, но связи её хранятся."""
-    source = _read('pages', 'universities.js')
-    # Фильтрация опирается на общий предикат, а не на вырезание из массива.
-    assert 'all.filter' in source
-    assert 'current' in source and 'historical' in source
-
-
-def test_rep_cabinet_shows_archived_links_as_historical():
-    """В кабинете представителя архивная связь видна и объяснена."""
+def test_rep_cabinet_explains_rule_state_and_missing_document():
+    """В кабинете видно, почему правило нельзя подтвердить."""
     source = _read('pages', 'myuniversity.js')
-    assert 'is_historical' in source or "item.status === 'ARCHIVED'" in source
-    assert 'Связь историческая' in source
-
-
-# ----------------------------------------------
+    assert 'Нужно заполнить' in source
+    assert 'Не выбран документ-основание' in source
+    assert 'Причина отказа' in source
 
 
 def test_frontend_has_no_delete_actions():
@@ -403,10 +407,10 @@ def test_frontend_has_no_delete_actions():
 
 
 def test_picker_uses_current_catalog_only():
-    """Выбор олимпиады для новой заявки берёт только актуальные записи.
+    """Выбор олимпиады для нового правила берёт только актуальные записи.
 
-    `listOlympiads` без `include_archived` возвращает `PUBLISHED`, поэтому
-    архивную олимпиаду нельзя выбрать даже до серверной проверки.
+    ``listOlympiads`` без ``include_archived`` возвращает ``PUBLISHED``,
+    поэтому архивную олимпиаду нельзя выбрать даже до серверной проверки.
     """
     source = _read('pages', 'myuniversity.js')
     match = re.search(r'api\.listOlympiads\((.*?)\)', source)
@@ -642,25 +646,111 @@ def test_modal_close_always_removes_keydown_listener():
     )
 
 
-def test_confirmed_bvi_link_offers_only_revoke():
-    """Для подтверждённой связи в панели есть только «Отозвать».
+def test_admin_requests_queue_supports_status_filter_and_pagination():
+    """Очередь запросов фильтруется по статусу и грузится порциями.
 
-    Вторая кнопка («Удалить связь») слала ``reject`` по CONFIRMED-связи, а
-    бэкенд отклоняет только PENDING-заявки (409). Подтверждённую связь удаляет
-    исключительно ``revoke``, поэтому всегда падающей кнопки быть не должно.
+    Запросы на отсутствующие олимпиады, сезоны и профили — отдельная очередь:
+    после одобрения сущность создаётся один раз, повторное одобрение даёт 409.
     """
     admin = _read('pages', 'admin.js')
-    branch = re.search(
-        r"link\.status === 'CONFIRMED'\s*\?\s*`(.*?)`\s*:",
-        admin,
-        re.S,
-    )
-    assert branch, 'ветка CONFIRMED для списка БВИ не найдена'
-    confirmed = branch.group(1)
-    assert 'revokeBvi' in confirmed
-    assert 'rejectBvi' not in confirmed, (
-        'CONFIRMED-связь нельзя отклонять: reject всегда даёт 409'
-    )
+    assert 'adminRequestsHtml' in admin
+    assert 'data-request-status' in admin
+    assert 'data-act="searchRequests"' in admin
+    assert 'data-act="loadMoreRequests"' in admin
+    assert 'data-act="approveRequest"' in admin
+    assert 'data-act="rejectRequest"' in admin
+    assert 'openRejectRequestModal' in admin
+    assert 'rejectEntityRequest' in admin
+    assert "label: 'Запросы в каталог'" in admin
+    # Старого раздела и очереди БВИ больше нет.
+    assert 'groupBviLinksByUniversity' not in admin
+    assert 'loadMoreBvi' not in admin
+    assert 'confirmAllBvi' not in admin
+    assert '/admin/bvi' not in admin
+
+
+def test_admin_has_no_sources_section():
+    """Отдельного раздела источников в панели нет."""
+    admin = _read('pages', 'admin.js')
+    assert 'admin/sources' not in admin
+    assert 'listSources' not in admin
+    assert 'source_id' not in admin
+
+
+def test_admin_benefits_filter_supports_needs_review():
+    """Очередь модерации умеет показать только требующие уточнения правила."""
+    admin = _read('pages', 'admin.js')
+    assert 'data-benefit-needs-review' in admin
+    assert 'Только требующие уточнения' in admin
+    assert 'searchBenefits' in admin
+    assert 'loadMoreBenefits' in admin
+
+
+def test_admin_can_create_and_edit_benefit_rules():
+    """Администратор добавляет и правит правила льгот из своей панели.
+
+    Вкладка «Льготы» получает кнопку создания и действие правки, а форма
+    открывается в админском режиме — с выбором университета.
+    """
+    admin = _read('pages', 'admin.js')
+    assert 'data-act="newBenefit"' in admin
+    assert 'data-act="editBenefit"' in admin
+    assert 'Добавить правило' in admin
+    assert 'openBenefitFormModal(null, null, [], () => reloadAdmin(), { admin: true })' in admin
+    assert 'openBenefitFormModal(null, rule, [], () => reloadAdmin(), { admin: true })' in admin
+    assert "'newBenefit', 'editBenefit'" in admin
+
+
+def test_admin_benefit_form_chooses_university_and_reloads_docs():
+    """В админской форме правило привязывается к выбранному вузу.
+
+    Документы-основания и программы подгружаются для этого вуза, а не для
+    кабинета представителя, поэтому выбор университета обязателен при создании.
+    """
+    cabinet = _read('pages', 'myuniversity.js')
+    assert 'loadAdminUniversityOptions' in cabinet
+    assert 'api.adminUniversities' in cabinet
+    assert "id: 'benefit-university'" in cabinet
+    assert 'adminMode' in cabinet
+    assert 'options.admin' in cabinet
+    assert 'loadOrderDocs' in cabinet
+    assert 'benefit-doc-hint' in cabinet
+
+
+def test_olympiad_edit_modal_contains_seasons_panel():
+    """Добавление сезона живёт в окне правки олимпиады, рядом с её полями.
+
+    Отдельная кнопка «Создать сезон» во вкладке «Сезоны» убрана: сезон — часть
+    олимпиады, и выбирать её заново в другом окне больше не нужно.
+    """
+    app_js = _read('app.js')
+    assert "id=\"ol-seasons-box\"" in app_js
+    assert 'loadOlympiadSeasonsBox' in app_js
+    assert "id=\"ol-season-add\"" in app_js
+    assert 'api.createSeason(olympiadId' in app_js
+    assert "size: isEdit ? 'xl' : 'lg'" in app_js
+    assert 'lg:grid-cols-' in app_js
+
+    admin = _read('pages', 'admin.js')
+    assert 'data-act="newSeason"' not in admin
+    assert 'Сезон добавляется в окне правки олимпиады' in admin
+
+
+def test_reject_benefit_sends_reason_and_explains_empty_reason():
+    """Отклонение отправляет непустую причину и не шлёт ``null``.
+
+    Пустой body раньше давал техническое «Field required» от валидатора;
+    теперь фронтенд проверяет причину до запроса и объясняет её по-русски.
+    """
+    admin = _read('pages', 'admin.js')
+    start = admin.index('function openRejectBenefitModal(')
+    end = admin.index('\n}', admin.index("showModalError(overlay, res);", start))
+    body = admin[start:end]
+    assert 'Укажите причину отклонения' in body
+    assert 'const reason = (fd.get(\'reason\') || \'\').trim();' in body
+    assert 'api.rejectBenefit(id, { reason })' in body
+    assert 'reason: ' not in body
+    assert 'null' not in body
 
 
 def test_run_import_button_disabled_while_processing():
@@ -701,50 +791,5 @@ def test_admin_nav_hides_my_university():
     )
 
 
-def test_admin_bvi_groups_by_university_and_splits_statuses():
-    """Очередь БВИ в панели группируется по вузам и делит заявки/подтверждённые.
 
-    Плоский список смешивал разные вузы, и администратор не видел, сколько
-    заявок ждёт подтверждения у конкретного университета.
-    """
-    admin = _read('pages', 'admin.js')
-    assert 'groupBviLinksByUniversity' in admin, 'нет группировки по университету'
-    assert 'bviUniversityGroupHtml' in admin, 'нет отрисовки группы вуза'
-    assert '<details' in admin, 'разделы вузов не раскрываются'
-    # Заявки и подтверждённые связи показаны разными блоками.
-    assert 'Ожидают подтверждения' in admin
-    assert 'Подтверждённые · ' in admin
-
-
-def test_admin_bvi_confirm_all_is_bulk_side_effect():
-    """У группы вуза есть «Подтвердить все», и это побочное действие.
-
-    Обработчик обязан быть в ``ADMIN_SIDE_EFFECT_ACTIONS``: он сам показывает
-    результат и перерисовывает вкладку, поэтому общий путь не должен читать
-    ``res.ok`` у ``undefined``.
-    """
-    admin = _read('pages', 'admin.js')
-    assert 'Подтвердить все' in admin
-    assert 'confirmAllBvi' in admin
-    assert 'confirmAllBviLinks' in admin
-    body = re.search(
-        r'const ADMIN_SIDE_EFFECT_ACTIONS = new Set\(\[(.*?)\]\);',
-        admin,
-        re.S,
-    )
-    assert body, 'ADMIN_SIDE_EFFECT_ACTIONS не найден'
-    assert 'confirmAllBvi' in body.group(1)
-    # Кнопка несёт университет: без него нельзя понять, какие заявки подтверждать.
-    assert 'data-act="confirmAllBvi" data-university=' in admin
-
-
-def test_admin_bvi_queue_is_not_paginated():
-    """Очередь БВИ выгружается целиком: группировка по вузам несовместима со страницами.
-
-    Порционная выдача разрезала бы один университет между страницами, и раздел
-    вуза показывал бы только часть заявок.
-    """
-    admin = _read('pages', 'admin.js')
-    assert 'loadMoreBvi' not in admin
-    assert 'fetchAllBviLinks' in admin
 

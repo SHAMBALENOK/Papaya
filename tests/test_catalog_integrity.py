@@ -16,7 +16,6 @@ from tests.conftest import (
     admin_client,
     create_olympiad,
     create_university,
-    university_rep_client,
 )
 from tests.rsosh_fixtures import (
     xlsx_bytes,
@@ -39,41 +38,46 @@ def normalize_name(value: str) -> str:
 # --------------------------- Гонка при создании связи ---------------------------
 
 
-async def test_parallel_requests_create_one_link(client):
-    """Два параллельных запроса на одну пару дают одну связь, а не 500.
+async def test_parallel_requests_create_one_season(client):
+    """Два параллельных запроса на одну метку дают один сезон, а не 500.
 
-    Уникальный индекс по паре — последняя линия защиты; второй запрос должен
-    получить уже созданную связь (тот же идемпотентный результат), а не
-    ``IntegrityError`` наружу.
+    Уникальный индекс по паре «олимпиада + метка» — последняя линия защиты:
+    второй запрос упирается в него, а не создаёт дубль сезона.
     """
-    university = await create_university(client, 'Университет ИТМО')
-    olympiad = await create_olympiad(client, 'Олимпиада для гонки')
-    await university_rep_client(client, university['id'])
-
-    async def request_link():
-        # Отдельная сессия на каждый запрос: иначе это один запрос, а не два.
-        from app.database import bvi as bvi_db
-
-        return await bvi_db.request_bvi_link(
-            olympiad['id'], university['id'], requested_by=None
-        )
-
-    results = await asyncio.gather(request_link(), request_link())
-    ids = {result['id'] for result in results}
-    assert len(ids) == 1, f'ожидалась одна связь, получили {ids}'
-    assert all(result['status'] == 'PENDING' for result in results)
-
     await admin_client(client)
-    queue = await client.get('/api/v1/admin/bvi')
-    assert queue.status_code == 200
-    assert len(queue.json()['links']) == 1
+    olympiad = await create_olympiad(client, 'Олимпиада для гонки')
+
+    from app.database import seasons as seasons_db
+
+    async def request_season():
+        # Отдельная сессия на каждый запрос: иначе это один запрос, а не два.
+        try:
+            return await seasons_db.create_season({
+                'olympiad_id': str(olympiad['id']),
+                'season_label': '2025/2026',
+            })
+        except Exception as exc:  # noqa: BLE001 — нужен факт отказа, не тип
+            return exc
+
+    results = await asyncio.gather(request_season(), request_season())
+    created = [result for result in results if isinstance(result, dict)]
+    assert len(created) == 1, f'ожидался один сезон, получили {results}'
+    assert any(not isinstance(result, dict) for result in results), (
+        'второй параллельный запрос должен был получить отказ'
+    )
+
+    seasons = await client.get(
+        f"/api/v1/olympiads/{olympiad['id']}/seasons",
+        params={'include_archived': True},
+    )
+    assert seasons.status_code == 200
+    assert len(seasons.json()['seasons']) == 1
 
 
 async def test_parallel_http_requests_do_not_fail(client):
-    """То же самое через HTTP: ни один из запросов не должен стать 500."""
-    university = await create_university(client, 'Университет ИТМО')
+    """То же самое через HTTP: дубль отклоняется 409, а не 500."""
+    await admin_client(client)
     olympiad = await create_olympiad(client, 'Олимпиада для гонки HTTP')
-    await university_rep_client(client, university['id'])
 
     import httpx
 
@@ -89,27 +93,28 @@ async def test_parallel_http_requests_do_not_fail(client):
             base_url='http://test',
             cookies=dict(client.cookies),
         ) as raw:
-            # Сессия гостя: права проверяются как у представителя, но
-            # параллельность создаётся на уровне приложения и БД.
+            # Параллельность создаётся на уровне приложения и БД.
             response = await raw.post(
-                f"/api/v1/universities/{university['id']}/bvi",
-                json={'olympiad_id': olympiad['id']},
+                f"/api/v1/olympiads/{olympiad['id']}/seasons",
+                json={'season_label': '2025/2026'},
             )
             return response
 
     responses = await asyncio.gather(http_request(), http_request())
     codes = sorted(response.status_code for response in responses)
-    assert codes == [201, 201], codes
+    assert codes == [200, 409], [
+        (response.status_code, response.text) for response in responses
+    ]
 
 
 async def test_database_backend_enforces_row_locks():
-    """Бэкенд действительно умеет блокировки, на которых держится BVI-инвариант.
+    """Бэкенд действительно умеет блокировки, на которых держатся версии.
 
-    ``request_bvi_link`` полагается на ``SELECT ... FOR UPDATE``: олимпиада не
-    может уйти в архив между проверкой и вставкой связи. Проверять это
-    «по документации» нельзя — на SQLite ``FOR UPDATE`` молча игнорируется, и
-    инвариант «архивная олимпиада не получает новых заявок» тихо перестал бы
-    работать. Тест проверяет поведение на живой базе: вторая транзакция обязана
+    Правка сезона, профиля и правила льготы полагается на
+    ``SELECT ... FOR UPDATE``: проверка ожидаемой версии и запись происходят
+    в одной транзакции, иначе две параллельные правки проходят обе проверки и
+    одна из них молча теряется. На SQLite ``FOR UPDATE`` игнорируется, поэтому
+    тест проверяет поведение на живой базе: вторая транзакция обязана
     дождаться первой, а не прочитать старое значение.
     """
     from sqlalchemy import text
@@ -117,7 +122,7 @@ async def test_database_backend_enforces_row_locks():
     from app.database.database import AsyncSessionLocal, engine
 
     assert engine.dialect.name == 'postgresql', (
-        'BVI-инварианты опираются на блокировки строк, поддерживаемые '
+        'проверка версий опирается на блокировки строк, поддерживаемые '
         'PostgreSQL; на текущем бэкенде они не гарантированы'
     )
 
@@ -873,51 +878,56 @@ async def test_manual_archive_cannot_override_rsosh_absent(client):
     assert state['archive_reason'] == 'RSOSH_ABSENT'
 
 
-async def test_manual_archive_keeps_its_bvi_history(client):
-    """Историческая связь ручной архивной олимпиады сохраняется.
+async def test_manual_archive_keeps_its_benefit_history(client):
+    """Правило льготы архивной олимпиады сохраняется.
 
-    Архив не отменяет того, что университет действительно давал БВИ, и новые
-    заявки за такую олимпиаду по-прежнему невозможны.
+    Архив не отменяет того, что университет действительно давал льготу по этой
+    олимпиаде: правило остаётся доступным в истории, а импорт РСОШ не
+    возвращает вручную заархивированную олимпиаду в актуальный каталог.
     """
-    await admin_client(client)
-    university = await create_university(client, 'Университет истории БВИ')
-    olympiad = await create_olympiad(client, 'Олимпиада для истории БВИ')
-    await university_rep_client(client, university['id'])
-    link = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi",
-        json={'olympiad_id': olympiad['id']},
+    from tests.conftest import (
+        create_benefit_rule,
+        create_profile,
+        create_season,
+        upload_university_doc,
     )
-    assert link.status_code == 201
-    await admin_client(client)
-    confirmed = await client.post(
-        f"/api/v1/universities/{university['id']}/bvi/{olympiad['id']}/moderation",
-        json={'action': 'confirm'},
-    )
-    assert confirmed.status_code == 200
 
-    await client.post(
+    await admin_client(client)
+    university = await create_university(client, 'Университет истории льгот')
+    olympiad = await create_olympiad(client, 'Олимпиада для истории льгот')
+    season = await create_season(client, olympiad['id'], '2024/2025')
+    profile = await create_profile(client, season['id'], 'Математика', '1')
+    doc = await upload_university_doc(client, university['id'])
+    rule = await create_benefit_rule(
+        client, university['id'], olympiad['id'], season['id'],
+        profile['id'], doc['id'],
+    )
+
+    archived = await client.post(
         f"/api/v1/admin/archive_olympiad/{olympiad['id']}?archived=true"
     )
+    assert archived.status_code == 200
 
     # Перечень РСОШ с этой олимпиадой не возвращает её в актуальные.
-    doc = await _upload(
+    doc_import = await _upload(
         client,
-        'rsosh_bvi_history.xlsx',
+        'rsosh_benefit_history.xlsx',
         xlsx_bytes_including(olympiad['name']),
     )
-    await _run(client, doc['id'])
-    confirmed = await _confirm(client, doc['id'])
+    await _run(client, doc_import['id'])
+    confirmed = await _confirm(client, doc_import['id'])
     assert confirmed.status_code == 200, confirmed.text
 
     state = await _admin_olympiad(client, olympiad['id'])
     assert state['status'] == 'ARCHIVED'
     assert state['archive_reason'] == 'MANUAL'
 
-    page = await client.get(f"/api/v1/universities/{university['id']}/olympiads")
+    page = await client.get(f"/api/v1/benefits/olympiad/{olympiad['id']}")
     assert page.status_code == 200
-    rows = [row for row in page.json()['olympiads'] if row['id'] == olympiad['id']]
-    assert len(rows) == 1, 'историческая связь должна была сохраниться'
-    assert rows[0]['is_historical'] is True
+    rows = [row for row in page.json()['rules'] if row['id'] == rule['id']]
+    assert len(rows) == 1, 'правило архивной олимпиады должно было сохраниться'
+    assert rows[0]['season_id'] == season['id']
+    assert rows[0]['profile_id'] == profile['id']
 
 
 # --------------------------- Гонки при подтверждении ---------------------------

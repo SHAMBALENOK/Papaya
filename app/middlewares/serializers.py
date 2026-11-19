@@ -76,20 +76,6 @@ def olympiad_to_dict(olympiad) -> dict:
     }
 
 
-def bvi_link_to_dict(link) -> dict:
-    """UniversityBvi (ORM) -> словарь связи «университет даёт БВИ»."""
-    return {
-        'id': str(link.id),
-        'university_id': str(link.university_id),
-        'olympiad_id': str(link.olympiad_id),
-        'status': link.status,
-        'createdBy': str(link.createdBy) if link.createdBy else None,
-        'confirmedBy': str(link.confirmedBy) if link.confirmedBy else None,
-        'createdAt': _iso(link.createdAt),
-        'updatedAt': _iso(link.updatedAt),
-    }
-
-
 def doc_to_dict(doc) -> dict:
     """Docs (ORM) -> словарь документа-источника."""
     return {

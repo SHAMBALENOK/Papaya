@@ -21,7 +21,13 @@ from pydantic import BaseModel, Field
 
 from app import database
 from app.core import deps
-from app.rsosh import persist, processor, states, university as university_import
+from app.rsosh import (
+    list_processor,
+    persist,
+    processor,
+    states,
+    university as university_import,
+)
 from app.rsosh.types import RsoshConflictError, RsoshError
 
 imports_page = APIRouter(
@@ -47,6 +53,43 @@ class ManualCandidateRemoveRequest(BaseModel):
     """Удаление вручную добавленной олимпиады (по нормализованному имени)."""
 
     name_norm: str
+
+
+class PlanOlympiadChange(BaseModel):
+    """Правка сопоставления одной олимпиады в плане импорта."""
+
+    name_norm: str
+    action: str | None = None
+    olympiad_id: str | None = None
+    name: str | None = None
+    organizer: str | None = None
+
+
+class PlanProfileChange(BaseModel):
+    """Правка профиля сезона: название, уровень или действие."""
+
+    olympiad: str
+    source_row: int
+    action: str | None = None
+    name: str | None = None
+    level: str | None = None
+
+
+class PlanUpdateRequest(BaseModel):
+    """Правки плана импорта официального перечня.
+
+    Правки адресуются по нормализованному названию олимпиады и номеру строки
+    профиля, поэтому их можно присылать в любом порядке и частями.
+    """
+
+    olympiads: List[PlanOlympiadChange] = Field(default_factory=list)
+    profiles: List[PlanProfileChange] = Field(default_factory=list)
+
+
+class ApplyRequest(BaseModel):
+    """Применение плана: фиксировать ли отсутствие олимпиад."""
+
+    mark_missing: bool = False
 
 
 class ConfirmRequest(BaseModel):
@@ -142,6 +185,14 @@ class ImportView(BaseModel):
     # Итог применения: created/updated/archived/skipped/errors и
     # archive_skipped_reason. Произвольная структура, поэтому dict.
     confirm: dict | None = None
+    # Официальный перечень: режим, заголовок и связанные таблицы. Панель по
+    # этим полям понимает, показывать карточки кандидатов или план с таблицей.
+    mode: str | None = None
+    title: str | None = None
+    table: dict | None = None
+    html: dict | None = None
+    applied_at: str | None = None
+    history_count: int = 0
 
 
 class ImportConfirmResponse(BaseModel):
@@ -173,6 +224,12 @@ def _import_view(doc: dict) -> dict:
         'summary': section.get('summary') or {},
         'warnings': section.get('warnings') or [],
         'confirm': section.get('confirm'),
+        'mode': section.get('mode'),
+        'title': section.get('title'),
+        'table': section.get('table'),
+        'html': section.get('html'),
+        'applied_at': section.get('applied_at'),
+        'history_count': len(section.get('history') or []),
     }
 
 
@@ -318,6 +375,239 @@ async def import_preview(
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
+@imports_page.get(
+    '/{import_id}/plan',
+    responses={
+        200: {'description': 'План импорта официального перечня'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'План ещё не построен'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def import_plan(
+    import_id: uuid.UUID,
+    current_user: deps.AdminUser = None,
+):
+    """План импорта: что создать, что использовать, чего не хватает.
+
+    План — предмет проверки для официального перечня. Он отдаётся целиком:
+    администратор должен видеть все строки документа, а не только спорные,
+    иначе нельзя заметить потерянную при OCR олимпиаду.
+    """
+    try:
+        doc = await _rsosh_doc(import_id)
+        section = states.rsosh_section(doc)
+        plan = section.get('plan')
+        if not plan:
+            raise HTTPException(
+                status_code=409,
+                detail='План импорта ещё не построен: документ не разобран',
+            )
+        return {'import': _import_view(doc), 'plan': plan}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.patch(
+    '/{import_id}/plan',
+    responses={
+        200: {'description': 'План обновлён'},
+        400: {'description': 'Некорректная правка плана'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'План ещё не построен или импорт уже применён'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def update_import_plan(
+    import_id: uuid.UUID,
+    payload: PlanUpdateRequest,
+    current_user: deps.AdminUser = None,
+):
+    """Исправить сопоставление, название, уровень или действие в плане.
+
+    Правки не пишут в каталог: они меняют только план. Запись происходит
+    отдельным шагом — применением, и только один раз.
+    """
+    try:
+        doc = await _rsosh_doc(import_id)
+        section = states.rsosh_section(doc)
+        if not section.get('plan'):
+            raise HTTPException(
+                status_code=409,
+                detail='План импорта ещё не построен',
+            )
+        if section.get('applied_at') or section.get('state') == 'approved':
+            raise HTTPException(
+                status_code=409,
+                detail='Импорт уже применён: план больше не редактируется',
+            )
+        updated = await list_processor.update_plan(
+            import_id, payload.model_dump(exclude_none=True)
+        )
+        await database.audit.log_action(
+            'import', import_id, 'plan_update',
+            user_id=current_user.get('id'),
+        )
+        return {
+            'import': _import_view(updated),
+            'plan': states.rsosh_section(updated).get('plan'),
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.post(
+    '/{import_id}/apply',
+    responses={
+        200: {'description': 'План применён, каталог обновлён'},
+        400: {'description': 'План неполон: есть неразрешённые строки'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Импорт уже применён'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def apply_import_plan(
+    import_id: uuid.UUID,
+    payload: ApplyRequest | None = None,
+    current_user: deps.AdminUser = None,
+):
+    """Применить утверждённый план одной транзакцией.
+
+    ``mark_missing`` фиксирует отсутствие олимпиад: профили, которых нет в
+    перечне, теряют уровень, а олимпиады уходят в архив. Это возможно только
+    по полному перечню — частичный скан не доказывает отсутствие.
+    """
+    try:
+        doc = await _rsosh_doc(import_id)
+        section = states.rsosh_section(doc)
+        if section.get('mode') != 'official_list':
+            raise HTTPException(
+                status_code=400,
+                detail='Документ обработан прежним конвейером: используйте '
+                       'confirm',
+            )
+        outcome = await list_processor.apply(
+            import_id,
+            user_id=current_user.get('id'),
+            mark_missing=bool(payload.mark_missing) if payload else False,
+        )
+        await database.audit.log_action(
+            'import', import_id, 'apply',
+            user_id=current_user.get('id'), after=outcome.get('result'),
+        )
+        updated = await _rsosh_doc(import_id)
+        return {
+            'import': _import_view(updated),
+            'result': outcome.get('result') or {},
+            'records': outcome.get('records') or [],
+            'history': outcome.get('history') or [],
+            'missing_profiles': outcome.get('missing_profiles') or [],
+        }
+    except HTTPException:
+        raise
+    except RsoshConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RsoshError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.get(
+    '/{import_id}/history',
+    responses={
+        200: {'description': 'История изменений каталога по документу'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def import_history(
+    import_id: uuid.UUID,
+    limit: int = Query(default=100, ge=1, le=1000),
+    current_user: deps.AdminUser = None,
+):
+    """Что этот документ изменил в каталоге.
+
+    История хранится в метаданных документа: она описывает решения по этому
+    перечню (создание, переименование, смена уровня, отсутствие), а не общий
+    журнал аудита.
+    """
+    try:
+        doc = await _rsosh_doc(import_id)
+        section = states.rsosh_section(doc)
+        history = list(section.get('history') or [])
+        jobs = await database.imports.list_jobs(doc_id=import_id, limit=20)
+        return {
+            'import': _import_view(doc),
+            'history': history[-limit:],
+            'confirm': section.get('confirm'),
+            'jobs': jobs,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@imports_page.get(
+    '/{import_id}/table',
+    responses={
+        200: {'description': 'Страница таблицы перечня'},
+        401: {'description': 'Access token missing'},
+        403: {'description': 'Admin role required'},
+        404: {'description': 'Import not found'},
+        409: {'description': 'Таблица ещё не собрана'},
+        500: {'description': 'Internal server error'},
+    },
+)
+async def import_table(
+    import_id: uuid.UUID,
+    sheet: str = Query(default='list', pattern='^(list|summary)$'),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    search: str | None = Query(default=None, max_length=100),
+    current_user: deps.AdminUser = None,
+):
+    """Постраничный просмотр таблицы перечня (лист перечня или сводки).
+
+    Пагинация серверная: в перечне бывает 300+ строк, и отдавать их все в
+    одном ответе незачем. Поиск фильтрует по всем колонкам листа.
+    """
+    try:
+        await _rsosh_doc(import_id)
+        page = await list_processor.table_page(
+            import_id, sheet=sheet, offset=offset, limit=limit, search=search
+        )
+        return page
+    except HTTPException:
+        raise
+    except RsoshError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
 @imports_page.post(
     '/{import_id}/confirm',
     response_model=ImportConfirmResponse,
@@ -352,6 +642,12 @@ async def confirm(
         # его актуальность) делаются внутри транзакции в persist — эта
         # ничего не решает, только отсекает заведомо неверные запросы.
         doc = await _rsosh_doc(import_id)
+        if states.rsosh_section(doc).get('mode') == 'official_list':
+            raise HTTPException(
+                status_code=409,
+                detail='Это официальный перечень: примените план через '
+                       '/imports/{id}/apply, а не подтверждение кандидатов',
+            )
         if selection is not None:
             chosen = selection
         else:

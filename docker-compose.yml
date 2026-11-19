@@ -206,6 +206,8 @@ services:
       - ./tests:/app/tests
       - ./docs:/app/docs
       - ./English.md:/app/English.md
+      - ./README.md:/app/README.md
+      - ./MVP.md:/app/MVP.md
       - ./pytest.ini:/app/pytest.ini
       - ./alembic.ini:/app/alembic.ini
       - ./requirements-dev.txt:/app/requirements-dev.txt
