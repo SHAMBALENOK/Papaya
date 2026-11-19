@@ -107,6 +107,88 @@ def _checksum(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _extension_of(filename: str) -> str:
+    return os.path.splitext(filename)[1].lower()
+
+
+def _validate_upload_name(
+    filename: str, allowed_extensions=None
+) -> str:
+    allowed = allowed_extensions or ALLOWED_TABLE_EXTENSIONS
+    clean = secure_filename(filename or '')
+    if not clean or _extension_of(clean) not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail='Unsupported file format. Allowed: '
+            + ', '.join(sorted(allowed)),
+        )
+    return clean
+
+
+#: Вложения к заявкам — только документы и фотографии. Таблицы РСОШ здесь
+#: не нужны, поэтому XLSX в список не входит.
+ATTACHMENT_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg'}
+
+
+async def save_uploaded_document(
+    file: UploadFile,
+    *,
+    doc_type: str,
+    name: str | None = None,
+    university_id=None,
+    uploaded_by=None,
+    entity_request_id=None,
+    representative_application_id=None,
+    allowed_extensions=None,
+) -> dict:
+    """Единая загрузка файла в ``docs``.
+
+    Используется загрузкой документов университета и вложениями к заявкам.
+    Файл на диске появляется только вместе с записью в БД: любой сбой на
+    середине удаляет недописанный файл.
+    """
+    filename = _validate_upload_name(file.filename or '', allowed_extensions)
+    extension = _extension_of(filename)
+    doc_id = uuid.uuid4()
+    target = _storage_path(str(doc_id), extension)
+    os.makedirs(DOCS_DIR, exist_ok=True)
+    created = False
+    try:
+        try:
+            _size, checksum = _read_upload(file, target)
+        finally:
+            await file.close()
+
+        if not target.is_file() or target.stat().st_size == 0:
+            raise HTTPException(status_code=400, detail='Uploaded file is empty')
+
+        try:
+            kind = filetypes.detect(str(target))
+        except filetypes.RsoshError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        record = await database.docs.add_doc(
+            {
+                'id': str(doc_id),
+                'name': (name or filename).strip(),
+                'type': doc_type,
+                'storage_key': target.name,
+                'mime_type': kind,
+                'checksum': checksum,
+                'status': 'UPLOADED',
+                'university_id': university_id,
+                'uploaded_by': uploaded_by,
+                'entity_request_id': entity_request_id,
+                'representative_application_id': representative_application_id,
+            }
+        )
+        created = record is not None
+        return record
+    finally:
+        if not created:
+            target.unlink(missing_ok=True)
+
+
 def _read_upload(file: UploadFile, target: Path) -> tuple[int, str]:
     """Записать загруженный файл с лимитом размера; вернуть (размер, sha256)."""
     hasher = hashlib.sha256()
@@ -297,7 +379,13 @@ async def download_doc_file(
         doc = await database.docs.get_doc(doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail='Document not found')
-        if not deps.can_manage_university(
+        # Автор загрузки видит свой файл даже без прав на университет:
+        # подтверждающие документы к заявке есть у обычного пользователя.
+        is_author = (
+            doc.get('uploaded_by')
+            and str(doc.get('uploaded_by')) == str(current_user.get('id'))
+        )
+        if not is_author and not deps.can_manage_university(
             current_user, doc.get('university_id') or ''
         ):
             raise HTTPException(status_code=403, detail='Permission denied')
@@ -400,55 +488,18 @@ async def upload_university_doc(
                 detail='Representative can upload only UNIVERSITY_ORDER or OTHER',
             )
 
-        filename = secure_filename(file.filename or '')
-        extension = os.path.splitext(filename)[1].lower()
-        if not filename or extension not in ALLOWED_TABLE_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail='Unsupported file format. Allowed: '
-                + ', '.join(sorted(ALLOWED_TABLE_EXTENSIONS)),
-            )
-
-        doc_id = uuid.uuid4()
-        target = _storage_path(str(doc_id), extension)
-        os.makedirs(DOCS_DIR, exist_ok=True)
-        created = False
-        try:
-            try:
-                _size, checksum = _read_upload(file, target)
-            finally:
-                await file.close()
-
-            if not target.is_file() or target.stat().st_size == 0:
-                raise HTTPException(status_code=400, detail='Uploaded file is empty')
-
-            try:
-                kind = filetypes.detect(str(target))
-            except filetypes.RsoshError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-            record = await database.docs.add_doc(
-                {
-                    'id': str(doc_id),
-                    'name': (name or filename).strip(),
-                    'type': doc_type,
-                    'storage_key': target.name,
-                    'mime_type': kind,
-                    'checksum': checksum,
-                    'status': 'UPLOADED',
-                    'university_id': str(university_id),
-                    'uploaded_by': current_user['id'],
-                }
-            )
-            created = record is not None
-            await database.audit.log_action(
-                'doc', record['id'], 'upload',
-                user_id=current_user['id'], after=record,
-            )
-            return record
-        finally:
-            if not created:
-                target.unlink(missing_ok=True)
+        record = await save_uploaded_document(
+            file,
+            doc_type=doc_type,
+            name=name,
+            university_id=str(university_id),
+            uploaded_by=current_user['id'],
+        )
+        await database.audit.log_action(
+            'doc', record['id'], 'upload',
+            user_id=current_user['id'], after=record,
+        )
+        return record
     except HTTPException:
         raise
     except Exception:

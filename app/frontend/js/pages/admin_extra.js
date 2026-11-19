@@ -53,6 +53,7 @@ function adminRepAppsHtml(items) {
                         <p class="mt-1 text-sm text-ink-soft">Университет: ${escHtml(a.university_name || 'не найден')}</p>
                         <p class="mt-1 text-xs text-ink-faint">Подана: ${formatDate(a.createdAt)}${a.reviewed_at ? ` · рассмотрена: ${formatDate(a.reviewed_at)}` : ''}</p>
                         ${a.justification ? `<p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(a.justification)}</p>` : ''}
+                        ${attachmentLinksHtml(a.attachments, 'Документы заявителя')}
                         ${a.rejection_reason ? `<p class="mt-3 text-sm text-ink-soft">Причина отклонения: ${escHtml(a.rejection_reason)}</p>` : ''}
                     </div>
                     ${a.status === 'pending' ? `
@@ -121,12 +122,16 @@ function openRejectRepAppModal(id, onDone) {
 const AUDIT_ENTITY_TYPES = [
     { value: 'benefit_rule', label: 'Правила льгот' },
     { value: 'university', label: 'Университеты' },
+    { value: 'olympiad', label: 'Олимпиады' },
     { value: 'olympiad_season', label: 'Сезоны' },
+    { value: 'season_profile', label: 'Профили сезонов' },
     { value: 'program', label: 'Программы' },
+    { value: 'university_program', label: 'Программы' },
     { value: 'entity_request', label: 'Запросы в каталог' },
     { value: 'doc', label: 'Документы' },
     { value: 'import', label: 'Импорт' },
     { value: 'representative_application', label: 'Заявки представителей' },
+    { value: 'user', label: 'Пользователи' },
 ];
 
 const AUDIT_ACTIONS = [
@@ -135,6 +140,7 @@ const AUDIT_ACTIONS = [
     { value: 'delete', label: 'Удаление' },
     { value: 'verify', label: 'Подтверждение' },
     { value: 'reject', label: 'Отклонение' },
+    { value: 'approve', label: 'Одобрение' },
     { value: 'status_change', label: 'Смена статуса' },
     { value: 'rollback', label: 'Откат версии' },
     { value: 'archive', label: 'Архив' },
@@ -143,7 +149,56 @@ const AUDIT_ACTIONS = [
     { value: 'start', label: 'Запуск импорта' },
     { value: 'confirm', label: 'Подтверждение импорта' },
     { value: 'review', label: 'Рассмотрение заявки' },
+    { value: 'bulk_create', label: 'Массовое создание' },
+    { value: 'role_change', label: 'Смена роли' },
+    { value: 'ban', label: 'Блокировка' },
+    { value: 'unban', label: 'Разблокировка' },
 ];
+
+const AUDIT_ENTITY_LABELS = Object.fromEntries(
+    AUDIT_ENTITY_TYPES.map(item => [item.value, item.label])
+);
+const AUDIT_ACTION_LABELS = Object.fromEntries(
+    AUDIT_ACTIONS.map(item => [item.value, item.label])
+);
+
+function auditEntityLabel(type) {
+    return AUDIT_ENTITY_LABELS[type] || type || 'Объект';
+}
+
+function auditActionLabel(action) {
+    return AUDIT_ACTION_LABELS[action] || action || 'Действие';
+}
+
+/** Название объекта из снимка аудита — вместо голого UUID. */
+function auditEntityName(log) {
+    const after = log.after || {};
+    const before = log.before || {};
+    return after.name || after.short_name || after.season_label
+        || after.university_name || after.profile_name
+        || before.name || before.short_name || before.season_label
+        || '';
+}
+
+function auditDetails(log) {
+    const after = log.after || {};
+    if (log.action === 'bulk_create') {
+        const profiles = (after.profiles || []).join(', ');
+        return [
+            after.season_label ? `сезон ${after.season_label}` : '',
+            after.created != null ? `создано ${after.created}` : '',
+            after.skipped != null ? `пропущено ${after.skipped}` : '',
+            profiles ? `профили: ${profiles}` : '',
+        ].filter(Boolean).join(' · ');
+    }
+    if (log.action === 'role_change') {
+        const oldRole = (log.before || {}).role || '—';
+        const newRole = after.role || '—';
+        return `роль: ${oldRole} → ${newRole}`;
+    }
+    return '';
+}
+
 
 function adminAuditHtml() {
     const { logs, total, entityType, action } = adminAuditState;
@@ -164,6 +219,7 @@ function adminAuditHtml() {
         </form>
         <div class="flex items-center gap-3">
             <p class="text-sm text-ink-faint">Показано ${logs.length} из ${total}</p>
+            <button type="button" data-act="refreshAudit" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Обновить</button>
             ${more ? `<button type="button" data-act="loadMoreAudit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Показать ещё</button>` : ''}
         </div>
     </div>`;
@@ -175,12 +231,22 @@ function adminAuditHtml() {
     }
 
     return filter + `<div class="space-y-4">
-        ${logs.map(l => `
+        ${logs.map(l => {
+            const name = auditEntityName(l);
+            const details = auditDetails(l);
+            const actor = l.user_name || l.user_email || l.user_id || 'система';
+            return `
             <article class="${UI.card} px-7 py-5">
-                <p class="font-semibold text-ink">${escHtml(l.action)} · ${escHtml(l.entity_type)}</p>
-                <p class="mt-1 text-sm text-ink-soft">${escHtml(formatDate(l.createdAt))} · пользователь ${escHtml(l.user_id || '—')}</p>
+                <p class="font-semibold text-ink">
+                    ${escHtml(auditActionLabel(l.action))} · ${escHtml(auditEntityLabel(l.entity_type))}${name ? ` — ${escHtml(name)}` : ''}
+                </p>
+                <p class="mt-1 text-sm text-ink-soft">
+                    ${escHtml(formatDateTime(l.createdAt))} · ${escHtml(actor)}
+                </p>
+                ${details ? `<p class="mt-1 text-sm text-ink-soft">${escHtml(details)}</p>` : ''}
                 ${l.entity_id ? `<p class="mt-1 text-xs text-ink-faint break-all">${escHtml(l.entity_id)}</p>` : ''}
-            </article>`).join('')}
+            </article>`;
+        }).join('')}
     </div>`;
 }
 

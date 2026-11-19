@@ -53,6 +53,7 @@ async function renderProfile() {
     const editBtn = document.getElementById('btn-edit-profile');
     if (editBtn) editBtn.addEventListener('click', () => openEditProfileModal(res.data));
     if (res.data.role === 'USER') renderRepresentativeApplicationSection();
+    renderUniversityProposalSection();
 }
 
 function userProfileHtml(u, { editable = false } = {}) {
@@ -112,6 +113,10 @@ function userProfileHtml(u, { editable = false } = {}) {
 
         ${editable && u.role === 'USER'
             ? '<section id="rep-application-section" class="mt-16" aria-live="polite"></section>'
+            : ''}
+
+        ${editable
+            ? '<section id="university-proposal-section" class="mt-16" aria-live="polite"></section>'
             : ''}
 
         <p class="mt-14 mb-4 text-sm text-ink-faint">Зарегистрирован: ${formatDate(u.createdAt)}</p>
@@ -224,6 +229,7 @@ async function renderRepresentativeApplicationSection() {
             </div>
             <p class="mt-4 text-ink">Университет: <span class="font-semibold">${escHtml(latest.university_name || 'не найден')}</span></p>
             ${latest.justification ? `<p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(latest.justification)}</p>` : ''}
+            ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
             <p class="mt-4 text-sm text-ink-soft leading-relaxed">
                 Администратор Papaya рассмотрит заявку. После одобрения в меню появится
                 раздел «Мой университет», где можно вести правила льгот.
@@ -241,6 +247,7 @@ async function renderRepresentativeApplicationSection() {
                 Доступ к кабинету представителя уже открыт. Если раздел «Мой университет»
                 ещё не появился в меню, обновите страницу.
             </p>
+            ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
         </div>`;
         return;
     }
@@ -288,6 +295,18 @@ async function renderRepresentativeApplicationSection() {
                 rows: 4,
                 placeholder: 'Должность, подразделение, ссылка на страницу сотрудника…',
             })}
+            <div class="rounded bg-brand-soft/60 border border-brand/20 px-5 py-4 mb-6 text-sm leading-relaxed text-ink">
+                <p class="font-semibold">Совет: приложите подтверждающие документы</p>
+                <p class="mt-2 text-ink-soft">Заявки с документами рассматриваются быстрее и чаще одобряются.
+                Подойдут фото или скан документа с ФИО, справка о должности или учёбе, пропуск,
+                доверенность или ссылка на профиль сотрудника на сайте вуза. Документы видит
+                только администратор Papaya.</p>
+            </div>
+            <div class="${UI.field}">
+                <label for="rep-application-files" class="${UI.label}">Подтверждающие документы (необязательно)</label>
+                <input id="rep-application-files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg" class="${UI.input} py-2">
+                <p class="mt-2 text-xs text-ink-faint">PDF, PNG или JPG. Можно выбрать несколько файлов.</p>
+            </div>
             <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Отправить заявку</button>
         </form>`;
 
@@ -309,8 +328,193 @@ async function renderRepresentativeApplicationSection() {
                 justification: (fd.get('justification') || '').trim() || null,
             });
             if (res.ok) {
-                showToast('Заявка отправлена администратору', 'success');
+                const files = form.querySelector('#rep-application-files').files;
+                const failed = [];
+                for (const file of Array.from(files || [])) {
+                    const upload = new FormData();
+                    upload.append('file', file);
+                    const upRes = await api.uploadRepresentativeApplicationAttachment(
+                        res.data.id, upload
+                    ).catch(() => ({ ok: false }));
+                    if (!upRes.ok) failed.push(file.name);
+                }
+                showToast(
+                    failed.length
+                        ? 'Заявка отправлена, но часть файлов не загрузилась'
+                        : 'Заявка отправлена администратору',
+                    failed.length ? 'error' : 'success'
+                );
                 await renderRepresentativeApplicationSection();
+                return;
+            }
+            alertBox.innerHTML = alertHtml(errorText(res), 'error');
+        } catch {
+            alertBox.innerHTML = alertHtml('Сетевая ошибка', 'error');
+        }
+        btn.disabled = false;
+    });
+}
+
+/**
+ * Предложка университета: любой пользователь может предложить вуз, которого
+ * нет в каталоге. После одобрения он становится представителем созданного вуза.
+ */
+async function renderUniversityProposalSection() {
+    const box = document.getElementById('university-proposal-section');
+    if (!box) return;
+
+    box.innerHTML = loadingHtml('Проверяем предложки…');
+    const res = await api.listMyUniversityProposals().catch(() => ({ ok: false }));
+
+    const header = `
+        <p class="${UI.eyebrow}">Каталог</p>
+        <h2 class="mt-5 text-2xl font-extrabold tracking-tight">Предложить университет</h2>`;
+
+    if (!res.ok) {
+        box.innerHTML = `${header}
+            <div class="mt-6">${alertHtml('Не удалось загрузить предложки', 'error')}</div>`;
+        return;
+    }
+
+    const proposals = (res.data && res.data.requests) || [];
+    const latest = proposals[0] || null;
+
+    if (latest && latest.status === 'pending') {
+        box.innerHTML = `${header}
+        <div class="${UI.card} px-8 py-6 mt-8">
+            <div class="flex flex-wrap items-center gap-3">
+                <span class="${UI.badge} ${UI.badgePending}">На рассмотрении</span>
+                <span class="text-sm text-ink-faint">от ${formatDate(latest.createdAt)}</span>
+            </div>
+            <p class="mt-4 text-ink">Университет: <span class="font-semibold">${escHtml(latest.name)}</span></p>
+            ${latest.description ? `<p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(latest.description)}</p>` : ''}
+            ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">
+                Администратор Papaya проверит предложку. После одобрения вы станете
+                представителем этого университета.
+            </p>
+        </div>`;
+        return;
+    }
+
+    if (latest && latest.status === 'approved') {
+        box.innerHTML = `${header}
+        <div class="${UI.card} px-8 py-6 mt-8">
+            <span class="${UI.badge} ${UI.badgeSuccess}">Университет добавлен</span>
+            <p class="mt-4 text-ink">Университет: <span class="font-semibold">${escHtml(latest.name)}</span></p>
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">
+                Вы назначены представителем этого университета. Если раздел
+                «Мой университет» ещё не появился в меню, обновите страницу.
+            </p>
+            ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
+        </div>`;
+        return;
+    }
+
+    box.innerHTML = `${header}
+        <p class="mt-5 text-lg text-ink-soft leading-relaxed max-w-2xl">
+            Если вашего университета нет в каталоге, предложите его. После проверки
+            администратор создаст вуз, а вы автоматически станете его представителем
+            и сможете вести правила льгот.
+        </p>
+        ${latest && latest.status === 'rejected'
+            ? `<div class="mt-8">${alertHtml(
+                'Предыдущая предложка отклонена'
+                + (latest.rejection_reason ? `: ${latest.rejection_reason}` : '')
+                + '. Можно подать новую.', 'error')}</div>`
+            : ''}
+        <form id="university-proposal-form" class="mt-8 max-w-2xl">
+            <div id="university-proposal-alert"></div>
+            ${inputField({
+                id: 'up-name',
+                name: 'name',
+                label: 'Полное название университета',
+                required: true,
+                placeholder: 'Московский физико-технический институт',
+            })}
+            ${inputField({
+                id: 'up-short',
+                name: 'short_name',
+                label: 'Краткое название / аббревиатура',
+                placeholder: 'МФТИ',
+            })}
+            ${inputField({
+                id: 'up-site',
+                name: 'website',
+                label: 'Официальный сайт',
+                type: 'url',
+                placeholder: 'https://…',
+            })}
+            ${inputField({
+                id: 'up-preview',
+                name: 'preview_image',
+                label: 'Маленькое фото для карточки (URL)',
+                type: 'url',
+                placeholder: 'https://…',
+            })}
+            ${inputField({
+                id: 'up-image',
+                name: 'image',
+                label: 'Большая картинка для страницы (URL)',
+                type: 'url',
+                placeholder: 'https://…',
+            })}
+            ${textareaField({
+                id: 'up-desc',
+                name: 'description',
+                label: 'Описание',
+                rows: 4,
+                placeholder: 'Чем университет полезен школьнику, какие олимпиады принимает…',
+            })}
+            <div class="rounded bg-brand-soft/60 border border-brand/20 px-5 py-4 mb-6 text-sm leading-relaxed text-ink">
+                <p class="font-semibold">Совет: приложите подтверждающие документы</p>
+                <p class="mt-2 text-ink-soft">Предложки с документами рассматриваются быстрее и чаще одобряются.
+                Подойдут фото или скан документа с ФИО, справка о должности или учёбе, пропуск,
+                доверенность или ссылка на профиль сотрудника на сайте вуза. Документы видит
+                только администратор Papaya.</p>
+            </div>
+            <div class="${UI.field}">
+                <label for="university-proposal-files" class="${UI.label}">Подтверждающие документы (необязательно)</label>
+                <input id="university-proposal-files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg" class="${UI.input} py-2">
+                <p class="mt-2 text-xs text-ink-faint">PDF, PNG или JPG. Можно выбрать несколько файлов.</p>
+            </div>
+            <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Отправить предложку</button>
+        </form>`;
+
+    const form = document.getElementById('university-proposal-form');
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(form);
+        const alertBox = document.getElementById('university-proposal-alert');
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        try {
+            const res = await api.createUniversityProposal({
+                name: (fd.get('name') || '').trim(),
+                short_name: (fd.get('short_name') || '').trim() || null,
+                website: (fd.get('website') || '').trim() || null,
+                preview_image: (fd.get('preview_image') || '').trim() || null,
+                image: (fd.get('image') || '').trim() || null,
+                description: (fd.get('description') || '').trim() || null,
+            });
+            if (res.ok) {
+                const files = form.querySelector('#university-proposal-files').files;
+                const failed = [];
+                for (const file of Array.from(files || [])) {
+                    const upload = new FormData();
+                    upload.append('file', file);
+                    const upRes = await api.uploadRequestAttachment(
+                        res.data.id, upload
+                    ).catch(() => ({ ok: false }));
+                    if (!upRes.ok) failed.push(file.name);
+                }
+                showToast(
+                    failed.length
+                        ? 'Предложка отправлена, но часть файлов не загрузилась'
+                        : 'Предложка отправлена администратору',
+                    failed.length ? 'error' : 'success'
+                );
+                await renderUniversityProposalSection();
                 return;
             }
             alertBox.innerHTML = alertHtml(errorText(res), 'error');

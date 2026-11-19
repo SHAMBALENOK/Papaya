@@ -12,9 +12,13 @@ from sqlalchemy import func, or_, select
 
 from app.database.database import AsyncSessionLocal
 from app.database.search import normalize_name
+from app.database.seasons import SeasonConflict, validate_season_label
+from app.middlewares.serializers import doc_to_dict
+from app.models.docs import Docs
 from app.models.entity_requests import EntityRequest
 from app.models.olympiads import Olympiads
 from app.models.seasons import OlympiadSeason, SeasonProfile
+from app.models.universities import Universities
 
 
 def _as_uuid(value):
@@ -70,7 +74,7 @@ class DuplicateEntity(RequestError):
         self.existing_id = str(existing_id) if existing_id else None
 
 
-async def _find_pending_duplicate(session, data):
+async def _find_pending_duplicate(session, data, user_id=None):
     """Тот же запрос уже ждёт рассмотрения — второй не нужен."""
     statement = select(EntityRequest).where(
         EntityRequest.status == 'pending',
@@ -81,19 +85,27 @@ async def _find_pending_duplicate(session, data):
         statement = statement.where(
             EntityRequest.university_id == _as_uuid(data['university_id'])
         )
+    else:
+        statement = statement.where(EntityRequest.university_id.is_(None))
     if data.get('parent_id'):
         statement = statement.where(
             EntityRequest.parent_id == _as_uuid(data['parent_id'])
         )
     else:
         statement = statement.where(EntityRequest.parent_id.is_(None))
+    # Предложку университета подаёт обычный пользователь: чужой pending-запрос
+    # не должен «съедать» его собственную заявку.
+    if data['entity_type'] == 'UNIVERSITY' and user_id:
+        statement = statement.where(
+            EntityRequest.created_by == _as_uuid(user_id)
+        )
     result = await session.execute(statement.limit(1))
     return result.scalar_one_or_none()
 
 
 async def create_request(data: dict, user_id=None) -> dict:
     async with AsyncSessionLocal() as session:
-        existing = await _find_pending_duplicate(session, data)
+        existing = await _find_pending_duplicate(session, data, user_id)
         if existing is not None:
             return request_to_dict(existing)
         request = EntityRequest(
@@ -119,7 +131,30 @@ async def create_request(data: dict, user_id=None) -> dict:
 async def get_request(request_id) -> dict | None:
     async with AsyncSessionLocal() as session:
         request = await session.get(EntityRequest, _as_uuid(request_id))
-        return request_to_dict(request) if request else None
+        if not request:
+            return None
+        data = request_to_dict(request)
+        data['attachments'] = (await _attachments_map(session, [data['id']])).get(data['id'], [])
+        return data
+
+
+async def _attachments_map(session, request_ids):
+    if not request_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Docs).where(
+                Docs.entity_request_id.in_(
+                    [_as_uuid(value) for value in request_ids]
+                )
+            ).order_by(Docs.createdAt)
+        )
+    ).scalars().all()
+    result: dict[str, list] = {}
+    for doc in rows:
+        key = str(doc.entity_request_id)
+        result.setdefault(key, []).append(doc_to_dict(doc))
+    return result
 
 
 async def list_requests(
@@ -127,6 +162,7 @@ async def list_requests(
     university_id=None,
     status=None,
     entity_type=None,
+    created_by=None,
     search=None,
     limit=None,
     offset=0,
@@ -136,6 +172,8 @@ async def list_requests(
     conditions = []
     if university_id:
         conditions.append(EntityRequest.university_id == _as_uuid(university_id))
+    if created_by:
+        conditions.append(EntityRequest.created_by == _as_uuid(created_by))
     if status:
         conditions.append(EntityRequest.status == status)
     if entity_type:
@@ -159,7 +197,11 @@ async def list_requests(
         if limit is not None:
             statement = statement.limit(limit).offset(max(0, int(offset or 0)))
         rows = (await session.execute(statement)).scalars().all()
-        return [request_to_dict(r) for r in rows], total
+        data = [request_to_dict(r) for r in rows]
+        attachments = await _attachments_map(session, [r['id'] for r in data])
+        for item in data:
+            item['attachments'] = attachments.get(item['id'], [])
+        return data, total
 
 
 def _profile_key(payload: dict) -> str:
@@ -205,7 +247,10 @@ async def _create_entity(session, request):
         olympiad = await session.get(Olympiads, request.parent_id)
         if olympiad is None:
             raise RequestError('Олимпиада из запроса не найдена', status_code=404)
-        label = request.name.strip()
+        try:
+            label = validate_season_label(request.name)
+        except SeasonConflict as exc:
+            raise RequestError(str(exc)) from exc
         existing = (
             await session.execute(
                 select(OlympiadSeason.id).where(
@@ -253,6 +298,38 @@ async def _create_entity(session, request):
         )
         session.add(entity)
         await session.flush()
+        return entity
+
+    if request.entity_type == 'UNIVERSITY':
+        name = request.name.strip()
+        name_norm = normalize_name(name)
+        existing = (
+            await session.execute(
+                select(Universities.id).where(Universities.name_norm == name_norm)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise DuplicateEntity(
+                'Университет с таким названием уже есть в каталоге', existing
+            )
+        entity = Universities(
+            name=name,
+            name_norm=name_norm,
+            short_name=(payload.get('short_name') or '').strip() or None,
+            description=(
+                (payload.get('description') or '').strip()
+                or request.description
+            ),
+            website=payload.get('website'),
+            preview_image=payload.get('preview_image'),
+            image=payload.get('image'),
+            is_archived=False,
+        )
+        session.add(entity)
+        await session.flush()
+        # Запрос запоминает созданный вуз: по этой связи заявителю назначается
+        # роль представителя, а в очереди видно результат одобрения.
+        request.university_id = entity.id
         return entity
 
     raise RequestError('Неизвестный тип сущности')

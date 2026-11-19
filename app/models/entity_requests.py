@@ -23,7 +23,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-ENTITY_TYPES = ('OLYMPIAD', 'SEASON', 'PROFILE')
+ENTITY_TYPES = ('OLYMPIAD', 'SEASON', 'PROFILE', 'UNIVERSITY')
 REQUEST_STATUSES = ('pending', 'approved', 'rejected')
 
 

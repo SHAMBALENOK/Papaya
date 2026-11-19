@@ -15,6 +15,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.database.database import AsyncSessionLocal
+from app.database.search import normalize_name
 from app.models.benefits import (
     BENEFIT_TYPES,
     REQUIRED_RESULT_TYPES,
@@ -506,6 +507,209 @@ async def _upsert_ege(session, rule, ege):
         existing.subject = subject
         existing.min_score = min_score
     await session.flush()
+
+
+async def bulk_benefit_options(
+    university_id, season_label=None, rsosh_level=None
+) -> dict:
+    """Что можно привязать ко всем РСОШ за один сезон.
+
+    Возвращает список учебных годов каталога и, если год выбран, профили,
+    сгруппированные по нормализованному названию: «Математика» одной
+    олимпиады и «математика» другой — один пункт формы, но разные профили в
+    БД. Для каждого профиля видно, у скольких олимпиад он есть и сколько
+    правил у университета уже заведено.
+
+    ``rsosh_level`` сужает охват до олимпиад нужного уровня: правило для
+    олимпиады 1 уровня почти всегда отличается от правила для 3 уровня.
+    """
+    async with AsyncSessionLocal() as session:
+        labels = (
+            await session.execute(
+                select(OlympiadSeason.season_label)
+                .join(Olympiads, Olympiads.id == OlympiadSeason.olympiad_id)
+                .where(Olympiads.status == 'PUBLISHED')
+                .distinct()
+                .order_by(OlympiadSeason.season_label.desc())
+            )
+        ).scalars().all()
+
+        if not season_label:
+            return {'season_labels': list(labels), 'profiles': []}
+
+        rows = (
+            await session.execute(
+                select(
+                    Olympiads.id,
+                    Olympiads.name,
+                    SeasonProfile.id,
+                    SeasonProfile.name,
+                    SeasonProfile.name_norm,
+                    SeasonProfile.rsosh_level,
+                )
+                .join(OlympiadSeason, OlympiadSeason.olympiad_id == Olympiads.id)
+                .join(SeasonProfile, SeasonProfile.season_id == OlympiadSeason.id)
+                .where(
+                    Olympiads.status == 'PUBLISHED',
+                    OlympiadSeason.season_label == season_label,
+                    *(
+                        [SeasonProfile.rsosh_level == str(rsosh_level)]
+                        if rsosh_level
+                        else []
+                    ),
+                )
+                .order_by(SeasonProfile.name_norm, Olympiads.name)
+            )
+        ).all()
+
+        profiles: dict[str, dict] = {}
+        for olympiad_id, olympiad_name, profile_id, name, name_norm, level in rows:
+            entry = profiles.setdefault(
+                name_norm,
+                {
+                    'name': name,
+                    'name_norm': name_norm,
+                    'levels': [],
+                    'olympiads': [],
+                    'olympiad_ids': [],
+                    'profile_ids': [],
+                },
+            )
+            if level and level not in entry['levels']:
+                entry['levels'].append(level)
+            if str(olympiad_id) not in entry['olympiad_ids']:
+                entry['olympiad_ids'].append(str(olympiad_id))
+                entry['olympiads'].append(
+                    {'id': str(olympiad_id), 'name': olympiad_name}
+                )
+            entry['profile_ids'].append(str(profile_id))
+
+        existing_rows = (
+            await session.execute(
+                select(BenefitRule.profile_id)
+                .join(OlympiadSeason, OlympiadSeason.id == BenefitRule.season_id)
+                .where(
+                    BenefitRule.university_id == _as_uuid(university_id),
+                    OlympiadSeason.season_label == season_label,
+                )
+            )
+        ).scalars().all()
+        existing_profile_ids = {str(value) for value in existing_rows}
+
+        for entry in profiles.values():
+            entry['existing'] = sum(
+                1 for profile_id in entry['profile_ids']
+                if profile_id in existing_profile_ids
+            )
+            entry['levels'] = sorted(entry['levels'])
+            entry.pop('profile_ids', None)
+
+        return {
+            'season_labels': list(labels),
+            'profiles': sorted(profiles.values(), key=lambda item: item['name']),
+        }
+
+
+async def bulk_create_rules(data: dict, user_id=None) -> dict:
+    """Создать одно и то же правило для всех олимпиад сезона.
+
+    Профили сопоставляются по ``name_norm``: у каждой олимпиады свой id
+    профиля, но название предмета общее. Уже существующее правило пары
+    «олимпиада + сезон + профиль» не дублируется — оно попадает в
+    ``skipped``, чтобы повторное нажатие кнопки было безопасным.
+    """
+    season_label = (data.get('season_label') or '').strip()
+    items = data.get('items') or []
+    doc_id = data.get('doc_id')
+    rsosh_level = data.get('rsosh_level')
+    if not season_label or not items:
+        raise InvalidReference('season_label and items are required')
+
+    items_by_norm = {
+        (item.get('name_norm') or normalize_name(item.get('name') or '')): item
+        for item in items
+    }
+
+    created = []
+    skipped = 0
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(OlympiadSeason)
+                .join(Olympiads, Olympiads.id == OlympiadSeason.olympiad_id)
+                .where(
+                    Olympiads.status == 'PUBLISHED',
+                    OlympiadSeason.season_label == season_label,
+                )
+            )
+        ).scalars().all()
+
+        for season in rows:
+            profiles = (
+                await session.execute(
+                    select(SeasonProfile).where(
+                        SeasonProfile.season_id == season.id,
+                        SeasonProfile.name_norm.in_(list(items_by_norm)),
+                        *(
+                            [SeasonProfile.rsosh_level == str(rsosh_level)]
+                            if rsosh_level
+                            else []
+                        ),
+                    )
+                )
+            ).scalars().all()
+            for profile in profiles:
+                item = items_by_norm.get(profile.name_norm)
+                if not item:
+                    continue
+                exists = (
+                    await session.execute(
+                        select(BenefitRule.id).where(
+                            BenefitRule.university_id
+                            == _as_uuid(data['university_id']),
+                            BenefitRule.olympiad_id == season.olympiad_id,
+                            BenefitRule.season_id == season.id,
+                            BenefitRule.profile_id == profile.id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if exists is not None:
+                    skipped += 1
+                    continue
+                rule = BenefitRule(
+                    university_id=_as_uuid(data['university_id']),
+                    olympiad_id=season.olympiad_id,
+                    season_id=season.id,
+                    profile_id=profile.id,
+                    benefit_type=normalize_benefit_type(
+                        item.get('benefit_type') or 'BVI'
+                    ),
+                    required_result_type=normalize_result_type(
+                        item.get('required_result_type')
+                    ),
+                    doc_id=_as_uuid(doc_id),
+                    verification_status='unverified',
+                    is_published=bool(data.get('is_published', True)),
+                    created_by=_as_uuid(user_id) if user_id else None,
+                    updated_by=_as_uuid(user_id) if user_id else None,
+                )
+                session.add(rule)
+                await session.flush()
+                await _upsert_ege(session, rule, item.get('ege_requirement'))
+                await _create_version(
+                    session, rule, changed_by=user_id,
+                    changed_fields=['*'], reason='bulk_created',
+                )
+                created.append({
+                    'id': str(rule.id),
+                    'olympiad_id': str(season.olympiad_id),
+                    'season_id': str(season.id),
+                    'profile_id': str(profile.id),
+                    'profile_name': profile.name,
+                })
+        await session.commit()
+
+    return {'created': created, 'skipped': skipped}
 
 
 async def create_rule(data: dict, user_id=None):

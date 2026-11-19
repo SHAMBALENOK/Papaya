@@ -89,6 +89,33 @@ function formatDate(iso) {
     return d.toLocaleDateString('ru-RU');
 }
 
+/** Дата и время: аудит должен отвечать не только «когда», но и «во сколько». */
+function formatDateTime(iso) {
+    if (!iso) return 'Н/Д';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return 'Н/Д';
+    return d.toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+/** Учебные годы для выпадающего списка сезонов, с текущего и назад.
+ *
+ * Учебный год начинается в августе: в ноябре 2026 первым идёт 2026/2027.
+ */
+function academicYearOptions(count = 12) {
+    const now = new Date();
+    const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+    return Array.from({ length: count }, (_, index) => {
+        const year = startYear - index;
+        return `${year}/${year + 1}`;
+    });
+}
+
 function userInitials(user) {
     if (!user) return '?';
     const a = (user.name || '?')[0] || '?';
@@ -151,6 +178,7 @@ const BENEFIT_RESULT_LABELS = {
 const DOC_TYPE_LABELS = {
     RSOSH_LIST: 'Перечень РСОШ',
     UNIVERSITY_ORDER: 'Приказ университета',
+    ATTACHMENT: 'Документ к заявке',
     OTHER: 'Другой документ',
     // Производные документы перечня: таблица и её HTML-версия создаются
     // импортом и открываются рядом с исходным сканом.
@@ -178,6 +206,16 @@ function benefitEgeLine(rule) {
 
 function docTypeLabel(type) {
     return DOC_TYPE_LABELS[type] || type || 'Документ';
+}
+
+/** Ссылки на подтверждающие документы заявки. */
+function attachmentLinksHtml(items, label = 'Вложения') {
+    if (!items || !items.length) return '';
+    const links = items.map(doc =>
+        `<a href="${escAttr(api.docFileUrl(doc.id))}" target="_blank" rel="noopener"
+            class="text-brand hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded">${escHtml(doc.name)}</a>`
+    ).join(' · ');
+    return `<p class="mt-2 text-xs text-ink-soft"><span class="font-semibold">${escHtml(label)}:</span> ${links}</p>`;
 }
 
 /* ---------- Поля форм ---------- */
@@ -237,16 +275,19 @@ function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } 
     const widths = { lg: 'max-w-4xl', xl: 'max-w-6xl' };
     const widthClass = wide ? 'max-w-3xl' : (widths[size] || 'max-w-lg');
     overlay.innerHTML = `
-    <div role="dialog" aria-modal="true" aria-label="${escAttr(title)}"
-         class="bg-white rounded-lg shadow-elev-3 w-full ${widthClass} max-h-[85vh] overflow-y-auto modal-scroll">
-        <div class="p-8 md:p-10">
-            <div class="flex items-start justify-between gap-6 mb-8">
-                <h2 class="text-2xl font-bold tracking-tight text-ink">${escHtml(title)}</h2>
-                <button type="button" data-modal-close aria-label="Закрыть окно"
-                        class="shrink-0 w-10 h-10 rounded bg-mist hover:bg-mist-deep text-ink-soft hover:text-ink flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">&times;</button>
+    <div class="relative w-full ${widthClass}">
+        <div role="dialog" aria-modal="true" aria-label="${escAttr(title)}"
+             class="bg-white rounded-lg shadow-elev-3 w-full max-h-[85vh] overflow-y-auto modal-scroll">
+            <div class="p-8 md:p-10">
+                <div class="flex items-start justify-between gap-6 mb-8">
+                    <h2 class="text-2xl font-bold tracking-tight text-ink">${escHtml(title)}</h2>
+                    <button type="button" data-modal-close aria-label="Закрыть окно"
+                            class="shrink-0 w-10 h-10 rounded bg-mist hover:bg-mist-deep text-ink-soft hover:text-ink flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">&times;</button>
+                </div>
+                <div class="modal-body">${bodyHtml}</div>
             </div>
-            <div class="modal-body">${bodyHtml}</div>
         </div>
+        <div data-scroll-hint class="modal-scroll-hint hidden" aria-hidden="true">Прокрутите вниз ↓</div>
     </div>`;
     document.body.appendChild(overlay);
     modalStack.push(overlay);
@@ -269,6 +310,7 @@ function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } 
             return;
         }
         document.removeEventListener('keydown', onEsc);
+        if (overlay._cleanupScrollHint) overlay._cleanupScrollHint();
         const index = modalStack.indexOf(overlay);
         if (index !== -1) modalStack.splice(index, 1);
         overlay.remove();
@@ -285,6 +327,33 @@ function openModal(title, bodyHtml, { wide = false, size = '', isDirty = null } 
         pressedOnOverlay = false;
     });
     document.addEventListener('keydown', onEsc);
+
+    // Подсказка «есть ещё контент»: без неё модалка на ПК выглядит
+    // законченной, хотя ниже остались поля. Показываем только когда
+    // содержимое реально не помещается и пользователь ещё не внизу.
+    const dialog = overlay.querySelector('[role="dialog"]');
+    const hint = overlay.querySelector('[data-scroll-hint]');
+    const updateScrollHint = () => {
+        if (!dialog || !hint) return;
+        const more = dialog.scrollHeight - dialog.scrollTop - dialog.clientHeight > 8;
+        hint.classList.toggle('hidden', !more);
+    };
+    if (dialog && hint) {
+        dialog.addEventListener('scroll', updateScrollHint, { passive: true });
+        window.addEventListener('resize', updateScrollHint);
+        const observer = new MutationObserver(updateScrollHint);
+        observer.observe(dialog, { childList: true, subtree: true });
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(updateScrollHint)
+            : null;
+        if (resizeObserver) resizeObserver.observe(dialog);
+        requestAnimationFrame(updateScrollHint);
+        overlay._cleanupScrollHint = () => {
+            window.removeEventListener('resize', updateScrollHint);
+            observer.disconnect();
+            if (resizeObserver) resizeObserver.disconnect();
+        };
+    }
 
     const first = overlay.querySelector('input, textarea, select');
     if (first) first.focus();
@@ -323,13 +392,48 @@ function openUniversityFormModal(university, onDone) {
     const body = `
         <div id="modal-alert"></div>
         <form id="university-form">
-            ${inputField({ id: 'un-name', name: 'name', label: 'Полное название', required: true, value: (university || {}).name || '' })}
-            ${inputField({ id: 'un-short', name: 'short_name', label: 'Краткое название / аббревиатура', value: (university || {}).short_name || '', placeholder: 'МФТИ' })}
-            ${inputField({ id: 'un-site', name: 'website', label: 'Официальный сайт', type: 'url', value: (university || {}).website || '', placeholder: 'https://…' })}
-            ${inputField({ id: 'un-preview', name: 'preview_image', label: 'Превью для карточек (URL)', type: 'url', value: (university || {}).preview_image || '', placeholder: 'https://…' })}
-            ${inputField({ id: 'un-image', name: 'image', label: 'Большая картинка для страницы (URL)', type: 'url', value: (university || {}).image || '', placeholder: 'https://…' })}
-            ${textareaField({ id: 'un-desc', name: 'description', label: 'Описание', value: (university || {}).description || '' })}
-            <div class="flex flex-wrap justify-end gap-3 mt-10">
+            <div class="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                <section aria-labelledby="un-section-main">
+                    <h3 id="un-section-main" class="${UI.eyebrow}">Основное</h3>
+                    <div class="mt-4">
+                        ${inputField({ id: 'un-name', name: 'name', label: 'Полное название', required: true, value: (university || {}).name || '' })}
+                        ${inputField({ id: 'un-short', name: 'short_name', label: 'Краткое название / аббревиатура', value: (university || {}).short_name || '', placeholder: 'МФТИ' })}
+                        ${inputField({ id: 'un-site', name: 'website', label: 'Официальный сайт', type: 'url', value: (university || {}).website || '', placeholder: 'https://…' })}
+                    </div>
+                </section>
+                <section aria-labelledby="un-section-images">
+                    <h3 id="un-section-images" class="${UI.eyebrow}">Изображения</h3>
+                    <div class="mt-4">
+                        <div class="${UI.field}">
+                            <label for="un-preview" class="${UI.label}">Маленькое фото для карточки (URL)</label>
+                            <input id="un-preview" name="preview_image" type="url" class="${UI.input}"
+                                   value="${escAttr((university || {}).preview_image || '')}" placeholder="https://…">
+                            <p class="mt-2 text-xs text-ink-soft leading-relaxed">
+                                Фото для карточки каталога, а не баннер. Рекомендуемый размер — около 400×300 px.
+                                Если оставить пустым, карточка возьмёт большую картинку.
+                            </p>
+                            <img data-image-preview="preview" alt="Предпросмотр фото для карточки"
+                                 class="mt-3 hidden w-full max-w-[16rem] aspect-[4/3] object-cover rounded border border-line"
+                                 src="${escAttr((university || {}).preview_image || '')}">
+                        </div>
+                        <div class="${UI.field}">
+                            <label for="un-image" class="${UI.label}">Большая картинка для страницы (URL)</label>
+                            <input id="un-image" name="image" type="url" class="${UI.input}"
+                                   value="${escAttr((university || {}).image || '')}" placeholder="https://…">
+                            <p class="mt-2 text-xs text-ink-soft leading-relaxed">
+                                Баннер в верхней части страницы университета. Рекомендуемая ширина — от 1200 px.
+                            </p>
+                            <img data-image-preview="full" alt="Предпросмотр большой картинки"
+                                 class="mt-3 hidden w-full max-h-40 object-cover rounded border border-line"
+                                 src="${escAttr((university || {}).image || '')}">
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <div class="mt-8">
+                ${textareaField({ id: 'un-desc', name: 'description', label: 'Описание', value: (university || {}).description || '', rows: 5 })}
+            </div>
+            <div class="sticky bottom-0 -mx-8 md:-mx-10 mt-10 px-8 md:px-10 py-4 bg-white border-t border-line flex flex-wrap justify-end gap-3">
                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary}">${isEdit ? 'Сохранить' : 'Создать университет'}</button>
             </div>
@@ -337,9 +441,29 @@ function openUniversityFormModal(university, onDone) {
     const { overlay, close } = openModal(
         isEdit ? 'Редактирование университета' : 'Новый университет',
         body,
-        { isDirty: () => dirty }
+        { size: 'xl', isDirty: () => dirty }
     );
     ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
+
+    const syncPreview = () => {
+        const preview = overlay.querySelector('[data-image-preview="preview"]');
+        const full = overlay.querySelector('[data-image-preview="full"]');
+        const previewValue = (overlay.querySelector('#un-preview').value || '').trim();
+        const fullValue = (overlay.querySelector('#un-image').value || '').trim();
+        [[preview, previewValue], [full, fullValue]].forEach(([img, value]) => {
+            if (!img) return;
+            if (value && /^https?:\/\//i.test(value)) {
+                img.src = value;
+                img.classList.remove('hidden');
+            } else {
+                img.classList.add('hidden');
+                img.removeAttribute('src');
+            }
+        });
+    };
+    overlay.querySelector('#un-preview').addEventListener('input', syncPreview);
+    overlay.querySelector('#un-image').addEventListener('input', syncPreview);
+    syncPreview();
 
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
     overlay.querySelector('#university-form').addEventListener('submit', async e => {
@@ -496,11 +620,14 @@ async function loadOlympiadSeasonsBox(overlay, olympiadId, onDone) {
         <form id="ol-season-add" class="rounded bg-mist px-4 py-4">
             <label for="ol-season-label" class="${UI.label}">Новый сезон</label>
             <div class="mt-2 flex flex-col sm:flex-row gap-3">
-                <input id="ol-season-label" name="season_label" class="${UI.input} flex-1"
-                       placeholder="2026/2027" required>
+                <select id="ol-season-label" name="season_label" class="${UI.input} flex-1" required>
+                    ${academicYearOptions().map(label =>
+                        `<option value="${escAttr(label)}">${escHtml(label)}</option>`
+                    ).join('')}
+                </select>
                 <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Добавить</button>
             </div>
-            <p class="mt-2 text-xs text-ink-faint">Метка года, например 2025/2026. Даты и уровень здесь не задаются.</p>
+            <p class="mt-2 text-xs text-ink-faint">Учебный год: с августа по июль. Даты и уровень здесь не задаются.</p>
         </form>
         <div class="mt-5 space-y-3">
             ${rows || '<p class="text-sm text-ink-soft">Сезонов пока нет. Добавьте первый.</p>'}
@@ -860,9 +987,50 @@ function bindChromeControls() {
     else if (desktop.addListener) desktop.addListener(syncViewport);
 }
 
+/* ---------- Подсказки прокрутки таблиц ----------
+ *
+ * На ПК широкая таблица обрезается контейнером, и без подсказки кажется,
+ * что колонок больше нет. Плашка появляется только при реальном переполнении
+ * по горизонтали и исчезает, когда пользователь домотал вправо.
+ */
+function enhanceScrollableTables(root = document) {
+    root.querySelectorAll('.overflow-x-auto').forEach(box => {
+        if (!box.querySelector('table')) return;
+        let hint = box.nextElementSibling;
+        if (!hint || !hint.hasAttribute('data-table-scroll-hint')) {
+            hint = document.createElement('p');
+            hint.setAttribute('data-table-scroll-hint', '');
+            hint.className = 'table-scroll-hint hidden';
+            hint.setAttribute('aria-hidden', 'true');
+            hint.textContent = 'Прокрутите вправо →';
+            box.insertAdjacentElement('afterend', hint);
+        }
+        if (box._scrollHintUpdate) {
+            box.removeEventListener('scroll', box._scrollHintUpdate);
+        }
+        const update = () => {
+            const more = box.scrollWidth - box.scrollLeft - box.clientWidth > 8;
+            hint.classList.toggle('hidden', !more);
+        };
+        box._scrollHintUpdate = update;
+        box.addEventListener('scroll', update, { passive: true });
+        requestAnimationFrame(update);
+    });
+}
+
+function watchScrollableTables() {
+    const page = document.getElementById('page');
+    if (!page || typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(() => enhanceScrollableTables(page));
+    observer.observe(page, { childList: true, subtree: true });
+    window.addEventListener('resize', () => enhanceScrollableTables(page));
+    enhanceScrollableTables(page);
+}
+
 /* ---------- Запуск приложения ---------- */
 (async function init() {
     bindChromeControls();
+    watchScrollableTables();
     const page = document.getElementById('page');
     if (page && !isPublicRoute(routePath())) {
         page.innerHTML = loadingHtml('Проверяем сессию…');

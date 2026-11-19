@@ -205,6 +205,16 @@ const api = {
         return this.get(`/universities/${id}/benefit-rules/manage${q ? `?${q}` : ''}`);
     },
     createBenefit(universityId, d) { return this.post(`/universities/${universityId}/benefits`, d); },
+    bulkBenefitOptions(universityId, seasonLabel, rsoshLevel) {
+        const params = new URLSearchParams();
+        if (seasonLabel) params.set('season_label', seasonLabel);
+        if (rsoshLevel) params.set('rsosh_level', rsoshLevel);
+        const q = params.toString();
+        return this.get(`/universities/${universityId}/benefit-rules/bulk-options${q ? `?${q}` : ''}`);
+    },
+    bulkCreateBenefits(universityId, d) {
+        return this.post(`/universities/${universityId}/benefit-rules/bulk`, d);
+    },
     getBenefit(id) { return this.get(`/benefits/${id}`, { skipAuthRedirect: true }); },
     getBenefitManage(id) { return this.get(`/benefits/${id}/manage`); },
     updateBenefit(id, d) { return this.put(`/benefits/${id}`, d); },
@@ -241,6 +251,18 @@ const api = {
     createEntityRequest(universityId, d) {
         return this.post(`/universities/${universityId}/entity-requests`, d);
     },
+    createUniversityProposal(d) {
+        return this.post('/university-requests', d);
+    },
+    listMyUniversityProposals() {
+        return this.get('/university-requests/my');
+    },
+    listRequestAttachments(requestId) {
+        return this.get(`/entity-requests/${requestId}/attachments`);
+    },
+    uploadRequestAttachment(requestId, formData) {
+        return this.postForm(`/entity-requests/${requestId}/attachments`, formData);
+    },
     adminEntityRequests(params) {
         const q = cleanQuery(params);
         return this.get(`/admin/entity-requests${q ? `?${q}` : ''}`);
@@ -260,6 +282,12 @@ const api = {
         return this.get(`/admin/representative-applications${q}`);
     },
     reviewRepresentativeApplication(id, d) { return this.post(`/admin/representative-applications/${id}/review`, d); },
+    listRepresentativeApplicationAttachments(id) {
+        return this.get(`/representative-applications/${id}/attachments`);
+    },
+    uploadRepresentativeApplicationAttachment(id, formData) {
+        return this.postForm(`/representative-applications/${id}/attachments`, formData);
+    },
     listAudit(params) {
         const q = cleanQuery(params);
         return this.get(`/admin/audit${q ? `?${q}` : ''}`);

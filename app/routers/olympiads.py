@@ -278,6 +278,10 @@ async def add_olympiad(
                 status_code=409,
                 detail='Olympiad with this name already exists',
             )
+        await database.audit.log_action(
+            'olympiad', created['id'], 'create',
+            user_id=current_user['id'], after=created,
+        )
         return created
     except HTTPException:
         raise
@@ -318,6 +322,10 @@ async def edit_olympiad(
                 status_code=409,
                 detail='Olympiad with this name already exists',
             )
+        await database.audit.log_action(
+            'olympiad', olympiad_id, 'update',
+            user_id=current_user['id'], after=updated,
+        )
         return updated
     except HTTPException:
         raise

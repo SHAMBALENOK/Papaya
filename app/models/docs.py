@@ -28,6 +28,7 @@ class Docs(Base):
 
     - ``RSOSH_LIST`` — перечень олимпиад РСОШ (основной источник каталога);
     - ``UNIVERSITY_ORDER`` — приказ/положение университета о льготах;
+    - ``ATTACHMENT`` — подтверждающий документ или фото к заявке;
     - ``OTHER`` — любой другой документ-источник.
 
     ``status`` — состояние обработки документа и одновременно состояние
@@ -56,6 +57,21 @@ class Docs(Base):
     university_id = Column(
         UUID(as_uuid=True),
         ForeignKey('universities.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    #: Вложение к заявке в каталог или к заявке представителя. Один документ
+    #: принадлежит максимум одной заявке: поля взаимоисключающие, проверка —
+    #: в API при загрузке.
+    entity_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('entity_requests.id', ondelete='CASCADE'),
+        nullable=True,
+        index=True,
+    )
+    representative_application_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('representative_applications.id', ondelete='CASCADE'),
         nullable=True,
         index=True,
     )

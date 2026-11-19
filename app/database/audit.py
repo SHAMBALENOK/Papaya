@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 
 from app.database.database import AsyncSessionLocal
 from app.models.audit import AuditLog
+from app.models.users import Users
 
 logger = logging.getLogger('papaya.audit')
 
@@ -39,7 +40,8 @@ async def log_action(entity_type, entity_id=None, action='', user_id=None, befor
 async def list_audit(entity_type=None, entity_id=None, action=None, limit=100, offset=0):
     async with AsyncSessionLocal() as session:
         stmt = _apply_audit_filters(
-            select(AuditLog), entity_type, entity_id, action
+            select(AuditLog, Users).outerjoin(Users, Users.id == AuditLog.user_id),
+            entity_type, entity_id, action,
         )
         stmt = (
             stmt.order_by(AuditLog.createdAt.desc(), AuditLog.id)
@@ -47,7 +49,7 @@ async def list_audit(entity_type=None, entity_id=None, action=None, limit=100, o
             .offset(max(0, int(offset or 0)))
         )
         result = await session.execute(stmt)
-        return [_audit_to_dict(r) for r in result.scalars().all()]
+        return [_audit_to_dict(row, user) for row, user in result.all()]
 
 
 def _apply_audit_filters(stmt, entity_type=None, entity_id=None, action=None):
@@ -60,13 +62,20 @@ def _apply_audit_filters(stmt, entity_type=None, entity_id=None, action=None):
     return stmt
 
 
-def _audit_to_dict(r):
+def _audit_to_dict(r, user=None):
     return {
         'id': str(r.id),
         'entity_type': r.entity_type,
         'entity_id': str(r.entity_id) if r.entity_id else None,
         'action': r.action,
         'user_id': str(r.user_id) if r.user_id else None,
+        'user_name': ' '.join(
+            part for part in (
+                getattr(user, 'name', None),
+                getattr(user, 'surname', None),
+            ) if part
+        ) or None,
+        'user_email': getattr(user, 'email', None),
         'before': r.before,
         'after': r.after,
         'request_id': r.request_id,

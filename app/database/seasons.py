@@ -5,6 +5,7 @@
 """
 
 import uuid as uuid_mod
+import re
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
@@ -38,6 +39,26 @@ def normalize_level(value):
     if v not in RSOSH_LEVELS:
         raise SeasonConflict('rsosh_level must be 1, 2, 3 or empty')
     return v
+
+
+_SEASON_LABEL_RE = re.compile(r'^(\d{4})/(\d{4})$')
+
+
+def validate_season_label(value) -> str:
+    """Метка сезона — учебный год вида ``2026/2027``.
+
+    Свободный текст позволял заводить «2025/2029» или «осень»: сортировка и
+    фильтры каталога после этого теряли смысл. Второй год обязан быть
+    следующим за первым.
+    """
+    label = (value or '').strip()
+    match = _SEASON_LABEL_RE.match(label)
+    if not match:
+        raise SeasonConflict('season_label must look like 2026/2027')
+    start, end = int(match.group(1)), int(match.group(2))
+    if end != start + 1:
+        raise SeasonConflict('season_label must be an academic year: 2026/2027')
+    return label
 
 
 def season_to_dict(s):
@@ -136,9 +157,7 @@ async def get_season(season_id):
 
 
 async def create_season(data: dict):
-    label = (data.get('season_label') or '').strip()
-    if not label:
-        raise SeasonConflict('season_label is required')
+    label = validate_season_label(data.get('season_label'))
     async with AsyncSessionLocal() as session:
         s = OlympiadSeason(
             olympiad_id=_as_uuid(data['olympiad_id']),
@@ -175,9 +194,7 @@ async def update_season(season_id, data: dict, *, expected_version=None):
             if k not in allowed:
                 continue
             if k == 'season_label':
-                v = (v or '').strip()
-                if not v:
-                    raise SeasonConflict('season_label is required')
+                v = validate_season_label(v)
             setattr(s, k, v)
         s.version = (s.version or 1) + 1
         await session.commit()
