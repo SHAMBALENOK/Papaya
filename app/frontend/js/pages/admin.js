@@ -278,6 +278,14 @@ async function loadAdminTab(tab) {
         audit: () => adminAuditHtml(data),
     };
     box.innerHTML = renderers[tab]();
+    // Аудит обновляется сам, пока вкладка открыта: иначе действие,
+    // выполненное в соседней вкладке, выглядело бы потерянным до перезагрузки.
+    if (window.adminAuditTimer) clearInterval(window.adminAuditTimer);
+    if (tab === 'audit') {
+        window.adminAuditTimer = setInterval(() => {
+            if (document.getElementById('admin-audit-entity')) filterAudit();
+        }, 15000);
+    }
 }
 
 /* Действия, которые открывают модалку или сами показывают результат. */
@@ -335,6 +343,12 @@ async function handleAdminClick(e) {
         btn.disabled = false;
         const rule = adminBenefitsState.rules.find(item => String(item.id) === String(id)) || null;
         openBenefitFormModal(null, rule, [], () => reloadAdmin(), { admin: true });
+        return;
+    }
+
+    if (act === 'refreshAudit') {
+        btn.disabled = true;
+        await filterAudit();
         return;
     }
 
@@ -828,6 +842,7 @@ const ENTITY_REQUEST_TYPE_LABELS = {
     OLYMPIAD: 'Олимпиада',
     SEASON: 'Сезон',
     PROFILE: 'Профиль',
+    UNIVERSITY: 'Новый университет',
 };
 
 const ENTITY_REQUEST_STATUS_LABELS = {
@@ -856,6 +871,8 @@ function adminRequestRowHtml(request) {
     if (payload.rsosh_level) details.push(`уровень РСОШ: ${escHtml(String(payload.rsosh_level))}`);
     if (payload.organizer) details.push(`организатор: ${escHtml(String(payload.organizer))}`);
     if (payload.official_url) details.push(`сайт: ${escHtml(String(payload.official_url))}`);
+    if (payload.short_name) details.push(`кратко: ${escHtml(String(payload.short_name))}`);
+    if (payload.website) details.push(`сайт: ${escHtml(String(payload.website))}`);
 
     return `<div class="${UI.card} px-8 py-6">
         <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
@@ -864,6 +881,7 @@ function adminRequestRowHtml(request) {
                 <p class="mt-2 font-bold text-ink leading-snug">${escHtml(request.name || '—')}</p>
                 ${request.description ? `<p class="mt-2 text-sm text-ink-soft leading-relaxed">${escHtml(request.description)}</p>` : ''}
                 ${details.length ? `<p class="mt-2 text-xs text-ink-faint">${details.join(' · ')}</p>` : ''}
+                ${attachmentLinksHtml(request.attachments, 'Документы заявителя')}
                 ${status === 'rejected' && request.rejection_reason
                     ? `<p class="mt-3 text-sm text-danger">Причина отказа: ${escHtml(request.rejection_reason)}</p>`
                     : ''}
@@ -2868,6 +2886,11 @@ async function openSeasonFormModal(season, onDone) {
         .concat(olympiads.map(item => ({ value: item.id, label: item.name })));
     const docOptions = [{ value: '', label: 'Без документа-основания' }]
         .concat(docs.map(item => ({ value: item.id, label: item.name })));
+    const seasonYears = academicYearOptions();
+    if (isEdit && season.season_label && !seasonYears.includes(season.season_label)) {
+        seasonYears.unshift(season.season_label);
+    }
+    const seasonYearOptions = seasonYears.map(label => ({ value: label, label }));
 
     const body = `
         <div id="modal-alert"></div>
@@ -2881,15 +2904,15 @@ async function openSeasonFormModal(season, onDone) {
                     options: olympiadOptions,
                     value: season ? season.olympiad_id : '',
                 })}
-            ${inputField({
+            ${selectField({
                 id: 'season-label',
                 name: 'season_label',
-                label: 'Метка сезона',
-                required: true,
-                value: (season || {}).season_label || '',
-                placeholder: '2025/2026',
+                label: 'Учебный год',
+                options: seasonYearOptions,
+                value: (season || {}).season_label || seasonYearOptions[0].value,
             })}
             <p class="mt-2 mb-4 text-sm text-ink-soft">
+                Учебный год начинается в августе: 2026/2027 — с сентября 2026 по август 2027.
                 Уровень РСОШ указывается у профиля сезона: у одной олимпиады
                 в одном сезоне бывает несколько профилей с разными уровнями.
             </p>

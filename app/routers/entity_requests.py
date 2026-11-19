@@ -10,12 +10,17 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field, field_validator
 
 from app import database
+from app.caching.main import cache_user_after_write, get_redis
 from app.core import deps
+from app.core.cache_guard import safe_cache_write
 from app.models.entity_requests import ENTITY_TYPES, REQUEST_STATUSES
+from app.routers.docs import ATTACHMENT_EXTENSIONS, save_uploaded_document
+from app.schemas.urls import ExternalUrl
 
 university_requests_page = APIRouter(tags=['entity-requests'])
 admin_requests_page = APIRouter(prefix='/admin/entity-requests', tags=['entity-requests'])
@@ -28,6 +33,9 @@ _ALLOWED_PAYLOAD = {
     'OLYMPIAD': {'official_url', 'organizer'},
     'SEASON': set(),
     'PROFILE': {'rsosh_level'},
+    'UNIVERSITY': {
+        'short_name', 'website', 'preview_image', 'image', 'description',
+    },
 }
 
 
@@ -41,6 +49,25 @@ class EntityRequestCreate(BaseModel):
 
 class EntityRequestReject(BaseModel):
     reason: str
+
+
+class UniversityProposalCreate(BaseModel):
+    """Предложка университета от любого авторизованного пользователя."""
+
+    name: str
+    short_name: str | None = None
+    description: str | None = None
+    website: ExternalUrl = None
+    preview_image: ExternalUrl = None
+    image: ExternalUrl = None
+
+    @field_validator('name')
+    @classmethod
+    def _check_name(cls, v):
+        v = (v or '').strip()
+        if not v:
+            raise ValueError('name is required')
+        return v
 
 
 def _clean_payload(entity_type: str, payload: dict | None) -> dict:
@@ -109,10 +136,18 @@ async def create_university_request(
         entity_type = (body.entity_type or '').strip().upper()
         if entity_type not in ENTITY_TYPES:
             raise HTTPException(status_code=400, detail='Unknown entity type')
+        if entity_type == 'UNIVERSITY':
+            # Новый университет вуз не «запрашивает»: предложку подаёт любой
+            # пользователь через /university-requests, иначе представитель
+            # мог бы создать вуз от имени своего.
+            raise HTTPException(
+                status_code=400,
+                detail='Use /university-requests to propose a university',
+            )
         name = (body.name or '').strip()
         if not name:
             raise HTTPException(status_code=400, detail='Name is required')
-        if entity_type != 'OLYMPIAD' and body.parent_id is None:
+        if entity_type in ('SEASON', 'PROFILE') and body.parent_id is None:
             raise HTTPException(
                 status_code=400,
                 detail='Parent entity is required for season and profile',
@@ -134,6 +169,130 @@ async def create_university_request(
             user_id=current_user['id'], after=request,
         )
         return request
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@university_requests_page.post(
+    '/university-requests',
+    status_code=201,
+)
+async def create_university_proposal(
+    body: UniversityProposalCreate,
+    current_user: dict = Depends(deps.get_current_user),
+):
+    """Предложить университет в каталог.
+
+    Доступно обычному пользователю: после одобрения он автоматически станет
+    представителем созданного вуза (роль назначает администратор при
+    одобрении).
+    """
+    try:
+        payload = {
+            'short_name': (body.short_name or '').strip() or None,
+            'description': (body.description or '').strip() or None,
+            'website': body.website,
+            'preview_image': body.preview_image,
+            'image': body.image,
+        }
+        request = await database.entity_requests.create_request(
+            {
+                'entity_type': 'UNIVERSITY',
+                'name': body.name,
+                'description': (body.description or '').strip() or None,
+                'payload': _clean_payload('UNIVERSITY', payload),
+                'university_id': None,
+                'parent_id': None,
+            },
+            user_id=current_user['id'],
+        )
+        await database.audit.log_action(
+            'entity_request', request['id'], 'create',
+            user_id=current_user['id'], after=request,
+        )
+        return request
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@university_requests_page.get('/university-requests/my')
+async def list_my_university_proposals(
+    current_user: dict = Depends(deps.get_current_user),
+):
+    """Свои предложки университетов: профиль показывает статус рассмотрения."""
+    try:
+        requests, _total = await database.entity_requests.list_requests(
+            entity_type='UNIVERSITY',
+            created_by=current_user['id'],
+            limit=20,
+        )
+        return {'requests': requests}
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+async def _get_request_for_user(request_id, current_user) -> dict:
+    request = await database.entity_requests.get_request(request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail='Request not found')
+    is_author = str(request.get('created_by') or '') == str(
+        current_user.get('id') or ''
+    )
+    if not is_author and current_user.get('role') != deps.ROLE_ADMIN:
+        raise HTTPException(status_code=403, detail='Permission denied')
+    return request
+
+
+@university_requests_page.get('/entity-requests/{request_id}/attachments')
+async def list_request_attachments(
+    request_id: uuid.UUID,
+    current_user: dict = Depends(deps.get_current_user),
+):
+    """Вложения к заявке: видит автор заявки и администратор."""
+    try:
+        await _get_request_for_user(request_id, current_user)
+        docs = await database.docs.list_docs(entity_request_id=request_id)
+        return {'attachments': docs}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@university_requests_page.post(
+    '/entity-requests/{request_id}/attachments',
+    status_code=201,
+)
+async def upload_request_attachment(
+    request_id: uuid.UUID,
+    file: UploadFile = File(...),
+    name: str | None = Form(default=None),
+    current_user: dict = Depends(deps.get_current_user),
+):
+    """Приложить подтверждающий документ или фото к заявке."""
+    try:
+        await _get_request_for_user(request_id, current_user)
+        record = await save_uploaded_document(
+            file,
+            doc_type='ATTACHMENT',
+            name=name,
+            uploaded_by=current_user['id'],
+            entity_request_id=str(request_id),
+            allowed_extensions=ATTACHMENT_EXTENSIONS,
+        )
+        await database.audit.log_action(
+            'doc', record['id'], 'upload',
+            user_id=current_user['id'], after=record,
+        )
+        return record
     except HTTPException:
         raise
     except Exception:
@@ -196,6 +355,7 @@ async def get_request(
 @admin_requests_page.post('/{request_id}/approve')
 async def approve_request(
     request_id: uuid.UUID,
+    r: aioredis.Redis = Depends(get_redis),
     current_user: deps.AdminUser = None,
 ):
     """Создать сущность по запросу. Дубль — 409, запрос остаётся в очереди."""
@@ -203,6 +363,20 @@ async def approve_request(
         result = await database.entity_requests.approve_request(
             request_id, admin_id=current_user['id']
         )
+        request = result['request']
+        # Предложка университета: автор автоматически становится
+        # представителем созданного вуза. Роль не понижается, если пользователь
+        # уже представитель другого университета или администратор.
+        if request.get('entity_type') == 'UNIVERSITY' and request.get('created_by'):
+            author = await database.users.find_user_by_id(request['created_by'])
+            if author and author.get('role') == 'USER':
+                updated = await database.users.apply_role_guarded(
+                    author['id'],
+                    'EDITOR',
+                    university_id=result['entity_id'],
+                )
+                if isinstance(updated, dict):
+                    await safe_cache_write(cache_user_after_write(r, updated))
         await database.audit.log_action(
             'entity_request', request_id, 'approve',
             user_id=current_user['id'], after=result,

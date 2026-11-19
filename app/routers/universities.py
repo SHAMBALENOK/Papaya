@@ -124,6 +124,10 @@ async def add_university(
                 status_code=409,
                 detail='University with this name already exists',
             )
+        await database.audit.log_action(
+            'university', created['id'], 'create',
+            user_id=current_user['id'], after=created,
+        )
         return created
     except HTTPException:
         raise
@@ -167,6 +171,10 @@ async def edit_university(
                 status_code=409,
                 detail='University with this name already exists',
             )
+        await database.audit.log_action(
+            'university', university_id, 'update',
+            user_id=current_user['id'], after=updated,
+        )
         return updated
     except HTTPException:
         raise

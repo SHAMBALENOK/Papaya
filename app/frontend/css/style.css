@@ -151,6 +151,36 @@ body {
 .modal-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 .modal-scroll::-webkit-scrollbar-track { background: transparent; }
 
+/* Подсказка «ниже есть продолжение»: плашка прижата к низу окна и не
+   перехватывает клики. Показывается из openModal только при реальной
+   прокрутке. */
+.modal-scroll-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 0.75rem;
+    transform: translateX(-50%);
+    padding: 0.35rem 0.9rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid var(--line);
+    box-shadow: 0 4px 14px rgba(8, 17, 12, 0.12);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-soft, #4b5563);
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* Подсказка горизонтальной прокрутки таблицы: тот же приём, но без
+   перекрытия содержимого — плашка стоит под таблицей. */
+.table-scroll-hint {
+    margin-top: 0.5rem;
+    text-align: right;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+}
+
 .toast {
     opacity: 0;
     transform: translateY(-6px);

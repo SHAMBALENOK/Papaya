@@ -30,16 +30,26 @@ class SeasonCreate(BaseModel):
     @field_validator('season_label')
     @classmethod
     def _check_label(cls, v):
-        v = (v or '').strip()
-        if not v:
-            raise ValueError('season_label is required')
-        return v
+        try:
+            return database.seasons.validate_season_label(v)
+        except database.seasons.SeasonConflict as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class SeasonUpdate(BaseModel):
     version: int | None = None
     season_label: str | None = None
     is_archived: bool | None = None
+
+    @field_validator('season_label')
+    @classmethod
+    def _check_label(cls, v):
+        if v is None:
+            return v
+        try:
+            return database.seasons.validate_season_label(v)
+        except database.seasons.SeasonConflict as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class ProfileCreate(BaseModel):

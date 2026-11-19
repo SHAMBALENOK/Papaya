@@ -15,6 +15,8 @@ DOC_TYPES = (
     'RSOSH_LIST',
     'UNIVERSITY_ORDER',
     'OTHER',
+    # Подтверждающий документ или фото к заявке пользователя.
+    'ATTACHMENT',
     # Производные документы официального перечня: таблица и её HTML-версия.
     # Они создаются конвейером, а не загружаются руками, но живут в том же
     # хранилище и открываются по тем же маршрутам.
@@ -99,6 +101,8 @@ class DocResponse(DocBase):
     storage_key: Optional[str] = None
     checksum: Optional[str] = None
     university_id: Optional[UUID] = None
+    entity_request_id: Optional[UUID] = None
+    representative_application_id: Optional[UUID] = None
     uploaded_by: Optional[UUID] = None
     processedAt: Optional[datetime] = None
     metadata: Optional[dict[str, Any]] = None

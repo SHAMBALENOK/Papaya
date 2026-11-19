@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.database.database import AsyncSessionLocal
+from app.middlewares.serializers import doc_to_dict
+from app.models.docs import Docs
 from app.models.representative import RepresentativeApplication
 from app.models.universities import Universities
 from app.models.users import Users
@@ -80,13 +82,44 @@ async def list_applications(status=None, user_id=None):
             )
         stmt = stmt.order_by(RepresentativeApplication.createdAt.desc())
         rows = (await session.execute(stmt)).all()
-        return [app_to_dict(a, user, university) for a, user, university in rows]
+        apps = [app_to_dict(a, user, university) for a, user, university in rows]
+        attachments = await _attachments_map(
+            session, [a['id'] for a in apps]
+        )
+        for app in apps:
+            app['attachments'] = attachments.get(app['id'], [])
+        return apps
+
+
+async def _attachments_map(session, app_ids):
+    """Вложения всех заявок одним запросом — без N+1 на карточку."""
+    if not app_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Docs).where(
+                Docs.representative_application_id.in_(
+                    [_as_uuid(value) for value in app_ids]
+                )
+            ).order_by(Docs.createdAt)
+        )
+    ).scalars().all()
+    result: dict[str, list] = {}
+    for doc in rows:
+        key = str(doc.representative_application_id)
+        result.setdefault(key, []).append(doc_to_dict(doc))
+    return result
+
 
 async def get_application(app_id):
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(RepresentativeApplication).where(RepresentativeApplication.id == _as_uuid(app_id)))
         a = result.scalar_one_or_none()
-        return app_to_dict(a) if a else None
+        if not a:
+            return None
+        data = app_to_dict(a)
+        data['attachments'] = (await _attachments_map(session, [str(a.id)])).get(str(a.id), [])
+        return data
 
 async def review_application(app_id, status, reviewer_id, rejection_reason=None):
     async with AsyncSessionLocal() as session:

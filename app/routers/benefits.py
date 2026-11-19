@@ -135,6 +135,40 @@ class StatusChange(BaseModel):
         return v
 
 
+class BulkBenefitItem(BaseModel):
+    """Один профиль в массовой привязке.
+
+    У профиля своё требование ЕГЭ: у математики и физики это разные
+    экзамены, поэтому общее поле на всю пачку было бы неверным.
+    """
+
+    name: str
+    name_norm: str | None = None
+    benefit_type: str = 'BVI'
+    required_result_type: str
+    ege_requirement: EgeRequirement | None = None
+
+    _benefit_type = field_validator('benefit_type')(_check_benefit_type)
+    _required_result_type = field_validator('required_result_type')(_check_result_type)
+
+
+class BulkBenefitCreate(BaseModel):
+    season_label: str
+    doc_id: uuid.UUID
+    is_published: bool = True
+    rsosh_level: str | None = None
+    items: list[BulkBenefitItem] = Field(min_length=1)
+
+    @field_validator('rsosh_level')
+    @classmethod
+    def _check_level(cls, v):
+        if v in (None, ''):
+            return None
+        if str(v) not in ('1', '2', '3'):
+            raise ValueError('rsosh_level must be 1, 2 or 3')
+        return str(v)
+
+
 class RejectRequest(BaseModel):
     """Отклонение правила: причина обязательна.
 
@@ -547,6 +581,93 @@ async def create_university_benefit_rule(
     current_user: dict = Depends(deps.require_university_rep),
 ):
     return await _create_handler(university_id, body, current_user)
+
+
+@university_benefits_page.get('/universities/{university_id}/benefit-rules/bulk-options')
+async def get_bulk_benefit_options(
+    university_id: uuid.UUID,
+    season_label: str | None = Query(default=None),
+    rsosh_level: str | None = Query(default=None),
+    current_user: dict = Depends(deps.require_manage_university),
+):
+    """Профили сезона для формы «привязать ко всем РСОШ»."""
+    try:
+        return await database.benefits.bulk_benefit_options(
+            university_id, season_label, rsosh_level
+        )
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
+@university_benefits_page.post('/universities/{university_id}/benefit-rules/bulk')
+async def bulk_create_benefit_rules(
+    university_id: uuid.UUID,
+    body: BulkBenefitCreate,
+    current_user: dict = Depends(deps.require_university_rep),
+):
+    """Одно правило для всех олимпиад РСОШ выбранного сезона."""
+    if not deps.can_manage_university(current_user, university_id):
+        raise HTTPException(
+            status_code=403, detail='You can only manage your own university'
+        )
+    try:
+        try:
+            season_label = database.seasons.validate_season_label(
+                body.season_label
+            )
+        except database.seasons.SeasonConflict as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        university = await database.universities.get_university(university_id)
+        if not university:
+            raise HTTPException(status_code=404, detail='University not found')
+
+        doc = await database.docs.get_doc(body.doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail='Document not found')
+        if str(doc.get('university_id') or '') != str(university_id):
+            raise HTTPException(
+                status_code=422,
+                detail='Document must belong to the same university',
+            )
+        if doc.get('type') != 'UNIVERSITY_ORDER':
+            raise HTTPException(
+                status_code=422,
+                detail='Only a university order can be the basis of a benefit',
+            )
+
+        result = await database.benefits.bulk_create_rules(
+            {
+                'university_id': str(university_id),
+                'season_label': season_label,
+                'doc_id': str(body.doc_id),
+                'is_published': body.is_published,
+                'rsosh_level': body.rsosh_level,
+                'items': [item.model_dump() for item in body.items],
+            },
+            user_id=current_user['id'],
+        )
+        await database.audit.log_action(
+            'benefit_rule', None, 'bulk_create',
+            user_id=current_user['id'],
+            after={
+                'university_id': str(university_id),
+                'season_label': season_label,
+                'rsosh_level': body.rsosh_level,
+                'profiles': [item.name for item in body.items],
+                'created': len(result['created']),
+                'skipped': result['skipped'],
+            },
+        )
+        return result
+    except HTTPException:
+        raise
+    except database.benefits.InvalidReference as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 # ------------------------------------------------------------------- detail

@@ -36,6 +36,8 @@ async def list_docs(
     status: str | None = None,
     university_id=None,
     uploaded_by=None,
+    entity_request_id=None,
+    representative_application_id=None,
     search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
@@ -47,6 +49,8 @@ async def list_docs(
         status=status,
         university_id=university_id,
         uploaded_by=uploaded_by,
+        entity_request_id=entity_request_id,
+        representative_application_id=representative_application_id,
         search=search,
     )
     statement = statement.order_by(Docs.createdAt.desc(), Docs.id)
@@ -65,6 +69,8 @@ def _apply_doc_filters(
     status=None,
     university_id=None,
     uploaded_by=None,
+    entity_request_id=None,
+    representative_application_id=None,
     search=None,
 ):
     if doc_type is not None:
@@ -75,6 +81,15 @@ def _apply_doc_filters(
         statement = statement.where(Docs.university_id == _as_uuid(university_id))
     if uploaded_by is not None:
         statement = statement.where(Docs.uploaded_by == _as_uuid(uploaded_by))
+    if entity_request_id is not None:
+        statement = statement.where(
+            Docs.entity_request_id == _as_uuid(entity_request_id)
+        )
+    if representative_application_id is not None:
+        statement = statement.where(
+            Docs.representative_application_id
+            == _as_uuid(representative_application_id)
+        )
     query = (search or '').strip()
     if query:
         statement = statement.where(
@@ -89,6 +104,8 @@ async def count_docs(
     status: str | None = None,
     university_id=None,
     uploaded_by=None,
+    entity_request_id=None,
+    representative_application_id=None,
     search: str | None = None,
 ) -> int:
     statement = _apply_doc_filters(
@@ -97,6 +114,8 @@ async def count_docs(
         status=status,
         university_id=university_id,
         uploaded_by=uploaded_by,
+        entity_request_id=entity_request_id,
+        representative_application_id=representative_application_id,
         search=search,
     )
     async with AsyncSessionLocal() as session:
@@ -120,6 +139,13 @@ async def add_doc(ins: dict) -> dict | None:
         'metadata': ins.get('metadata'),
         'note': ins.get('note'),
         'university_id': _as_uuid(ins['university_id']) if ins.get('university_id') else None,
+        'entity_request_id': (
+            _as_uuid(ins['entity_request_id']) if ins.get('entity_request_id') else None
+        ),
+        'representative_application_id': (
+            _as_uuid(ins['representative_application_id'])
+            if ins.get('representative_application_id') else None
+        ),
         'uploaded_by': _as_uuid(ins['uploaded_by']) if ins.get('uploaded_by') else None,
     }
     if ins.get('id'):

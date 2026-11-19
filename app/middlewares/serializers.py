@@ -86,6 +86,11 @@ def doc_to_dict(doc) -> dict:
         'mime_type': doc.mime_type,
         'source_url': doc.source_url,
         'university_id': str(doc.university_id) if getattr(doc, 'university_id', None) else None,
+        'entity_request_id': str(doc.entity_request_id) if getattr(doc, 'entity_request_id', None) else None,
+        'representative_application_id': (
+            str(doc.representative_application_id)
+            if getattr(doc, 'representative_application_id', None) else None
+        ),
         'uploaded_by': str(doc.uploaded_by) if getattr(doc, 'uploaded_by', None) else None,
         'checksum': doc.checksum,
         'status': doc.status,

@@ -268,6 +268,10 @@ async def ban(
             target_id=user_id,
             ip=rate_limit.client_ip(request),
         )
+        await database.audit.log_action(
+            'user', user_id, 'ban',
+            user_id=current_user.get('id'), after=updated,
+        )
         return updated
     except HTTPException:
         raise
@@ -305,6 +309,10 @@ async def unban(
             actor_id=current_user.get('id'),
             target_id=user_id,
             ip=rate_limit.client_ip(request),
+        )
+        await database.audit.log_action(
+            'user', user_id, 'unban',
+            user_id=current_user.get('id'), after=updated,
         )
         return updated
     except HTTPException:
@@ -392,6 +400,12 @@ async def _apply_role(
         new_role=role,
         university_id=university_id,
         ip=ip,
+    )
+    await database.audit.log_action(
+        'user', user_id, 'role_change',
+        user_id=actor_id,
+        before={'role': before.get('role'), 'university_id': before.get('university_id')},
+        after={'role': role, 'university_id': university_id},
     )
     return updated
 

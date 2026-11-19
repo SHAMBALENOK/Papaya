@@ -78,7 +78,10 @@ async function renderMyUniversity() {
     <section class="mb-16 md:mb-24" aria-labelledby="my-benefits-title">
         <div class="flex flex-wrap items-center justify-between gap-6">
             <h2 id="my-benefits-title" class="text-2xl font-extrabold tracking-tight">Правила льгот (${benefits.length})</h2>
-            <button type="button" id="benefit-add" class="${UI.btn} ${UI.btnPrimary}">Добавить правило</button>
+            <div class="flex flex-wrap gap-3">
+                <button type="button" id="benefit-bulk" class="${UI.btn} ${UI.btnSecondary}">Привязать ко всем РСОШ</button>
+                <button type="button" id="benefit-add" class="${UI.btn} ${UI.btnPrimary}">Добавить правило</button>
+            </div>
         </div>
         <div id="my-benefits-list" class="mt-10"></div>
     </section>
@@ -122,6 +125,8 @@ async function renderMyUniversity() {
 
     document.getElementById('benefit-add').addEventListener('click', () =>
         openBenefitFormModal(universityId, null, docs, () => renderMyUniversity()));
+    document.getElementById('benefit-bulk').addEventListener('click', () =>
+        openBulkBenefitModal(universityId, docs, () => renderMyUniversity()));
     document.getElementById('doc-add').addEventListener('click', () =>
         openDocUploadModal(universityId, () => renderMyUniversity()));
     document.getElementById('program-add').addEventListener('click', () =>
@@ -297,8 +302,13 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
         const res = await api.listSeasons(initialOlympiad, { include_archived: true });
         seasons = (res.ok && res.data && res.data.seasons) || [];
     }
-    if (rule && rule.season_id) {
-        const res = await api.listProfiles(rule.season_id);
+    // Профили грузим сразу для того сезона, который будет выбран в форме:
+    // иначе при создании правила сезон уже выбран, а список профилей пуст.
+    const initialSeason = rule
+        ? rule.season_id
+        : ((seasons[0] || {}).id || '');
+    if (initialSeason) {
+        const res = await api.listProfiles(initialSeason);
         profiles = (res.ok && res.data && res.data.profiles) || [];
     }
 
@@ -348,7 +358,7 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
                     value: item.id,
                     label: `${item.season_label}${item.is_archived ? ' (архив)' : ''}`,
                 })),
-                value: rule ? (rule.season_id || '') : '',
+                value: initialSeason,
             })}
             ${selectField({
                 id: 'benefit-profile',
@@ -423,8 +433,13 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
             value: item.id,
             label: `${item.season_label}${item.is_archived ? ' (архив)' : ''}`,
         }));
-        setSelectOptions(seasonSelect, options, selected || '');
-        await loadProfiles(selected || '', '');
+        // Сезон без явного выбора — первый в списке: профили должны появиться
+        // сразу, а не после ручного переключения.
+        const effective = selected && options.some(item => String(item.value) === String(selected))
+            ? selected
+            : ((options[0] || {}).value || '');
+        setSelectOptions(seasonSelect, options, effective);
+        await loadProfiles(effective, '');
     }
     async function loadProfiles(seasonId, selected) {
         let options = [];
@@ -506,6 +521,223 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
         showModalError(overlay, res);
         btn.disabled = false;
         btn.textContent = isEditMode ? 'Сохранить' : 'Добавить правило';
+    });
+}
+
+/** Массовая привязка: одно правило для всех олимпиад РСОШ сезона. */
+async function openBulkBenefitModal(universityId, docs, onDone) {
+    const orderDocs = universityOrderDocs(docs);
+    if (!orderDocs.length) {
+        showToast('Сначала загрузите приказ университета', 'error');
+        return;
+    }
+    const initial = await api.bulkBenefitOptions(universityId);
+    if (!initial.ok) {
+        showToast(errorText(initial), 'error');
+        return;
+    }
+    const labels = (initial.data && initial.data.season_labels) || [];
+    if (!labels.length) {
+        showToast('В каталоге пока нет сезонов олимпиад', 'error');
+        return;
+    }
+
+    const body = `
+        <div id="modal-alert"></div>
+        <form id="bulk-benefit-form">
+            <p class="text-sm text-ink-soft leading-relaxed">
+                Одно правило будет создано для каждой олимпиады РСОШ выбранного
+                сезона и уровня, у которой есть отмеченный профиль. Уже существующие
+                правила не дублируются.
+            </p>
+            <div class="grid gap-4 sm:grid-cols-2 mt-6">
+                ${selectField({
+                    id: 'bulk-season',
+                    name: 'season_label',
+                    label: 'Учебный год',
+                    options: labels.map(label => ({ value: label, label })),
+                    value: labels[0],
+                })}
+                ${selectField({
+                    id: 'bulk-level',
+                    name: 'rsosh_level',
+                    label: 'Уровень РСОШ',
+                    options: [
+                        { value: '', label: 'Все уровни' },
+                        { value: '1', label: '1 уровень' },
+                        { value: '2', label: '2 уровень' },
+                        { value: '3', label: '3 уровень' },
+                    ],
+                    value: '',
+                })}
+                ${selectField({
+                    id: 'bulk-doc',
+                    name: 'doc_id',
+                    label: 'Документ-основание',
+                    options: orderDocs.map(item => ({ value: item.id, label: item.name })),
+                    value: orderDocs[0] ? orderDocs[0].id : '',
+                })}
+                ${selectField({
+                    id: 'bulk-type',
+                    name: 'benefit_type',
+                    label: 'Тип льготы',
+                    options: Object.entries(BENEFIT_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+                    value: 'BVI',
+                })}
+                ${selectField({
+                    id: 'bulk-result',
+                    name: 'required_result_type',
+                    label: 'Требуемый результат',
+                    options: Object.entries(BENEFIT_RESULT_LABELS).map(([value, label]) => ({ value, label })),
+                    value: 'WINNER_OR_PRIZE',
+                })}
+            </div>
+            <div class="mt-6 flex flex-wrap items-center justify-between gap-3">
+                <h3 class="text-lg font-bold tracking-tight text-ink">Профили сезона</h3>
+                <button type="button" id="bulk-toggle-all" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Снять все</button>
+            </div>
+            <div id="bulk-profiles" class="mt-4">${loadingHtml('Загружаем профили…')}</div>
+            <label class="flex items-start gap-3 text-sm text-ink mt-6">
+                <input type="checkbox" name="is_published" checked class="mt-0.5">
+                <span>Показывать в каталоге</span>
+            </label>
+            <div class="flex flex-wrap justify-end gap-3 mt-10">
+                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
+                <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Привязать</button>
+            </div>
+        </form>`;
+    const { overlay, close } = openModal(
+        'Привязать льготу ко всем РСОШ',
+        body,
+        { size: 'xl' }
+    );
+    const seasonSelect = overlay.querySelector('#bulk-season');
+    const levelSelect = overlay.querySelector('#bulk-level');
+    const profilesBox = overlay.querySelector('#bulk-profiles');
+    let profiles = [];
+
+    const renderProfiles = () => {
+        if (!profiles.length) {
+            profilesBox.innerHTML = '<p class="text-sm text-ink-soft">В этом сезоне и уровне нет олимпиад с профилями.</p>';
+            return;
+        }
+        profilesBox.innerHTML = `
+            <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-ink-faint border-b border-line">
+                        <th class="py-2 pr-3">Профиль</th>
+                        <th class="py-2 pr-3">Олимпиад</th>
+                        <th class="py-2 pr-3">ЕГЭ: предмет</th>
+                        <th class="py-2">Мин. балл</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${profiles.map((item, index) => `
+                    <tr class="border-b border-line/60 align-top">
+                        <td class="py-3 pr-3">
+                            <label class="flex items-start gap-2">
+                                <input type="checkbox" data-bulk-profile="${index}" checked class="mt-1">
+                                <span>
+                                    <span class="font-semibold text-ink">${escHtml(item.name)}</span>
+                                    ${item.levels && item.levels.length
+                                        ? `<span class="block text-xs text-ink-faint">уровень РСОШ: ${escHtml(item.levels.join(', '))}</span>`
+                                        : ''}
+                                    ${item.existing
+                                        ? `<span class="block text-xs text-ink-faint">уже есть правил: ${item.existing}</span>`
+                                        : ''}
+                                </span>
+                            </label>
+                        </td>
+                        <td class="py-3 pr-3 text-ink-soft">${item.olympiads.length}</td>
+                        <td class="py-3 pr-3">
+                            <input data-bulk-ege-subject="${index}" class="${UI.input} !py-2" placeholder="Математика">
+                        </td>
+                        <td class="py-3">
+                            <input data-bulk-ege-score="${index}" type="number" min="0" max="100" class="${UI.input} !py-2" placeholder="75">
+                        </td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+            </div>
+            <p class="mt-3 text-xs text-ink-soft leading-relaxed">
+                Предмет ЕГЭ заполняется отдельно для каждого профиля. Пустой
+                предмет означает правило без требования ЕГЭ.
+            </p>`;
+    };
+
+    let allChecked = true;
+    const toggleAll = overlay.querySelector('#bulk-toggle-all');
+    toggleAll.addEventListener('click', () => {
+        allChecked = !allChecked;
+        overlay.querySelectorAll('[data-bulk-profile]').forEach(box => {
+            box.checked = allChecked;
+        });
+        toggleAll.textContent = allChecked ? 'Снять все' : 'Выбрать все';
+    });
+
+    const loadProfiles = async () => {
+        profilesBox.innerHTML = loadingHtml('Загружаем профили…');
+        const res = await api.bulkBenefitOptions(universityId, seasonSelect.value);
+        if (!res.ok) {
+            profilesBox.innerHTML = alertHtml(errorText(res), 'error');
+            return;
+        }
+        profiles = (res.data && res.data.profiles) || [];
+        renderProfiles();
+    };
+    seasonSelect.addEventListener('change', loadProfiles);
+    await loadProfiles();
+
+    overlay.querySelector('[data-cancel]').addEventListener('click', close);
+    overlay.querySelector('#bulk-benefit-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const docId = (fd.get('doc_id') || '').trim();
+        if (!docId) {
+            showModalError(overlay, { data: { detail: 'Выберите документ-основание' } });
+            return;
+        }
+        const items = [];
+        profiles.forEach((item, index) => {
+            const box = overlay.querySelector(`[data-bulk-profile="${index}"]`);
+            if (!box || !box.checked) return;
+            const subject = (overlay.querySelector(`[data-bulk-ege-subject="${index}"]`).value || '').trim();
+            const score = (overlay.querySelector(`[data-bulk-ege-score="${index}"]`).value || '').trim();
+            items.push({
+                name: item.name,
+                name_norm: item.name_norm,
+                benefit_type: fd.get('benefit_type') || 'BVI',
+                required_result_type: fd.get('required_result_type') || 'WINNER_OR_PRIZE',
+                ege_requirement: subject
+                    ? { subject, min_score: score ? Number(score) : null }
+                    : null,
+            });
+        });
+        if (!items.length) {
+            showModalError(overlay, { data: { detail: 'Отметьте хотя бы один профиль' } });
+            return;
+        }
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.textContent = 'Создаём…';
+        const res = await api.bulkCreateBenefits(universityId, {
+            season_label: fd.get('season_label'),
+            doc_id: docId,
+            is_published: fd.get('is_published') === 'on',
+            items,
+        });
+        if (res.ok) {
+            close();
+            const created = (res.data && res.data.created ? res.data.created.length : 0);
+            const skipped = (res.data && res.data.skipped) || 0;
+            showToast(`Создано правил: ${created}. Пропущено уже существующих: ${skipped}.`, 'success', 6000);
+            if (onDone) onDone();
+            return;
+        }
+        showModalError(overlay, res);
+        btn.disabled = false;
+        btn.textContent = 'Привязать';
     });
 }
 
