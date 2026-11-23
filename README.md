@@ -277,9 +277,15 @@ XLSX («Перечень <сезон>» + «Сводка») и HTML-версия
 ```bash
 git clone https://github.com/SHAMBALENOK/Papaya.git
 cd Papaya
-cp .env.example .env      # необязательно: значения по умолчанию рабочие
+cp .env.example .env
+# замените JWT_KEY в .env на собственный случайный секрет:
+python -c "import secrets; print(secrets.token_hex(32))"
 docker compose up -d --build
 ```
+
+> Приложение не стартует с секретом-заглушкой `JWT_KEY=change_this_secret_key`
+> (кроме `ENVIRONMENT=test`): с общеизвестным секретом можно подделать JWT
+> любого пользователя, включая администратора.
 
 После запуска доступны:
 
@@ -287,10 +293,14 @@ docker compose up -d --build
 - интерактивная документация API — http://localhost:5000/docs
 - pgAdmin — http://localhost:5050 (логин `postgres@postgres.com`, пароль `postgres`; хост `postgres`, порт `5432`, база `postgres`)
 
+> Если стандартный порт на хосте уже занят (например, локальным PostgreSQL на
+> `5432`), задайте в `.env` свободные `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`,
+> `PGADMIN_HOST_PORT` или `WEB_HOST_PORT`. Внутри Docker-сети порты не меняются.
+
 Ключевые переменные окружения (подробности — в `.env.example`):
 
-- `JWT_KEY` — секрет подписи JWT; в production длинная случайная строка (`python -c "import secrets; print(secrets.token_hex(32))"`);
-- `ENVIRONMENT` — `development` (по умолчанию) или `production` (включает `Secure`-флаг cookie и запрещает секрет-заглушки);
+- `JWT_KEY` — секрет подписи JWT; обязателен, длинная случайная строка (`python -c "import secrets; print(secrets.token_hex(32))"`); заглушка запрещена везде, кроме `ENVIRONMENT=test`;
+- `ENVIRONMENT` — `development` (по умолчанию) или `production` (включает `Secure`-флаг cookie и HSTS);
 - `DATABASE_URL` — подключение к PostgreSQL; миграции применяются автоматически при старте;
 - `MAX_UPLOAD_MB` — максимальный размер загружаемого документа (по умолчанию `30`);
 - `DOCS_DIR` — каталог хранения загруженных документов-источников;
@@ -338,6 +348,7 @@ docker compose --profile testing run --rm --entrypoint sh test -c \
 | Файл | Сценарии |
 |------|----------|
 | `tests/test_auth.py` | регистрация, вход, выход, cookie-флаги, пароли |
+| `tests/test_security_hardening.py` | защитные заголовки, запрет JWT-заглушки, loopback-порты, самопроверка заявок и защита роли администратора |
 | `tests/test_health.py` | liveness, readiness, JSON-404 для не-API путей |
 | `tests/test_catalog.py` | публичные каталоги, поиск, дубли, архив, единый поиск |
 | `tests/test_mvp.py` | каноническая модель: сезоны, профили с уровнем РСОШ, правила льгот, БВИ как тип льготы, требование ЕГЭ, документы вуза |

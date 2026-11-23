@@ -136,7 +136,9 @@ async def add_doc(ins: dict) -> dict | None:
         'source_url': ins.get('source_url'),
         'checksum': ins.get('checksum'),
         'status': ins.get('status') or 'UPLOADED',
-        'metadata': ins.get('metadata'),
+        # Атрибут модели — ``meta`` (имя metadata зарезервировано), а JSONB-
+        # колонка в БД называется ``metadata``.
+        'meta': ins.get('metadata'),
         'note': ins.get('note'),
         'university_id': _as_uuid(ins['university_id']) if ins.get('university_id') else None,
         'entity_request_id': (

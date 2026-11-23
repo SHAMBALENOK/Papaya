@@ -140,6 +140,7 @@ async def save_uploaded_document(
     entity_request_id=None,
     representative_application_id=None,
     allowed_extensions=None,
+    metadata=None,
 ) -> dict:
     """Единая загрузка файла в ``docs``.
 
@@ -180,6 +181,7 @@ async def save_uploaded_document(
                 'uploaded_by': uploaded_by,
                 'entity_request_id': entity_request_id,
                 'representative_application_id': representative_application_id,
+                'metadata': metadata,
             }
         )
         created = record is not None

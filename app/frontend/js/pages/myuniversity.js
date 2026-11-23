@@ -75,6 +75,13 @@ async function renderMyUniversity() {
         <p class="mt-6"><a href="#/universities/${escAttr(university.id)}" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Открыть страницу университета</a></p>
     </section>
 
+    ${pageGuideHtml([
+        { id: 'my-benefits-title', label: `Правила льгот (${benefits.length})` },
+        { id: 'my-docs-title', label: `Документы (${docs.length})` },
+        { id: 'my-programs-title', label: `Программы (${programs.length})` },
+        { id: 'my-requests-title', label: `Запросы (${requests.length})` },
+    ])}
+
     <section class="mb-16 md:mb-24" aria-labelledby="my-benefits-title">
         <div class="flex flex-wrap items-center justify-between gap-6">
             <h2 id="my-benefits-title" class="text-2xl font-extrabold tracking-tight">Правила льгот (${benefits.length})</h2>
@@ -275,41 +282,97 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
         const res = await api.listUniversityDocs(id).catch(() => null);
         return universityOrderDocs((res && res.ok && res.data && res.data.docs) || []);
     };
-    let documents = adminMode ? await loadOrderDocs(selectedUniversityId) : universityOrderDocs(docs);
+    // Документы всегда перечитываются на сервере: если приказ загрузили после
+    // открытия страницы, форма всё равно должна его увидеть, иначе пользователь
+    // снова упирается в пустой список.
+    let documents = await loadOrderDocs(selectedUniversityId);
 
-    const [olyRes, progRes] = await Promise.all([
-        api.listOlympiads(''),
-        selectedUniversityId
-            ? api.listPrograms(selectedUniversityId)
-            : Promise.resolve({ ok: false, data: null }),
-    ]);
-    if (!olyRes.ok) {
-        showToast(errorText(olyRes), 'error');
+    const loadPrograms = async id => {
+        if (!id) return [];
+        const res = await api.listPrograms(id).catch(() => null);
+        return (res && res.ok && res.data && res.data.programs) || [];
+    };
+    let programs = await loadPrograms(selectedUniversityId);
+
+    // Дерево «олимпиада → сезон → профиль»: только непустые ветки. Обычный
+    // список олимпиад показывал бы и те, у которых нет профилей, и правило
+    // нельзя было бы сохранить.
+    const treeRes = await api.benefitFormOptions();
+    if (!treeRes.ok) {
+        showToast(errorText(treeRes), 'error');
         return;
     }
+    const olympiads = ((treeRes.data && treeRes.data.olympiads) || []).slice();
 
-    const olympiads = (olyRes.data.olympiads || []).slice();
-    if (rule && rule.olympiad_id && !olympiads.some(item => String(item.id) === String(rule.olympiad_id))) {
-        olympiads.unshift({ id: rule.olympiad_id, name: rule.olympiad_name || 'Текущая олимпиада' });
+    // При редактировании правило может ссылаться на архивный сезон или
+    // профиль, которых нет в дереве. Вставляем их, чтобы текущие значения не
+    // потерялись при сохранении.
+    if (rule && rule.olympiad_id) {
+        let olympiad = olympiads.find(item => String(item.id) === String(rule.olympiad_id));
+        if (!olympiad) {
+            olympiad = {
+                id: rule.olympiad_id,
+                name: rule.olympiad_name || 'Текущая олимпиада',
+                seasons: [],
+            };
+            olympiads.unshift(olympiad);
+        }
+        if (rule.season_id && !olympiad.seasons.some(item => String(item.id) === String(rule.season_id))) {
+            olympiad.seasons.unshift({
+                id: rule.season_id,
+                season_label: rule.season_label || 'Текущий сезон',
+                is_archived: true,
+                profiles: [],
+            });
+        }
+        const season = olympiad.seasons.find(item => String(item.id) === String(rule.season_id));
+        if (season && rule.profile_id && !season.profiles.some(item => String(item.id) === String(rule.profile_id))) {
+            season.profiles.unshift({
+                id: rule.profile_id,
+                name: rule.profile_name || 'Текущий профиль',
+                rsosh_level: rule.profile_rsosh_level || null,
+            });
+        }
     }
-    let programs = (progRes.ok && progRes.data && progRes.data.programs) || [];
+
     const isEditMode = isEdit;
+    const seasonsFor = olympiadId =>
+        ((olympiads.find(item => String(item.id) === String(olympiadId)) || {}).seasons || []);
+    const firstPopulatedSeason = seasons => {
+        const populated = seasons.find(item => (item.profiles || []).length);
+        return (populated || seasons[0] || {}).id || '';
+    };
 
-    const initialOlympiad = rule ? rule.olympiad_id : (olympiads[0] || {}).id;
-    let seasons = [];
-    let profiles = [];
-    if (initialOlympiad) {
-        const res = await api.listSeasons(initialOlympiad, { include_archived: true });
-        seasons = (res.ok && res.data && res.data.seasons) || [];
-    }
-    // Профили грузим сразу для того сезона, который будет выбран в форме:
-    // иначе при создании правила сезон уже выбран, а список профилей пуст.
+    const initialOlympiad = rule
+        ? rule.olympiad_id
+        : ((olympiads[0] || {}).id || '');
+    const seasons = seasonsFor(initialOlympiad);
     const initialSeason = rule
         ? rule.season_id
-        : ((seasons[0] || {}).id || '');
-    if (initialSeason) {
-        const res = await api.listProfiles(initialSeason);
-        profiles = (res.ok && res.data && res.data.profiles) || [];
+        : firstPopulatedSeason(seasons);
+    const profiles = (
+        seasons.find(item => String(item.id) === String(initialSeason)) || {}
+    ).profiles || [];
+    const initialProfile = rule
+        ? (rule.profile_id || '')
+        : ((profiles[0] || {}).id || '');
+
+    if (!olympiads.length) {
+        const { overlay: emptyOverlay, close: closeEmpty } = openModal(
+            'Новое правило льготы',
+            `<div id="modal-alert"></div>
+             <p class="text-sm text-ink-soft leading-relaxed">
+                 В каталоге пока нет олимпиад с сезонами и профилями. Правило
+                 нельзя создать, пока администратор не добавит хотя бы один
+                 сезон с профилем.
+             </p>
+             <div class="flex flex-wrap justify-end gap-3 mt-8">
+                 <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Закрыть</button>
+             </div>`,
+            { wide: true }
+        );
+        emptyOverlay.querySelector('[data-cancel]').addEventListener('click', closeEmpty);
+        return;
     }
 
     const docOptions = () => documents.map(item => ({ value: item.id, label: item.name }));
@@ -320,7 +383,10 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
         : '<p class="mt-2 text-sm text-ink-soft">Программы не заведены. Их можно добавить на странице университета.</p>';
     const docHintHtml = () => documents.length
         ? ''
-        : '<p class="mb-6 text-sm text-danger">У выбранного вуза нет приказа UNIVERSITY_ORDER: без него правило нельзя подтвердить.</p>';
+        : `<div class="mb-6 rounded bg-danger-soft px-5 py-4 text-sm text-danger leading-relaxed">
+               <p>У выбранного вуза нет приказа университета: без него правило нельзя подтвердить.</p>
+               <button type="button" data-upload-order class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall} mt-3">Загрузить приказ</button>
+           </div>`;
     const universityName = adminMode
         ? (universities.find(item => String(item.id) === String(selectedUniversityId)) || {})
         : {};
@@ -339,6 +405,19 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
             }))
         : '';
 
+    const olympiadOptions = olympiads.map(item => ({ value: item.id, label: item.name }));
+    if (!initialOlympiad) olympiadOptions.unshift({ value: '', label: 'Выберите олимпиаду' });
+    const seasonOptions = seasons.map(item => ({
+        value: item.id,
+        label: `${item.season_label}${item.is_archived ? ' (архив)' : ''}`,
+    }));
+    if (!initialSeason) seasonOptions.unshift({ value: '', label: 'Выберите сезон' });
+    const profileOptions = profiles.map(item => ({
+        value: item.id,
+        label: item.rsosh_level ? `${item.name} · уровень ${item.rsosh_level}` : item.name,
+    }));
+    if (!initialProfile) profileOptions.unshift({ value: '', label: 'Выберите профиль' });
+
     const body = `
         <div id="modal-alert"></div>
         <form id="benefit-form">
@@ -347,28 +426,22 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
                 id: 'benefit-olympiad',
                 name: 'olympiad_id',
                 label: 'Олимпиада',
-                options: olympiads.map(item => ({ value: item.id, label: item.name })),
+                options: olympiadOptions,
                 value: initialOlympiad,
             })}
             ${selectField({
                 id: 'benefit-season',
                 name: 'season_id',
                 label: 'Сезон',
-                options: seasons.map(item => ({
-                    value: item.id,
-                    label: `${item.season_label}${item.is_archived ? ' (архив)' : ''}`,
-                })),
+                options: seasonOptions,
                 value: initialSeason,
             })}
             ${selectField({
                 id: 'benefit-profile',
                 name: 'profile_id',
                 label: 'Профиль сезона',
-                options: profiles.map(item => ({
-                    value: item.id,
-                    label: item.rsosh_level ? `${item.name} · уровень ${item.rsosh_level}` : item.name,
-                })),
-                value: rule ? (rule.profile_id || '') : '',
+                options: profileOptions,
+                value: initialProfile,
             })}
             ${selectField({
                 id: 'benefit-type',
@@ -427,44 +500,58 @@ async function openBenefitFormModal(universityId, rule, docs, onDone, options = 
     const docSelect = overlay.querySelector('#benefit-doc');
     const universitySelect = overlay.querySelector('#benefit-university');
 
-    async function loadSeasons(olympiadId, selected) {
-        const res = await api.listSeasons(olympiadId, { include_archived: true });
-        const options = ((res.ok && res.data && res.data.seasons) || []).map(item => ({
+    const setSeasonOptions = selected => {
+        const seasonsNow = seasonsFor(olympiadSelect.value);
+        const options = seasonsNow.map(item => ({
             value: item.id,
             label: `${item.season_label}${item.is_archived ? ' (архив)' : ''}`,
         }));
-        // Сезон без явного выбора — первый в списке: профили должны появиться
-        // сразу, а не после ручного переключения.
+        // Сезон без явного выбора — первый с профилями: список профилей должен
+        // быть заполнен сразу, а не после ручного переключения.
         const effective = selected && options.some(item => String(item.value) === String(selected))
             ? selected
-            : ((options[0] || {}).value || '');
+            : firstPopulatedSeason(seasonsNow);
         setSelectOptions(seasonSelect, options, effective);
-        await loadProfiles(effective, '');
+        loadProfiles(effective, '');
+    };
+    async function loadSeasons(olympiadId, selected) {
+        void olympiadId;
+        setSeasonOptions(selected);
     }
-    async function loadProfiles(seasonId, selected) {
-        let options = [];
-        if (seasonId) {
-            const res = await api.listProfiles(seasonId);
-            options = ((res.ok && res.data && res.data.profiles) || []).map(item => ({
-                value: item.id,
-                label: item.rsosh_level ? `${item.name} · уровень ${item.rsosh_level}` : item.name,
-            }));
-        }
-        setSelectOptions(profileSelect, options, selected || '');
+    function loadProfiles(seasonId, selected) {
+        const season = seasonsFor(olympiadSelect.value)
+            .find(item => String(item.id) === String(seasonId));
+        const options = ((season && season.profiles) || []).map(item => ({
+            value: item.id,
+            label: item.rsosh_level ? `${item.name} · уровень ${item.rsosh_level}` : item.name,
+        }));
+        // Профиль по умолчанию — первый в сезоне: пустой селект выглядит как
+        // ошибка формы, хотя профили просто не были выбраны.
+        setSelectOptions(profileSelect, options, selected || ((options[0] || {}).value || ''));
     }
+
+    const refreshOrderDocs = async (preferredDocId = '') => {
+        documents = await loadOrderDocs(selectedUniversityId);
+        setSelectOptions(docSelect, docOptions(), preferredDocId || ((documents[0] || {}).id || ''));
+        const hint = overlay.querySelector('#benefit-doc-hint');
+        if (hint) hint.innerHTML = docHintHtml();
+    };
 
     olympiadSelect.addEventListener('change', () => loadSeasons(olympiadSelect.value, ''));
     seasonSelect.addEventListener('change', () => loadProfiles(seasonSelect.value, ''));
 
+    // Загрузка приказа прямо из формы правила: пользователь не должен уходить
+    // со страницы и заново открывать форму, узнав, что документа нет.
+    overlay.addEventListener('click', event => {
+        if (!event.target.closest('[data-upload-order]')) return;
+        openDocUploadModal(selectedUniversityId, () => refreshOrderDocs());
+    });
+
     if (universitySelect) {
         universitySelect.addEventListener('change', async () => {
             selectedUniversityId = universitySelect.value;
-            documents = await loadOrderDocs(selectedUniversityId);
-            setSelectOptions(docSelect, docOptions(), '');
-            const hint = overlay.querySelector('#benefit-doc-hint');
-            if (hint) hint.innerHTML = docHintHtml();
-            const res = await api.listPrograms(selectedUniversityId);
-            programs = (res.ok && res.data && res.data.programs) || [];
+            await refreshOrderDocs();
+            programs = await loadPrograms(selectedUniversityId);
             const box = overlay.querySelector('#benefit-programs');
             if (box) box.innerHTML = programsHtml();
         });
@@ -597,6 +684,7 @@ async function openBulkBenefitModal(universityId, docs, onDone) {
                 <button type="button" id="bulk-toggle-all" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Снять все</button>
             </div>
             <div id="bulk-profiles" class="mt-4">${loadingHtml('Загружаем профили…')}</div>
+            <p id="bulk-summary" class="mt-4 text-sm text-ink-soft"></p>
             <label class="flex items-start gap-3 text-sm text-ink mt-6">
                 <input type="checkbox" name="is_published" checked class="mt-0.5">
                 <span>Показывать в каталоге</span>
@@ -615,6 +703,25 @@ async function openBulkBenefitModal(universityId, docs, onDone) {
     const levelSelect = overlay.querySelector('#bulk-level');
     const profilesBox = overlay.querySelector('#bulk-profiles');
     let profiles = [];
+
+    const updateBulkSummary = () => {
+        const summary = overlay.querySelector('#bulk-summary');
+        if (!summary) return;
+        let selectedProfiles = 0;
+        let olympiads = 0;
+        profiles.forEach((item, index) => {
+            const box = overlay.querySelector(`[data-bulk-profile="${index}"]`);
+            if (!box || !box.checked) return;
+            selectedProfiles += 1;
+            olympiads += (item.olympiads || []).length;
+        });
+        summary.textContent = selectedProfiles
+            ? `Выбрано профилей: ${selectedProfiles} · будет создано до ${olympiads} правил (существующие пропускаются)`
+            : 'Отметьте хотя бы один профиль, чтобы увидеть объём привязки';
+        summary.className = selectedProfiles
+            ? 'mt-4 text-sm text-ink-soft'
+            : 'mt-4 text-sm text-danger';
+    };
 
     const renderProfiles = () => {
         if (!profiles.length) {
@@ -674,19 +781,31 @@ async function openBulkBenefitModal(universityId, docs, onDone) {
             box.checked = allChecked;
         });
         toggleAll.textContent = allChecked ? 'Снять все' : 'Выбрать все';
+        updateBulkSummary();
     });
+    profilesBox.addEventListener('change', updateBulkSummary);
 
     const loadProfiles = async () => {
         profilesBox.innerHTML = loadingHtml('Загружаем профили…');
-        const res = await api.bulkBenefitOptions(universityId, seasonSelect.value);
+        // Уровень обязателен: без него «все уровни» незаметно смешивает
+        // профили 1–3 уровня в одну таблицу.
+        const res = await api.bulkBenefitOptions(
+            universityId,
+            seasonSelect.value,
+            levelSelect.value
+        );
         if (!res.ok) {
+            profiles = [];
             profilesBox.innerHTML = alertHtml(errorText(res), 'error');
+            updateBulkSummary();
             return;
         }
         profiles = (res.data && res.data.profiles) || [];
         renderProfiles();
+        updateBulkSummary();
     };
     seasonSelect.addEventListener('change', loadProfiles);
+    levelSelect.addEventListener('change', loadProfiles);
     await loadProfiles();
 
     overlay.querySelector('[data-cancel]').addEventListener('click', close);
@@ -723,6 +842,7 @@ async function openBulkBenefitModal(universityId, docs, onDone) {
         btn.textContent = 'Создаём…';
         const res = await api.bulkCreateBenefits(universityId, {
             season_label: fd.get('season_label'),
+            rsosh_level: fd.get('rsosh_level') || null,
             doc_id: docId,
             is_published: fd.get('is_published') === 'on',
             items,

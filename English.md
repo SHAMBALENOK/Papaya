@@ -218,9 +218,15 @@ You do not need to install Python, PostgreSQL, Redis, or Tesseract separately; t
 ```bash
 git clone https://github.com/SHAMBALENOK/Papaya.git
 cd Papaya
-cp .env.example .env      # optional: the defaults work as is
+cp .env.example .env
+# replace JWT_KEY in .env with your own random secret:
+python -c "import secrets; print(secrets.token_hex(32))"
 docker compose up -d --build
 ```
+
+> The application refuses to start with the placeholder
+> `JWT_KEY=change_this_secret_key` (except with `ENVIRONMENT=test`): a
+> publicly known secret lets anyone forge a JWT, including an admin token.
 
 After startup:
 
@@ -228,10 +234,15 @@ After startup:
 - interactive API documentation — [http://localhost:5000/docs](http://localhost:5000/docs)
 - pgAdmin — [http://localhost:5050](http://localhost:5050) (`postgres@postgres.com` / `postgres`, host `postgres`, port `5432`, database `postgres`)
 
+> If a host port is already taken (for example, by a local PostgreSQL on
+> `5432`), set free `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`,
+> `PGADMIN_HOST_PORT`, or `WEB_HOST_PORT` values in `.env`. Ports inside the
+> Docker network stay unchanged.
+
 Main environment variables (details in `.env.example`):
 
-- `JWT_KEY` — the JWT signing secret; in production use a long random string (`python -c "import secrets; print(secrets.token_hex(32))"`);
-- `ENVIRONMENT` — `development` (default) or `production` (enables the `Secure` cookie flag and rejects placeholder secrets);
+- `JWT_KEY` — the JWT signing secret; required, a long random string (`python -c "import secrets; print(secrets.token_hex(32))"`); the placeholder is rejected in every environment except `ENVIRONMENT=test`;
+- `ENVIRONMENT` — `development` (default) or `production` (enables the `Secure` cookie flag and HSTS);
 - `DATABASE_URL` — PostgreSQL connection (Alembic migrations are applied automatically on container start);
 - `MAX_UPLOAD_MB` — maximum uploaded document size, `30` by default;
 - `DOCS_DIR` — storage directory for uploaded source documents;

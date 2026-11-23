@@ -118,3 +118,13 @@ function router() {
 }
 
 window.addEventListener('hashchange', router);
+
+/* Кнопки «На этой странице»: прокрутка к секции без смены маршрута. */
+document.addEventListener('click', event => {
+    const trigger = event.target.closest('[data-scroll-to]');
+    if (!trigger) return;
+    const target = document.getElementById(trigger.dataset.scrollTo);
+    if (!target) return;
+    event.preventDefault();
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});

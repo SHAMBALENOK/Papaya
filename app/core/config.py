@@ -12,9 +12,15 @@ _SCHEME = 'postgresql+asyncpg://'
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
-    """Прочитать булеву переменную окружения."""
+    """Прочитать булеву переменную окружения.
+
+    Пустое значение считается «не задано»: Docker Compose передаёт
+    ``COOKIE_SECURE: "${COOKIE_SECURE:-}"`` пустой строкой, когда переменная
+    не задана, и такое значение не должно молча превращаться в ``false`` —
+    иначе production-дефолт ``Secure``-cookie был бы отключён.
+    """
     value = os.getenv(name)
-    if value is None:
+    if value is None or not value.strip():
         return default
     return value.strip().casefold() in {'1', 'true', 'yes', 'on'}
 
@@ -108,8 +114,13 @@ def validate_config() -> None:
     if DATABASE_URL.startswith('sqlite'):
         raise RuntimeError('SQLite is not supported: Papaya requires PostgreSQL')
 
-    if ENVIRONMENT == 'production' and JWT_KEY in _INSECURE_JWT_DEFAULTS:
+    # Заглушка запрещена везде, кроме тестов. Проверять только
+    # ``ENVIRONMENT=production`` недостаточно: при развёртывании легко забыть
+    # переключить окружение, и сервис стартовал бы с общеизвестным секретом,
+    # которым можно подделать любой JWT (включая роль ADMIN).
+    if ENVIRONMENT not in {'test', 'testing'} and JWT_KEY in _INSECURE_JWT_DEFAULTS:
         raise RuntimeError(
-            'JWT_KEY must be a long random secret in production; '
-            'remove the default placeholder value'
+            'JWT_KEY must be a long random secret; remove the default '
+            'placeholder value. Generate one with: '
+            'python -c "import secrets; print(secrets.token_hex(32))"'
         )
