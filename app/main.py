@@ -6,9 +6,10 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import validate_config
+from app.core.config import ENVIRONMENT, validate_config
 from app.core.errors import install_exception_handlers
 from app.middlewares.request_id import RequestIdMiddleware
+from app.middlewares.security_headers import SecurityHeadersMiddleware
 
 validate_config()
 from app import schemas
@@ -17,6 +18,7 @@ from app.core import deps
 from app.database.database import db_lifespan
 from app.routers import (
     admin,
+    admin_applications,
     auth,
     benefits,
     docs,
@@ -45,6 +47,12 @@ async def main_lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=main_lifespan)
 
+# Защитные заголовки ставятся до RequestIdMiddleware: тот добавляется последним
+# и остаётся самым внешним слоем, но покрывает и ответы, сформированные здесь.
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    hsts=ENVIRONMENT == 'production',
+)
 # Идентификатор запроса ставится самым внешним middleware: он должен покрывать
 # все маршруты, включая ошибки, и попадать в логи ещё до обработчиков.
 app.add_middleware(RequestIdMiddleware)
@@ -76,6 +84,8 @@ app.include_router(representative.applications_page, prefix='/api/v1')
 app.include_router(representative.admin_rep_page, prefix='/api/v1')
 app.include_router(entity_requests.university_requests_page, prefix='/api/v1')
 app.include_router(entity_requests.admin_requests_page, prefix='/api/v1')
+app.include_router(admin_applications.public_page, prefix='/api/v1')
+app.include_router(admin_applications.admin_page, prefix='/api/v1')
 
 
 @app.get(

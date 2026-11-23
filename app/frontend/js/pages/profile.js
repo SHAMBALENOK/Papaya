@@ -54,6 +54,7 @@ async function renderProfile() {
     if (editBtn) editBtn.addEventListener('click', () => openEditProfileModal(res.data));
     if (res.data.role === 'USER') renderRepresentativeApplicationSection();
     renderUniversityProposalSection();
+    if (res.data.role !== 'ADMIN') renderAdminApplicationSection();
 }
 
 function userProfileHtml(u, { editable = false } = {}) {
@@ -95,7 +96,15 @@ function userProfileHtml(u, { editable = false } = {}) {
             </div>` : ''}
         </header>
 
-        <section class="mt-16" aria-label="Данные профиля">
+        ${editable ? pageGuideHtml([
+            { id: 'profile-data-section', label: 'Данные профиля' },
+            { id: 'profile-bio-title', label: 'О себе' },
+            ...(u.role === 'USER' ? [{ id: 'rep-application-section', label: 'Представительство' }] : []),
+            { id: 'university-proposal-section', label: 'Предложить вуз' },
+            ...(u.role !== 'ADMIN' ? [{ id: 'admin-application-section', label: 'Стать администратором' }] : []),
+        ]) : ''}
+
+        <section id="profile-data-section" class="mt-16" aria-label="Данные профиля">
             <h2 class="${UI.eyebrow}">Данные профиля</h2>
             <dl class="mt-8 grid sm:grid-cols-2 gap-x-12 gap-y-9">
                 ${fields.map(([label, value]) => `
@@ -117,6 +126,10 @@ function userProfileHtml(u, { editable = false } = {}) {
 
         ${editable
             ? '<section id="university-proposal-section" class="mt-16" aria-live="polite"></section>'
+            : ''}
+
+        ${editable && u.role !== 'ADMIN'
+            ? '<section id="admin-application-section" class="mt-16" aria-live="polite"></section>'
             : ''}
 
         <p class="mt-14 mb-4 text-sm text-ink-faint">Зарегистрирован: ${formatDate(u.createdAt)}</p>
@@ -188,7 +201,126 @@ function openEditProfileModal(u) {
     });
 }
 
-/* ------------------- Заявка на представительство ------------------- */
+/* --------------------- Заявка на роль администратора --------------------- */
+
+/** Блок в профиле: подать заявку на ADMIN или увидеть её статус.
+ *
+ * Роль ADMIN даёт доступ ко всему каталогу и управлению ролями, поэтому
+ * заявка требует контакт и мотивационное письмо. Одобрение сразу выдаёт роль,
+ * но только другому человеку: свою заявку одобрить нельзя (проверка сервера).
+ */
+async function renderAdminApplicationSection() {
+    const box = document.getElementById('admin-application-section');
+    if (!box) return;
+    box.innerHTML = loadingHtml('Проверяем заявку…');
+
+    const res = await api.listMyAdminApplications().catch(() => ({ ok: false, data: null }));
+    const header = `
+        <p class="${UI.eyebrow}">Администрирование</p>
+        <h2 class="mt-5 text-2xl font-extrabold tracking-tight">Стать администратором Papaya</h2>`;
+
+    if (!res.ok) {
+        box.innerHTML = `${header}
+            <div class="mt-6">${alertHtml('Не удалось загрузить статус заявки', 'error')}</div>`;
+        return;
+    }
+
+    const applications = (res.data && res.data.applications) || [];
+    const latest = applications[0] || null;
+
+    if (latest && latest.status === 'pending') {
+        box.innerHTML = `${header}
+        <div class="${UI.card} px-8 py-6 mt-8">
+            <div class="flex flex-wrap items-center gap-3">
+                <span class="${UI.badge} ${UI.badgePending}">На рассмотрении</span>
+                <span class="text-sm text-ink-faint">от ${formatDateTime(latest.createdAt)}</span>
+            </div>
+            <p class="mt-4 text-sm text-ink-soft">Почта для связи: ${escHtml(latest.contact_email || 'не указана')}</p>
+            <p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(latest.motivation || '')}</p>
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">
+                Рассматривает другой администратор Papaya: одобрить собственную
+                заявку нельзя. После одобрения роль выдаётся сразу.
+            </p>
+        </div>`;
+        return;
+    }
+
+    if (latest && latest.status === 'approved') {
+        box.innerHTML = `${header}
+        <div class="${UI.card} px-8 py-6 mt-8">
+            <span class="${UI.badge} ${UI.badgeSuccess}">Заявка одобрена</span>
+            <p class="mt-4 text-sm text-ink-soft leading-relaxed">
+                Роль администратора выдана. Если раздел «Администрирование» ещё не
+                появился в меню, обновите страницу.
+            </p>
+        </div>`;
+        return;
+    }
+
+    box.innerHTML = `${header}
+        <p class="mt-5 text-lg text-ink-soft leading-relaxed max-w-2xl">
+            Администратор ведёт каталог олимпиад и университетов, модерирует льготы
+            и заявки, запускает импорт РСОШ. Заявку рассматривает другой
+            администратор: свою одобрить нельзя.
+        </p>
+        ${latest && latest.status === 'rejected'
+            ? `<div class="mt-8">${alertHtml(
+                'Предыдущая заявка отклонена'
+                + (latest.rejection_reason ? `: ${latest.rejection_reason}` : '')
+                + '. Можно подать новую.', 'error')}</div>`
+            : ''}
+        <form id="admin-application-form" class="mt-8 max-w-2xl">
+            <div id="admin-application-alert"></div>
+            ${inputField({
+                id: 'aa-contact-email',
+                name: 'contact_email',
+                label: 'Почта для связи',
+                type: 'email',
+                required: true,
+                value: (store.user && store.user.email) || '',
+                autocomplete: 'email',
+            })}
+            ${textareaField({
+                id: 'aa-motivation',
+                name: 'motivation',
+                label: 'Почему вы хотите стать администратором',
+                rows: 5,
+                required: true,
+                placeholder: 'Опыт модерации, знание олимпиад и вузов, готовность проверять данные…',
+            })}
+            <button type="submit" class="${UI.btn} ${UI.btnPrimary}">Отправить заявку</button>
+        </form>`;
+
+    const form = document.getElementById('admin-application-form');
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(form);
+        const alertBox = document.getElementById('admin-application-alert');
+        const contactEmail = (fd.get('contact_email') || '').trim();
+        const motivation = (fd.get('motivation') || '').trim();
+        if (!contactEmail || !motivation) {
+            alertBox.innerHTML = alertHtml('Заполните почту и мотивацию', 'error');
+            return;
+        }
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        try {
+            const created = await api.createAdminApplication({
+                contact_email: contactEmail,
+                motivation,
+            });
+            if (created.ok) {
+                showToast('Заявка отправлена администратору', 'success');
+                await renderAdminApplicationSection();
+                return;
+            }
+            alertBox.innerHTML = alertHtml(errorText(created), 'error');
+        } catch {
+            alertBox.innerHTML = alertHtml('Сетевая ошибка', 'error');
+        }
+        btn.disabled = false;
+    });
+}
 
 /** Блок в профиле: подать заявку или увидеть её статус.
  *
@@ -228,7 +360,9 @@ async function renderRepresentativeApplicationSection() {
                 <span class="text-sm text-ink-faint">от ${formatDate(latest.createdAt)}</span>
             </div>
             <p class="mt-4 text-ink">Университет: <span class="font-semibold">${escHtml(latest.university_name || 'не найден')}</span></p>
+            ${latest.contact_email ? `<p class="mt-2 text-sm text-ink-soft">Почта для связи: ${escHtml(latest.contact_email)}</p>` : ''}
             ${latest.justification ? `<p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(latest.justification)}</p>` : ''}
+            ${attachmentThumbsHtml(latest.attachments, 'Фотографии')}
             ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
             <p class="mt-4 text-sm text-ink-soft leading-relaxed">
                 Администратор Papaya рассмотрит заявку. После одобрения в меню появится
@@ -247,6 +381,7 @@ async function renderRepresentativeApplicationSection() {
                 Доступ к кабинету представителя уже открыт. Если раздел «Мой университет»
                 ещё не появился в меню, обновите страницу.
             </p>
+            ${attachmentThumbsHtml(latest.attachments, 'Фотографии')}
             ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
         </div>`;
         return;
@@ -288,6 +423,15 @@ async function renderRepresentativeApplicationSection() {
                 options,
                 value: '',
             })}
+            ${inputField({
+                id: 'rep-application-email',
+                name: 'contact_email',
+                label: 'Почта для связи',
+                type: 'email',
+                required: true,
+                value: (store.user && store.user.email) || '',
+                autocomplete: 'email',
+            })}
             ${textareaField({
                 id: 'rep-application-justification',
                 name: 'justification',
@@ -296,11 +440,16 @@ async function renderRepresentativeApplicationSection() {
                 placeholder: 'Должность, подразделение, ссылка на страницу сотрудника…',
             })}
             <div class="rounded bg-brand-soft/60 border border-brand/20 px-5 py-4 mb-6 text-sm leading-relaxed text-ink">
-                <p class="font-semibold">Совет: приложите подтверждающие документы</p>
-                <p class="mt-2 text-ink-soft">Заявки с документами рассматриваются быстрее и чаще одобряются.
+                <p class="font-semibold">Совет: приложите фото и подтверждающие документы</p>
+                <p class="mt-2 text-ink-soft">Заявки с фотографией и документами рассматриваются быстрее и чаще одобряются.
                 Подойдут фото или скан документа с ФИО, справка о должности или учёбе, пропуск,
                 доверенность или ссылка на профиль сотрудника на сайте вуза. Документы видит
                 только администратор Papaya.</p>
+            </div>
+            <div class="${UI.field}">
+                <label for="rep-application-photo" class="${UI.label}">Ваше фото (необязательно)</label>
+                <input id="rep-application-photo" type="file" accept=".png,.jpg,.jpeg" class="${UI.input} py-2">
+                <p class="mt-2 text-xs text-ink-faint">PNG или JPG. Помогает администратору узнать вас при проверке.</p>
             </div>
             <div class="${UI.field}">
                 <label for="rep-application-files" class="${UI.label}">Подтверждающие документы (необязательно)</label>
@@ -326,10 +475,22 @@ async function renderRepresentativeApplicationSection() {
             const res = await api.createRepresentativeApplication({
                 university_id: universityId,
                 justification: (fd.get('justification') || '').trim() || null,
+                contact_email: (fd.get('contact_email') || '').trim() || null,
             });
             if (res.ok) {
                 const files = form.querySelector('#rep-application-files').files;
+                const photo = form.querySelector('#rep-application-photo').files[0];
                 const failed = [];
+                if (photo) {
+                    const upload = new FormData();
+                    upload.append('file', photo);
+                    upload.append('kind', 'photo');
+                    upload.append('name', `Фото: ${photo.name}`);
+                    const upRes = await api.uploadRepresentativeApplicationAttachment(
+                        res.data.id, upload
+                    ).catch(() => ({ ok: false }));
+                    if (!upRes.ok) failed.push(photo.name);
+                }
                 for (const file of Array.from(files || [])) {
                     const upload = new FormData();
                     upload.append('file', file);
@@ -390,8 +551,9 @@ async function renderUniversityProposalSection() {
             ${latest.description ? `<p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(latest.description)}</p>` : ''}
             ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
             <p class="mt-4 text-sm text-ink-soft leading-relaxed">
-                Администратор Papaya проверит предложку. После одобрения вы станете
-                представителем этого университета.
+                ${(latest.payload || {}).become_representative
+                    ? 'После одобрения администратор назначит вас представителем этого университета и откроет раздел «Мой университет».'
+                    : 'Предложка добавит вуз в каталог. Роль представителя не выдаётся: при подаче не была отмечена галочка «Хочу стать представителем».'}
             </p>
         </div>`;
         return;
@@ -403,8 +565,9 @@ async function renderUniversityProposalSection() {
             <span class="${UI.badge} ${UI.badgeSuccess}">Университет добавлен</span>
             <p class="mt-4 text-ink">Университет: <span class="font-semibold">${escHtml(latest.name)}</span></p>
             <p class="mt-4 text-sm text-ink-soft leading-relaxed">
-                Вы назначены представителем этого университета. Если раздел
-                «Мой университет» ещё не появился в меню, обновите страницу.
+                ${(latest.payload || {}).become_representative
+                    ? 'Вы назначены представителем этого университета. Если раздел «Мой университет» ещё не появился в меню, обновите страницу.'
+                    : 'Университет появился в каталоге. Роль представителя не выдавалась — при подаче не была отмечена галочка «Хочу стать представителем».'}
             </p>
             ${attachmentLinksHtml(latest.attachments, 'Приложенные документы')}
         </div>`;
@@ -414,8 +577,8 @@ async function renderUniversityProposalSection() {
     box.innerHTML = `${header}
         <p class="mt-5 text-lg text-ink-soft leading-relaxed max-w-2xl">
             Если вашего университета нет в каталоге, предложите его. После проверки
-            администратор создаст вуз, а вы автоматически станете его представителем
-            и сможете вести правила льгот.
+            администратор создаст вуз. Если вы отметите «Хочу стать представителем»,
+            он назначит вас представителем — без галочки вуз просто появится в каталоге.
         </p>
         ${latest && latest.status === 'rejected'
             ? `<div class="mt-8">${alertHtml(
@@ -466,6 +629,32 @@ async function renderUniversityProposalSection() {
                 rows: 4,
                 placeholder: 'Чем университет полезен школьнику, какие олимпиады принимает…',
             })}
+            <div class="${UI.field}">
+                <label class="flex items-start gap-3 text-sm text-ink">
+                    <input id="up-become-representative" type="checkbox" name="become_representative" class="mt-1">
+                    <span>
+                        <span class="font-semibold">Хочу стать представителем этого университета</span>
+                        <span class="block mt-1 text-ink-soft">После одобрения администратор назначит вас представителем: вы сможете вести правила льгот и загружать приказы.</span>
+                    </span>
+                </label>
+            </div>
+            <div id="up-representative-fields" class="hidden">
+                ${inputField({
+                    id: 'up-contact-email',
+                    name: 'contact_email',
+                    label: 'Почта для связи',
+                    type: 'email',
+                    value: (store.user && store.user.email) || '',
+                    autocomplete: 'email',
+                })}
+                ${textareaField({
+                    id: 'up-rep-justification',
+                    name: 'representative_justification',
+                    label: 'Почему вы можете представлять этот университет',
+                    rows: 3,
+                    placeholder: 'Должность, подразделение, ссылка на страницу сотрудника…',
+                })}
+            </div>
             <div class="rounded bg-brand-soft/60 border border-brand/20 px-5 py-4 mb-6 text-sm leading-relaxed text-ink">
                 <p class="font-semibold">Совет: приложите подтверждающие документы</p>
                 <p class="mt-2 text-ink-soft">Предложки с документами рассматриваются быстрее и чаще одобряются.
@@ -482,10 +671,29 @@ async function renderUniversityProposalSection() {
         </form>`;
 
     const form = document.getElementById('university-proposal-form');
+    const repToggle = form.querySelector('#up-become-representative');
+    const repFields = form.querySelector('#up-representative-fields');
+    const syncRepFields = () => {
+        const enabled = repToggle.checked;
+        repFields.classList.toggle('hidden', !enabled);
+        repFields.querySelectorAll('input, textarea').forEach(el => {
+            el.disabled = !enabled;
+            el.required = enabled && el.name === 'contact_email';
+        });
+    };
+    repToggle.addEventListener('change', syncRepFields);
+    syncRepFields();
+
     form.addEventListener('submit', async e => {
         e.preventDefault();
         const fd = new FormData(form);
         const alertBox = document.getElementById('university-proposal-alert');
+        const becomeRepresentative = fd.get('become_representative') === 'on';
+        const contactEmail = (fd.get('contact_email') || '').trim();
+        if (becomeRepresentative && !contactEmail) {
+            alertBox.innerHTML = alertHtml('Укажите почту для связи', 'error');
+            return;
+        }
         const btn = form.querySelector('button[type="submit"]');
         btn.disabled = true;
         try {
@@ -496,6 +704,11 @@ async function renderUniversityProposalSection() {
                 preview_image: (fd.get('preview_image') || '').trim() || null,
                 image: (fd.get('image') || '').trim() || null,
                 description: (fd.get('description') || '').trim() || null,
+                become_representative: becomeRepresentative,
+                contact_email: becomeRepresentative ? contactEmail : null,
+                representative_justification: becomeRepresentative
+                    ? ((fd.get('representative_justification') || '').trim() || null)
+                    : null,
             });
             if (res.ok) {
                 const files = form.querySelector('#university-proposal-files').files;

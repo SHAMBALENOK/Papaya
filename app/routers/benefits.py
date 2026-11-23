@@ -583,6 +583,22 @@ async def create_university_benefit_rule(
     return await _create_handler(university_id, body, current_user)
 
 
+@benefit_rules_page.get('/form-options')
+async def get_benefit_form_options(
+    current_user: dict = Depends(deps.get_current_user),
+):
+    """Олимпиады с сезонами и профилями для формы правила льготы.
+
+    Отдаём только непустые ветки: пользователь не должен упираться в пустой
+    селект и узнавать о причине уже после отправки формы.
+    """
+    try:
+        return await database.benefits.benefit_form_options()
+    except Exception:
+        logger.exception('Unhandled error')
+        raise HTTPException(status_code=500, detail='Internal server error')
+
+
 @university_benefits_page.get('/universities/{university_id}/benefit-rules/bulk-options')
 async def get_bulk_benefit_options(
     university_id: uuid.UUID,

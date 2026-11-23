@@ -2,7 +2,7 @@ import uuid
 import logging
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from app import database
 from app.caching.main import cache_user_after_write, get_redis
@@ -20,6 +20,9 @@ logger = logging.getLogger('papaya.representative')
 class ApplicationCreate(BaseModel):
     university_id: str
     justification: str | None = None
+    #: Контакт для связи. Если клиент не прислал его, берём почту аккаунта:
+    #: администратору всё равно нужен канал ответа.
+    contact_email: EmailStr | None = None
 
 
 class ReviewRequest(BaseModel):
@@ -33,7 +36,20 @@ async def create_application(body: ApplicationCreate, current_user: dict = Depen
         university = await database.universities.get_university(body.university_id)
         if not university:
             raise HTTPException(status_code=404, detail='University not found')
-        app = await database.representative.create_application(current_user['id'], body.university_id, body.justification)
+        contact_email = (
+            str(body.contact_email) if body.contact_email
+            else (current_user.get('email') or '')
+        ).strip()
+        if not contact_email:
+            raise HTTPException(
+                status_code=422, detail='contact_email is required'
+            )
+        app = await database.representative.create_application(
+            current_user['id'],
+            body.university_id,
+            body.justification,
+            contact_email=contact_email,
+        )
         await database.audit.log_action(
             'representative_application', app['id'], 'create',
             user_id=current_user['id'], after=app,
@@ -96,6 +112,7 @@ async def upload_application_attachment(
     app_id: uuid.UUID,
     file: UploadFile = File(...),
     name: str | None = Form(default=None),
+    kind: str | None = Form(default=None),
     current_user: dict = Depends(deps.get_current_user),
 ):
     """Приложить документ или фото к заявке представителя."""
@@ -108,6 +125,7 @@ async def upload_application_attachment(
             uploaded_by=current_user['id'],
             representative_application_id=str(app_id),
             allowed_extensions=ATTACHMENT_EXTENSIONS,
+            metadata={'kind': 'representative_photo'} if kind == 'photo' else None,
         )
         await database.audit.log_action(
             'doc', record['id'], 'upload',
@@ -162,19 +180,55 @@ async def review_application(
     try:
         if body.status not in ('approved', 'rejected'):
             raise HTTPException(status_code=400, detail='status must be approved or rejected')
-        app = await database.representative.review_application(app_id, body.status, current_user['id'], body.rejection_reason)
-        if not app:
+        application = await database.representative.get_application(app_id)
+        if not application:
             raise HTTPException(status_code=404, detail='Application not found')
-        # if approved, set user role to EDITOR with university
+        # Одобрение заявки — это смена роли, поэтому проверки те же, что в
+        # админке ролей: нельзя одобрить собственную заявку и нельзя понизить
+        # администратора до представителя. Иначе администратор мог бы
+        # «одобрить» себя и потерять права, а последний ADMIN — оставить
+        # систему без администратора.
+        if str(application['user_id']) == str(current_user['id']):
+            raise HTTPException(
+                status_code=403,
+                detail='You cannot review your own application',
+            )
         if body.status == 'approved':
             from app.database import users as users_db
+
+            target = await database.users.find_user_by_id(application['user_id'])
+            if not target:
+                raise HTTPException(status_code=404, detail='User not found')
+            if target.get('role') == deps.ROLE_ADMIN:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        'Administrator cannot be demoted to university '
+                        'representative through an application'
+                    ),
+                )
             updated = await users_db.apply_role_guarded(
-                app['user_id'], 'EDITOR', university_id=app['university_id']
+                application['user_id'],
+                'EDITOR',
+                university_id=application['university_id'],
             )
-            if isinstance(updated, dict):
-                # Без сброса кэша пользователь ещё до истечения TTL не увидел бы
-                # раздел «Мой университет».
-                await safe_cache_write(cache_user_after_write(r, updated))
+            if isinstance(updated, str):
+                # 'missing' / 'last_admin' — роль не изменена, заявку
+                # одобрять нельзя: интерфейс не должен показывать успех.
+                if updated == users_db.ADMIN_GUARD_LAST_ADMIN:
+                    raise HTTPException(
+                        status_code=409,
+                        detail='Cannot demote the last active administrator',
+                    )
+                raise HTTPException(status_code=404, detail='User not found')
+            # Без сброса кэша пользователь ещё до истечения TTL не увидел бы
+            # раздел «Мой университет».
+            await safe_cache_write(cache_user_after_write(r, updated))
+        app = await database.representative.review_application(
+            app_id, body.status, current_user['id'], body.rejection_reason
+        )
+        if not app:
+            raise HTTPException(status_code=404, detail='Application not found')
         await database.audit.log_action('representative_application', app_id, 'review', user_id=current_user['id'], after=app)
         return app
     except HTTPException:

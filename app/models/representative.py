@@ -18,6 +18,9 @@ class RepresentativeApplication(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     university_id = Column(UUID(as_uuid=True), ForeignKey('universities.id', ondelete='CASCADE'), nullable=False, index=True)
     justification = Column(Text, nullable=True)
+    #: Почта для связи с кандидатом. Заполняется при подаче заявки, чтобы
+    #: администратор не искал контакт в профиле и мог ответить одним письмом.
+    contact_email = Column(String, nullable=True)
     status = Column(String, nullable=False, default='pending', index=True)
     reviewed_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)

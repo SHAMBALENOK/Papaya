@@ -12,7 +12,7 @@ import uuid
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app import database
 from app.caching.main import cache_user_after_write, get_redis
@@ -35,6 +35,8 @@ _ALLOWED_PAYLOAD = {
     'PROFILE': {'rsosh_level'},
     'UNIVERSITY': {
         'short_name', 'website', 'preview_image', 'image', 'description',
+        'become_representative', 'contact_email',
+        'representative_justification',
     },
 }
 
@@ -60,6 +62,12 @@ class UniversityProposalCreate(BaseModel):
     website: ExternalUrl = None
     preview_image: ExternalUrl = None
     image: ExternalUrl = None
+    #: Осознанное согласие стать представителем созданного вуза. Раньше роль
+    #: выдавалась автоматически при одобрении предложки; теперь — только если
+    #: пользователь поставил галочку и заполнил контакт.
+    become_representative: bool = False
+    contact_email: EmailStr | None = None
+    representative_justification: str | None = None
 
     @field_validator('name')
     @classmethod
@@ -68,6 +76,14 @@ class UniversityProposalCreate(BaseModel):
         if not v:
             raise ValueError('name is required')
         return v
+
+    @model_validator(mode='after')
+    def _check_representative_fields(self):
+        if self.become_representative and not self.contact_email:
+            raise ValueError(
+                'contact_email is required when become_representative is set'
+            )
+        return self
 
 
 def _clean_payload(entity_type: str, payload: dict | None) -> dict:
@@ -186,9 +202,9 @@ async def create_university_proposal(
 ):
     """Предложить университет в каталог.
 
-    Доступно обычному пользователю: после одобрения он автоматически станет
-    представителем созданного вуза (роль назначает администратор при
-    одобрении).
+    Доступно обычному пользователю. Если отмечено «хочу стать представителем»,
+    после одобрения администратор назначит роль представителя созданного вуза;
+    без галочки предложка только добавляет вуз в каталог.
     """
     try:
         payload = {
@@ -197,6 +213,13 @@ async def create_university_proposal(
             'website': body.website,
             'preview_image': body.preview_image,
             'image': body.image,
+            'become_representative': body.become_representative,
+            'contact_email': (
+                str(body.contact_email) if body.contact_email else None
+            ),
+            'representative_justification': (
+                (body.representative_justification or '').strip() or None
+            ),
         }
         request = await database.entity_requests.create_request(
             {
@@ -275,6 +298,7 @@ async def upload_request_attachment(
     request_id: uuid.UUID,
     file: UploadFile = File(...),
     name: str | None = Form(default=None),
+    kind: str | None = Form(default=None),
     current_user: dict = Depends(deps.get_current_user),
 ):
     """Приложить подтверждающий документ или фото к заявке."""
@@ -287,6 +311,7 @@ async def upload_request_attachment(
             uploaded_by=current_user['id'],
             entity_request_id=str(request_id),
             allowed_extensions=ATTACHMENT_EXTENSIONS,
+            metadata={'kind': 'representative_photo'} if kind == 'photo' else None,
         )
         await database.audit.log_action(
             'doc', record['id'], 'upload',
@@ -364,10 +389,18 @@ async def approve_request(
             request_id, admin_id=current_user['id']
         )
         request = result['request']
-        # Предложка университета: автор автоматически становится
-        # представителем созданного вуза. Роль не понижается, если пользователь
-        # уже представитель другого университета или администратор.
-        if request.get('entity_type') == 'UNIVERSITY' and request.get('created_by'):
+        # Предложка университета: представителем созданного вуза автор
+        # становится только при явном согласии в заявке. Роль не понижается,
+        # если пользователь уже представитель другого университета или
+        # администратор.
+        wants_representative = bool(
+            (request.get('payload') or {}).get('become_representative')
+        )
+        if (
+            request.get('entity_type') == 'UNIVERSITY'
+            and request.get('created_by')
+            and wants_representative
+        ):
             author = await database.users.find_user_by_id(request['created_by'])
             if author and author.get('role') == 'USER':
                 updated = await database.users.apply_role_guarded(

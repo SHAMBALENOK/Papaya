@@ -1,7 +1,10 @@
 import logging
 
 import uuid as uuid_mod
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from enum import Enum
+
 from sqlalchemy import func, select
 
 from app.database.database import AsyncSessionLocal
@@ -10,8 +13,49 @@ from app.models.users import Users
 
 logger = logging.getLogger('papaya.audit')
 
+
 def _as_uuid(value):
-    return value if isinstance(value, uuid_mod.UUID) else (uuid_mod.UUID(str(value)) if value else None)
+    """UUID или ``None``.
+
+    Аудит — вторичная запись: идентификатор нестандартного типа (например,
+    строка-метка сезона) не должен терять всю запись. Невалидное значение
+    сохраняем как ``None``, а исходник остаётся в ``before``/``after``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, uuid_mod.UUID):
+        return value
+    try:
+        return uuid_mod.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _jsonable(value):
+    """Привести снимок к JSONB-совместимому виду.
+
+    ``log_action`` вызывается из разных слоёв: туда попадают ORM-объекты,
+    ``datetime``, ``Decimal`` и UUID. Без преобразования PostgreSQL отклоняет
+    вставку, а вместе с ней теряется и сам факт действия.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, uuid_mod.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, bytes):
+        return value.decode('utf-8', 'replace')
+    return str(value)
+
 
 async def log_action(entity_type, entity_id=None, action='', user_id=None, before=None, after=None, request_id=None):
     try:
@@ -21,8 +65,8 @@ async def log_action(entity_type, entity_id=None, action='', user_id=None, befor
                 entity_id=_as_uuid(entity_id),
                 action=action,
                 user_id=_as_uuid(user_id),
-                before=before,
-                after=after,
+                before=_jsonable(before),
+                after=_jsonable(after),
                 request_id=request_id,
                 createdAt=datetime.now(timezone.utc),
             )

@@ -16,7 +16,9 @@ services:
       - ./docker/db-init:/docker-entrypoint-initdb.d
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Только loopback: PostgreSQL не должен быть доступен из сети хоста/интернета.
+      # Хостовый порт настраивается: 5432 часто занят локальным PostgreSQL.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 10s
@@ -37,7 +39,8 @@ services:
     volumes:
       - pgadmin-data:/var/lib/pgadmin
     ports:
-      - "5050:80"
+      # pgAdmin — только с локальной машины.
+      - "127.0.0.1:${PGADMIN_HOST_PORT:-5050}:80"
     restart: unless-stopped
     networks:
       - project
@@ -46,7 +49,8 @@ services:
     image: redis:7-alpine
     container_name: redis
     ports:
-      - "6379:6379"
+      # Redis без пароля нельзя публиковать во внешнюю сеть.
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     restart: unless-stopped
@@ -98,9 +102,9 @@ services:
       # API). auto — celery, если брокер доступен, иначе inline.
       RSOSH_EXECUTION: "${RSOSH_EXECUTION:-auto}"
       RSOSH_PDF_DPI: "${RSOSH_PDF_DPI:-300}"
-      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-}"
     ports:
-      - "5000:5000"
+      - "${WEB_HOST_PORT:-5000}:5000"
     volumes:
       # Рабочее дерево вместо кода, запечённого в образ: правки в app/
       # подхватываются без пересборки. requirements.txt при изменении требует
@@ -204,6 +208,7 @@ services:
       - ./migrations:/app/migrations
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
       - ./docs:/app/docs
       - ./English.md:/app/English.md
       - ./README.md:/app/README.md

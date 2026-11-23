@@ -205,6 +205,9 @@ const api = {
         return this.get(`/universities/${id}/benefit-rules/manage${q ? `?${q}` : ''}`);
     },
     createBenefit(universityId, d) { return this.post(`/universities/${universityId}/benefits`, d); },
+    /* Дерево «олимпиада → сезон → профиль» для формы правила: только непустые
+       ветки, чтобы селект не оставался без вариантов. */
+    benefitFormOptions() { return this.get('/benefit-rules/form-options'); },
     bulkBenefitOptions(universityId, seasonLabel, rsoshLevel) {
         const params = new URLSearchParams();
         if (seasonLabel) params.set('season_label', seasonLabel);
@@ -288,6 +291,21 @@ const api = {
     uploadRepresentativeApplicationAttachment(id, formData) {
         return this.postForm(`/representative-applications/${id}/attachments`, formData);
     },
+
+    /* Заявки на роль администратора */
+    createAdminApplication(d) { return this.post('/admin-applications', d); },
+    listMyAdminApplications() { return this.get('/admin-applications/my'); },
+    listAdminApplications(status) {
+        const q = status ? `?status=${encodeURIComponent(status)}` : '';
+        return this.get(`/admin/admin-applications${q}`);
+    },
+    approveAdminApplication(id) {
+        return this.post(`/admin/admin-applications/${id}/approve`);
+    },
+    rejectAdminApplication(id, reason) {
+        return this.post(`/admin/admin-applications/${id}/reject`, { reason });
+    },
+
     listAudit(params) {
         const q = cleanQuery(params);
         return this.get(`/admin/audit${q ? `?${q}` : ''}`);

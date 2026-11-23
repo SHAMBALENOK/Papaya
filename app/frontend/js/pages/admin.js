@@ -18,7 +18,10 @@ const ADMIN_GROUPS = [
     },
     {
         key: 'users', label: 'Пользователи',
-        tabs: [{ key: 'users', label: 'Пользователи' }],
+        tabs: [
+            { key: 'users', label: 'Пользователи' },
+            { key: 'adminapps', label: 'Заявки администраторов' },
+        ],
     },
     {
         key: 'olympiads', label: 'Олимпиады',
@@ -68,8 +71,9 @@ let adminSeasonsState = { seasons: [], total: 0, olympiads: [] };
 let adminProgramsState = { programs: [], total: 0, universities: [] };
 let adminDocsState = { docs: [], total: 0, search: '', type: '', status: '' };
 let adminRequestsState = { requests: [], total: 0, status: '' };
-let adminAuditState = { logs: [], total: 0, entityType: '', action: '' };
+let adminAuditState = { logs: [], total: 0, entityType: '', action: '', updatedAt: null };
 let adminRepAppsStatus = '';
+let adminAdminAppsStatus = '';
 
 function renderAdmin(initialTab) {
     const page = document.getElementById('page');
@@ -144,6 +148,10 @@ async function loadAdminTab(tab) {
                 universities: [],
             };
             return users;
+        },
+        adminapps: async () => {
+            const res = await api.listAdminApplications(adminAdminAppsStatus || undefined);
+            return (res.data && res.data.applications) || [];
         },
         olympiads: async () => {
             const res = await api.adminOlympiads({ limit: ADMIN_LIST_PAGE_SIZE, offset: 0 });
@@ -243,6 +251,7 @@ async function loadAdminTab(tab) {
                 total: res.data.total != null ? res.data.total : logs.length,
                 entityType: '',
                 action: '',
+                updatedAt: new Date(),
             };
             return logs;
         },
@@ -266,6 +275,7 @@ async function loadAdminTab(tab) {
 
     const renderers = {
         dashboard: () => adminDashboardHtml(data),
+        adminapps: () => adminAdminAppsHtml(data),
         benefits: () => adminBenefitsHtml(),
         olympiads: () => adminOlympiadsHtml(),
         universities: () => adminUniversitiesHtml(data),
@@ -282,9 +292,13 @@ async function loadAdminTab(tab) {
     // выполненное в соседней вкладке, выглядело бы потерянным до перезагрузки.
     if (window.adminAuditTimer) clearInterval(window.adminAuditTimer);
     if (tab === 'audit') {
+        // 5 секунд — компромисс: новое действие появляется почти сразу, но
+        // скрытая вкладка не тратит запросы впустую.
         window.adminAuditTimer = setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            if (currentAdminTab() !== 'audit') return;
             if (document.getElementById('admin-audit-entity')) filterAudit();
-        }, 15000);
+        }, 5000);
     }
 }
 
@@ -324,6 +338,18 @@ async function handleAdminClick(e) {
     if (act === 'rejectRepApp') {
         btn.disabled = false;
         openRejectRepAppModal(id, () => reloadAdmin());
+        return;
+    }
+
+    if (act === 'rejectAdminApp') {
+        btn.disabled = false;
+        openRejectAdminAppModal(id, () => reloadAdmin());
+        return;
+    }
+
+    if (act === 'refreshAdminApps') {
+        btn.disabled = false;
+        await loadAdminTab('adminapps');
         return;
     }
 
@@ -372,8 +398,8 @@ async function handleAdminClick(e) {
             () => reloadAdmin()
         ),
         seasonProfiles: () => openSeasonProfilesModal(id),
-        newProgram: () => openProgramFormModal(null, () => reloadAdmin()),
-        editProgram: () => openProgramFormModal(
+        newProgram: () => openAdminProgramFormModal(null, () => reloadAdmin()),
+        editProgram: () => openAdminProgramFormModal(
             adminProgramsState.programs.find(item => String(item.id) === String(id)) || null,
             () => reloadAdmin()
         ),
@@ -398,6 +424,7 @@ async function handleAdminClick(e) {
         importJobRecords: () => openImportJobModal(id),
         loadMoreAudit: () => loadMoreAudit(),
         approveRepApp: () => api.reviewRepresentativeApplication(id, { status: 'approved' }),
+        approveAdminApp: () => api.approveAdminApplication(id),
     };
 
     const messages = {
@@ -414,6 +441,7 @@ async function handleAdminClick(e) {
         restoreSeason: 'Сезон возвращён из архива',
         verifyBenefit: 'Правило льготы подтверждено',
         rejectBenefit: 'Правило льготы отклонено',
+        approveAdminApp: 'Заявка одобрена, роль администратора выдана',
     };
 
     const call = calls[act];
@@ -530,6 +558,10 @@ async function handleAdminChange(e) {
 
     if (e.target.closest('[data-repapp-status]')) {
         filterRepApps();
+    }
+
+    if (e.target.closest('[data-adminapp-status]')) {
+        filterAdminApps();
     }
 
     if (e.target.closest('[data-doc-filter]')) {
@@ -873,6 +905,8 @@ function adminRequestRowHtml(request) {
     if (payload.official_url) details.push(`сайт: ${escHtml(String(payload.official_url))}`);
     if (payload.short_name) details.push(`кратко: ${escHtml(String(payload.short_name))}`);
     if (payload.website) details.push(`сайт: ${escHtml(String(payload.website))}`);
+    if (payload.contact_email) details.push(`почта для связи: ${escHtml(String(payload.contact_email))}`);
+    if (payload.become_representative) details.push('хочет стать представителем вуза');
 
     return `<div class="${UI.card} px-8 py-6">
         <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
@@ -880,6 +914,7 @@ function adminRequestRowHtml(request) {
                 <p class="text-xs font-semibold uppercase tracking-wide text-ink-faint">${escHtml(typeLabel)}</p>
                 <p class="mt-2 font-bold text-ink leading-snug">${escHtml(request.name || '—')}</p>
                 ${request.description ? `<p class="mt-2 text-sm text-ink-soft leading-relaxed">${escHtml(request.description)}</p>` : ''}
+                ${payload.representative_justification ? `<p class="mt-2 text-sm text-ink leading-relaxed whitespace-pre-wrap">Почему хочет быть представителем: ${escHtml(payload.representative_justification)}</p>` : ''}
                 ${details.length ? `<p class="mt-2 text-xs text-ink-faint">${details.join(' · ')}</p>` : ''}
                 ${attachmentLinksHtml(request.attachments, 'Документы заявителя')}
                 ${status === 'rejected' && request.rejection_reason
@@ -3120,7 +3155,7 @@ async function openSeasonProfilesModal(seasonId, onChange) {
 
 /* -------------------------------- Программы -------------------------------- */
 
-async function openProgramFormModal(program, onDone) {
+async function openAdminProgramFormModal(program, onDone) {
     const isEdit = !!program;
     const universities = adminProgramsState.universities.slice();
     if (!isEdit && !universities.length) {

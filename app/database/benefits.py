@@ -509,6 +509,75 @@ async def _upsert_ege(session, rule, ege):
     await session.flush()
 
 
+async def benefit_form_options() -> dict:
+    """Дерево «олимпиада → сезон → профиль» для формы правила.
+
+    Форма не должна показывать олимпиаду без сезонов и сезон без профилей:
+    иначе пользователь выбирает пустой вариант и получает ошибку при отправке.
+    Поэтому в ответ попадают только олимпиады, у которых есть хотя бы один
+    неархивный сезон с профилями. Архивные сезоны остаются доступны через
+    редактирование существующего правила — там значения подставляются из
+    самого правила.
+    """
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Olympiads)
+                .where(Olympiads.status == 'PUBLISHED')
+                .options(
+                    selectinload(Olympiads.seasons).selectinload(
+                        OlympiadSeason.profiles
+                    )
+                )
+                .order_by(Olympiads.name_norm, Olympiads.id)
+            )
+        ).scalars().all()
+
+    result = []
+    for olympiad in rows:
+        seasons = []
+        for season in sorted(
+            olympiad.seasons,
+            key=lambda item: (item.season_label, str(item.id)),
+            reverse=True,
+        ):
+            if getattr(season, 'is_archived', False):
+                continue
+            profiles = sorted(
+                season.profiles,
+                key=lambda item: (
+                    item.rsosh_level or '9',
+                    item.name_norm or item.name.casefold(),
+                ),
+            )
+            if not profiles:
+                continue
+            seasons.append(
+                {
+                    'id': str(season.id),
+                    'season_label': season.season_label,
+                    'is_archived': False,
+                    'profiles': [
+                        {
+                            'id': str(profile.id),
+                            'name': profile.name,
+                            'rsosh_level': profile.rsosh_level,
+                        }
+                        for profile in profiles
+                    ],
+                }
+            )
+        if seasons:
+            result.append(
+                {
+                    'id': str(olympiad.id),
+                    'name': olympiad.name,
+                    'seasons': seasons,
+                }
+            )
+    return {'olympiads': result}
+
+
 async def bulk_benefit_options(
     university_id, season_label=None, rsosh_level=None
 ) -> dict:

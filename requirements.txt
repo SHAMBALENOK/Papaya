@@ -5,13 +5,13 @@
 # --- Web и API ---
 fastapi==0.141.1
 uvicorn==0.52.4
-gunicorn==21.2.0
+gunicorn==22.0.0
 python-multipart==0.0.32
-werkzeug==3.1.8
+werkzeug==3.1.9
 pydantic[email]==2.13.5
 
 # --- Аутентификация ---
-pyjwt==2.13.0
+pyjwt==2.15.1
 bcrypt==5.0.0
 
 # --- База данных и схема ---
@@ -19,7 +19,7 @@ sqlalchemy==2.0.52
 asyncpg==0.31.0
 alembic==1.20.0
 # подгрузка .env для migrations/env.py
-python-dotenv==1.1.1
+python-dotenv==1.2.4
 
 # --- Redis и фоновые задачи ---
 redis==6.4.0

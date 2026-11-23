@@ -50,9 +50,11 @@ function adminRepAppsHtml(items) {
                             ${repAppStatusBadge(a.status)}
                         </div>
                         <p class="mt-2 text-sm text-ink-soft">${escHtml(a.user_email || 'email не указан')}</p>
+                        ${a.contact_email ? `<p class="mt-1 text-sm text-ink-soft">Почта для связи: ${escHtml(a.contact_email)}</p>` : ''}
                         <p class="mt-1 text-sm text-ink-soft">Университет: ${escHtml(a.university_name || 'не найден')}</p>
-                        <p class="mt-1 text-xs text-ink-faint">Подана: ${formatDate(a.createdAt)}${a.reviewed_at ? ` · рассмотрена: ${formatDate(a.reviewed_at)}` : ''}</p>
+                        <p class="mt-1 text-xs text-ink-faint">Подана: ${formatDateTime(a.createdAt)}${a.reviewed_at ? ` · рассмотрена: ${formatDateTime(a.reviewed_at)}` : ''}</p>
                         ${a.justification ? `<p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(a.justification)}</p>` : ''}
+                        ${attachmentThumbsHtml(a.attachments, 'Фотографии')}
                         ${attachmentLinksHtml(a.attachments, 'Документы заявителя')}
                         ${a.rejection_reason ? `<p class="mt-3 text-sm text-ink-soft">Причина отклонения: ${escHtml(a.rejection_reason)}</p>` : ''}
                     </div>
@@ -119,6 +121,133 @@ function openRejectRepAppModal(id, onDone) {
     });
 }
 
+const ADMIN_APP_STATUS_LABELS = {
+    pending: 'На рассмотрении',
+    approved: 'Одобрена',
+    rejected: 'Отклонена',
+};
+
+function adminAppStatusBadge(status) {
+    if (status === 'approved') {
+        return `<span class="${UI.badge} ${UI.badgeSuccess}">Одобрена</span>`;
+    }
+    if (status === 'rejected') {
+        return `<span class="${UI.badge} ${UI.badgeDanger}">Отклонена</span>`;
+    }
+    return `<span class="${UI.badge} ${UI.badgePending}">На рассмотрении</span>`;
+}
+
+function adminAdminAppsHtml(items) {
+    const statuses = [
+        { value: '', label: 'Все заявки' },
+        { value: 'pending', label: 'На рассмотрении' },
+        { value: 'approved', label: 'Одобренные' },
+        { value: 'rejected', label: 'Отклонённые' },
+    ];
+    const filter = `
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-8">
+        <form class="flex flex-wrap items-end gap-3" onsubmit="return false;">
+            <label class="sr-only" for="admin-adminapps-status">Статус заявки</label>
+            <select id="admin-adminapps-status" data-adminapp-status class="${UI.input} sm:!w-64 !py-2 text-sm">
+                ${statuses.map(o => `<option value="${escAttr(o.value)}" ${o.value === adminAdminAppsStatus ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
+            </select>
+        </form>
+        <div class="flex items-center gap-3">
+            <p class="text-sm text-ink-faint">Заявок: ${items.length}</p>
+            <button type="button" data-act="refreshAdminApps" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Обновить</button>
+        </div>
+    </div>`;
+
+    if (!items.length) {
+        return filter + (adminAdminAppsStatus
+            ? emptyHtml('Заявок с таким статусом нет', 'Выберите другой статус или покажите все заявки.')
+            : emptyHtml('Заявок нет',
+                'Пользователь может подать заявку на роль администратора из своего профиля.'));
+    }
+
+    return filter + `
+    <div class="space-y-4">
+        ${items.map(a => `
+            <article class="${UI.card} px-8 py-6">
+                <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <p class="font-bold text-ink">${escHtml(a.user_name || 'Пользователь')}</p>
+                            ${adminAppStatusBadge(a.status)}
+                        </div>
+                        <p class="mt-2 text-sm text-ink-soft">Аккаунт: ${escHtml(a.user_email || 'email не указан')}</p>
+                        <p class="mt-1 text-sm text-ink-soft">Почта для связи: ${escHtml(a.contact_email || 'не указана')}</p>
+                        <p class="mt-1 text-xs text-ink-faint">Подана: ${formatDateTime(a.createdAt)}${a.reviewed_at ? ` · рассмотрена: ${formatDateTime(a.reviewed_at)}` : ''}</p>
+                        <p class="mt-3 text-sm text-ink leading-relaxed whitespace-pre-wrap">${escHtml(a.motivation || '')}</p>
+                        ${a.rejection_reason ? `<p class="mt-3 text-sm text-ink-soft">Причина отклонения: ${escHtml(a.rejection_reason)}</p>` : ''}
+                    </div>
+                    ${a.status === 'pending' ? `
+                    <div class="flex flex-wrap gap-2 shrink-0">
+                        <button class="admin-action ${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}" data-act="approveAdminApp" data-id="${escAttr(a.id)}">Одобрить и выдать ADMIN</button>
+                        <button class="admin-action ${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}" data-act="rejectAdminApp" data-id="${escAttr(a.id)}">Отклонить</button>
+                    </div>` : ''}
+                </div>
+            </article>`).join('')}
+    </div>`;
+}
+
+async function filterAdminApps() {
+    const select = document.querySelector('[data-adminapp-status]');
+    adminAdminAppsStatus = select ? select.value : '';
+    await loadAdminTab('adminapps');
+}
+
+function openRejectAdminAppModal(id, onDone) {
+    let dirty = false;
+    const body = `
+        <div id="modal-alert"></div>
+        <form id="reject-adminapp-form">
+            ${textareaField({
+                id: 'reject-adminapp-reason',
+                name: 'reason',
+                label: 'Причина отклонения',
+                rows: 3,
+                required: true,
+                placeholder: 'Например: недостаточно опыта модерации каталога',
+            })}
+            <div class="flex flex-wrap justify-end gap-3 mt-8">
+                <button type="button" data-cancel class="${UI.btn} ${UI.btnGhost}">Отмена</button>
+                <button type="submit" class="${UI.btn} ${UI.btnDanger}">Отклонить заявку</button>
+            </div>
+        </form>`;
+    const { overlay, close } = openModal('Отклонить заявку администратора', body, {
+        isDirty: () => dirty,
+    });
+    ['input', 'change'].forEach(ev => overlay.addEventListener(ev, () => { dirty = true; }));
+    overlay.querySelector('[data-cancel]').addEventListener('click', close);
+    overlay.querySelector('#reject-adminapp-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const reason = (fd.get('reason') || '').trim();
+        if (!reason) {
+            showModalError(overlay, { data: { detail: 'Укажите причину отклонения' } });
+            return;
+        }
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        try {
+            const res = await api.rejectAdminApplication(id, reason);
+            if (res.ok) {
+                dirty = false;
+                close();
+                showToast('Заявка отклонена', 'success');
+                if (onDone) onDone();
+                return;
+            }
+            showModalError(overlay, res);
+        } catch {
+            showModalError(overlay, { data: { detail: 'Сетевая ошибка' } });
+        }
+        btn.disabled = false;
+    });
+}
+
+
 const AUDIT_ENTITY_TYPES = [
     { value: 'benefit_rule', label: 'Правила льгот' },
     { value: 'university', label: 'Университеты' },
@@ -131,6 +260,7 @@ const AUDIT_ENTITY_TYPES = [
     { value: 'doc', label: 'Документы' },
     { value: 'import', label: 'Импорт' },
     { value: 'representative_application', label: 'Заявки представителей' },
+    { value: 'admin_application', label: 'Заявки администраторов' },
     { value: 'user', label: 'Пользователи' },
 ];
 
@@ -180,21 +310,85 @@ function auditEntityName(log) {
         || '';
 }
 
+/** Человеческие подписи полей аудита для diff-строки. */
+const AUDIT_FIELD_LABELS = {
+    name: 'название',
+    short_name: 'краткое название',
+    description: 'описание',
+    website: 'сайт',
+    rsosh_level: 'уровень РСОШ',
+    season_label: 'сезон',
+    status: 'статус',
+    role: 'роль',
+    is_published: 'публикация',
+    verification_status: 'проверка',
+    rejection_reason: 'причина отказа',
+    contact_email: 'почта для связи',
+    motivation: 'мотивация',
+    benefit_type: 'тип льготы',
+    required_result_type: 'требуемый результат',
+    is_archived: 'архив',
+    archived_reason: 'причина архивации',
+};
+
+function auditValue(value) {
+    if (value === true) return 'да';
+    if (value === false) return 'нет';
+    if (value == null || value === '') return '—';
+    return String(value);
+}
+
+/** Пояснение к записи аудита: что именно произошло, а не только «правка». */
 function auditDetails(log) {
     const after = log.after || {};
+    const before = log.before || {};
     if (log.action === 'bulk_create') {
         const profiles = (after.profiles || []).join(', ');
         return [
             after.season_label ? `сезон ${after.season_label}` : '',
+            after.rsosh_level ? `уровень ${after.rsosh_level}` : '',
             after.created != null ? `создано ${after.created}` : '',
             after.skipped != null ? `пропущено ${after.skipped}` : '',
             profiles ? `профили: ${profiles}` : '',
         ].filter(Boolean).join(' · ');
     }
     if (log.action === 'role_change') {
-        const oldRole = (log.before || {}).role || '—';
-        const newRole = after.role || '—';
-        return `роль: ${oldRole} → ${newRole}`;
+        const oldRole = ROLE_LABELS[before.role] || before.role || '—';
+        const newRole = ROLE_LABELS[after.role] || after.role || '—';
+        const university = after.university_name || after.university_short_name;
+        return `роль: ${oldRole} → ${newRole}${university ? ` · университет: ${university}` : ''}`;
+    }
+    if (log.action === 'review' || log.action === 'status_change') {
+        const status = after.status;
+        if (status) {
+            const label = status === 'approved' ? 'одобрена'
+                : status === 'rejected' ? 'отклонена'
+                : status === 'pending' ? 'на рассмотрении'
+                : status;
+            const reason = after.rejection_reason;
+            return `новый статус: ${label}${reason ? ` · причина: ${reason}` : ''}`;
+        }
+    }
+    if (log.action === 'reject' && (after.rejection_reason || after.reason)) {
+        return `причина: ${after.rejection_reason || after.reason}`;
+    }
+    if (log.action === 'upload' && (after.name || after.original_name)) {
+        return `файл: ${after.name || after.original_name}`;
+    }
+    if (log.action === 'update') {
+        const changed = Object.keys(after).filter(key =>
+            AUDIT_FIELD_LABELS[key]
+            && JSON.stringify(before[key]) !== JSON.stringify(after[key])
+        );
+        if (changed.length) {
+            return 'изменено: ' + changed.slice(0, 6).map(key =>
+                `${AUDIT_FIELD_LABELS[key]}: ${auditValue(before[key])} → ${auditValue(after[key])}`
+            ).join(', ');
+        }
+    }
+    const name = after.name || after.short_name || after.season_label;
+    if (name && ['create', 'approve', 'restore', 'archive'].includes(log.action)) {
+        return `объект: ${name}`;
     }
     return '';
 }
@@ -217,12 +411,22 @@ function adminAuditHtml() {
                 ${AUDIT_ACTIONS.map(o => `<option value="${escAttr(o.value)}" ${o.value === action ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('')}
             </select>
         </form>
-        <div class="flex items-center gap-3">
-            <p class="text-sm text-ink-faint">Показано ${logs.length} из ${total}</p>
-            <button type="button" data-act="refreshAudit" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Обновить</button>
-            ${more ? `<button type="button" data-act="loadMoreAudit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Показать ещё</button>` : ''}
+        <div class="flex flex-col items-start sm:items-end gap-2">
+            <div class="flex items-center gap-3">
+                <p class="text-sm text-ink-faint">Показано ${logs.length} из ${total}</p>
+                <button type="button" data-act="refreshAudit" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Обновить</button>
+                ${more ? `<button type="button" data-act="loadMoreAudit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Показать ещё</button>` : ''}
+            </div>
+            <p class="text-xs text-ink-faint" aria-live="polite">
+                ${adminAuditState.updatedAt ? `Обновлено в ${escHtml(formatDateTime(adminAuditState.updatedAt))}` : ''}
+                · новые записи появляются автоматически каждые 5 секунд
+            </p>
         </div>
-    </div>`;
+    </div>
+    <p class="mb-8 -mt-4 text-xs text-ink-faint leading-relaxed max-w-2xl">
+        Если включён фильтр, действие другого типа может быть скрыто — снимите
+        фильтры, чтобы увидеть все последние записи.
+    </p>`;
 
     if (!logs.length) {
         return filter + ((entityType || action)
@@ -269,6 +473,7 @@ async function filterAudit() {
         const logs = res.data.logs || [];
         adminAuditState.logs = logs;
         adminAuditState.total = res.data.total != null ? res.data.total : logs.length;
+        adminAuditState.updatedAt = new Date();
         renderAdminContent(adminAuditHtml());
     } catch {
         showToast('Не удалось загрузить аудит', 'error');

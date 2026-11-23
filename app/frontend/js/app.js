@@ -100,6 +100,7 @@ function formatDateTime(iso) {
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
+        second: '2-digit',
     });
 }
 
@@ -216,6 +217,42 @@ function attachmentLinksHtml(items, label = 'Вложения') {
             class="text-brand hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded">${escHtml(doc.name)}</a>`
     ).join(' · ');
     return `<p class="mt-2 text-xs text-ink-soft"><span class="font-semibold">${escHtml(label)}:</span> ${links}</p>`;
+}
+
+/** Миниатюры изображений-вложений: фото видно сразу, без скачивания. */
+function attachmentThumbsHtml(items, label = 'Фотографии') {
+    const images = (items || []).filter(doc =>
+        String(doc.mime_type || '').startsWith('image/')
+    );
+    if (!images.length) return '';
+    return `<div class="mt-3">
+        <p class="text-xs font-semibold text-ink-soft mb-2">${escHtml(label)}</p>
+        <div class="flex flex-wrap gap-3">
+            ${images.map(doc => `
+                <a href="${escAttr(api.docFileUrl(doc.id))}" target="_blank" rel="noopener"
+                   class="block w-24 h-24 rounded overflow-hidden border border-line bg-mist focus:outline-none focus-visible:ring-2 focus-visible:ring-brand">
+                    <img src="${escAttr(api.docFileUrl(doc.id))}" alt="${escAttr(doc.name || 'Фото')}"
+                         loading="lazy" class="w-full h-full object-cover">
+                </a>`).join('')}
+        </div>
+    </div>`;
+}
+
+/** Быстрые ссылки на секции длинной страницы.
+ *
+ * Якоря не меняют hash: SPA-роутер воспринял бы `#section` как новый маршрут.
+ * Вместо этого кнопка прокручивает к элементу по id.
+ */
+function pageGuideHtml(items) {
+    if (!items || !items.length) return '';
+    return `<nav class="my-8 rounded bg-mist px-5 py-4" aria-label="Быстрый переход по разделам">
+        <p class="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-3">На этой странице</p>
+        <div class="flex flex-wrap gap-2">
+            ${items.map(item => `
+                <button type="button" data-scroll-to="${escAttr(item.id)}"
+                        class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">${escHtml(item.label)}</button>`).join('')}
+        </div>
+    </nav>`;
 }
 
 /* ---------- Поля форм ---------- */

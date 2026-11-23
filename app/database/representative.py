@@ -32,6 +32,7 @@ def app_to_dict(a, user=None, university=None):
             or getattr(university, 'name', None)
         ),
         'justification': a.justification,
+        'contact_email': getattr(a, 'contact_email', None),
         'status': a.status,
         'reviewed_by': str(a.reviewed_by) if a.reviewed_by else None,
         'reviewed_at': _iso(a.reviewed_at),
@@ -40,7 +41,9 @@ def app_to_dict(a, user=None, university=None):
         'updatedAt': _iso(a.updatedAt),
     }
 
-async def create_application(user_id, university_id, justification=None):
+async def create_application(
+    user_id, university_id, justification=None, contact_email=None
+):
     async with AsyncSessionLocal() as session:
         # Повторная отправка той же заявки не создаёт дубль: пользователь
         # видит уже существующую заявку «на рассмотрении», а админ — одну
@@ -58,6 +61,7 @@ async def create_application(user_id, university_id, justification=None):
             user_id=_as_uuid(user_id),
             university_id=_as_uuid(university_id),
             justification=justification,
+            contact_email=contact_email,
         )
         session.add(a)
         await session.commit()

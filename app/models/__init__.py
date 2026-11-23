@@ -1,4 +1,5 @@
 from . import (
+    admin_applications,
     audit,
     benefits,
     docs,
