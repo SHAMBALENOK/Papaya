@@ -361,6 +361,40 @@ def test_apply_changes_fixes_profile_name_and_level():
     assert updated['missing_allowed'] is True
 
 
+def test_apply_changes_fixes_profile_after_olympiad_rename():
+    """Правка профиля адресуется исходным ключом олимпиады из того же запроса.
+
+    Панель отправляет название олимпиады и правки её профилей одним запросом.
+    Переименование меняет ``name_norm``, но профили по-прежнему ссылаются на
+    ключ, который был на момент открытия карточки. Раньше это давало ошибку
+    «олимпиада не найдена в плане», и сохранить правки было невозможно.
+    """
+    parsed = _parsed(rows=[_row(olympiad='Старое название', profile='профиль')])
+    plan = list_plan.build_plan(parsed, doc_id='doc', catalog=_catalog())
+    original = plan['olympiads'][0]['name_norm']
+
+    updated = list_plan.apply_changes(
+        plan,
+        {
+            'olympiads': [{'name_norm': original, 'name': 'Новое название'}],
+            'profiles': [
+                {
+                    'olympiad': original,
+                    'source_row': 1,
+                    'name': 'новый профиль',
+                    'level': '2',
+                }
+            ],
+        },
+    )
+
+    item = updated['olympiads'][0]
+    assert item['name'] == 'Новое название'
+    assert item['profiles'][0]['name'] == 'новый профиль'
+    assert item['profiles'][0]['level'] == '2'
+    assert updated['errors'] == []
+
+
 def test_apply_changes_rejects_bad_level():
     plan = list_plan.build_plan(_parsed(), doc_id='doc', catalog=_catalog())
     with pytest.raises(ValueError):
