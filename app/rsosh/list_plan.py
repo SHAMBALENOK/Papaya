@@ -543,6 +543,11 @@ def apply_changes(plan: dict | None, changes: dict | None) -> dict:
     # Внутри модуля normalize_name уже импортирован; локальный импорт
     # избавляет от цикла при чтении плана из метаданных документа.
     by_norm = {item['name_norm']: item for item in plan['olympiads']}
+    # Профили в том же запросе адресованы ключом, который был у олимпиады до
+    # правок: переименование выше уже заменило её name_norm в by_norm, и прямой
+    # поиск по исходному ключу давал «олимпиада не найдена в плане». Снимок
+    # адресации хранит исходные ключи до конца запроса.
+    by_original_norm = dict(by_norm)
 
     for change in changes.get('olympiads') or []:
         item = by_norm.get(change.get('name_norm'))
@@ -592,6 +597,8 @@ def apply_changes(plan: dict | None, changes: dict | None) -> dict:
 
     for change in changes.get('profiles') or []:
         item = by_norm.get(change.get('olympiad'))
+        if item is None:
+            item = by_original_norm.get(change.get('olympiad'))
         if item is None:
             raise ValueError(
                 f'Олимпиада «{change.get("olympiad")}» не найдена в плане'

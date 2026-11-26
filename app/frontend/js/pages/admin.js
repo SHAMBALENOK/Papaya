@@ -1439,79 +1439,141 @@ function planMatchOptions(item) {
     return options.join('');
 }
 
-function planOlympiadHtml(item, index) {
+function planLevelLabel(level) {
+    return PLAN_LEVEL_LABELS.find(o => o.value === (level || ''))?.label || '—';
+}
+
+function planProfileRowHtml(profile, editable) {
+    const pmatch = profile.match || {};
+    const level = profile.level || '';
+    const skipped = pmatch.action === 'skip';
+    const source = `стр. ${escHtml(String(profile.page || '—'))}`;
+    const issue = (profile.issues || []).length
+        ? `<span class="block text-danger">${escHtml(profile.issues[0])}</span>`
+        : '';
+    if (!editable) {
+        return `
+        <tr class="border-b border-line last:border-0 ${skipped ? 'opacity-60' : ''}">
+            <td class="px-3 py-2.5 align-top text-ink break-words">${escHtml(profile.name || '—')}</td>
+            <td class="px-3 py-2.5 align-top whitespace-nowrap font-semibold text-ink">${escHtml(planLevelLabel(level))}</td>
+            <td class="px-3 py-2.5 align-top text-center text-xs text-ink-faint">${skipped ? 'Пропуск' : '—'}</td>
+            <td class="px-3 py-2.5 align-top text-xs text-ink-faint">${source}${issue}</td>
+        </tr>`;
+    }
+    return `
+    <tr class="border-b border-line last:border-0 align-top" data-profile-row data-row="${escAttr(String(profile.source_row))}">
+        <td class="px-3 py-2.5 align-top min-w-56">
+            <input class="${UI.input} !py-2 text-sm w-full" data-field="profile-name"
+                   value="${escAttr(profile.name || '')}" aria-label="Название профиля">
+        </td>
+        <td class="px-3 py-2.5 align-top w-24">
+            <select class="${UI.input} !py-2 text-sm" data-field="profile-level" aria-label="Уровень профиля">
+                ${PLAN_LEVEL_LABELS.map(o => `<option value="${o.value}" ${o.value === level ? 'selected' : ''}>${o.label}</option>`).join('')}
+            </select>
+            ${profile.previous_level ? `<p class="mt-1 text-xs text-ink-faint">было ${escHtml(planLevelLabel(profile.previous_level))}</p>` : ''}
+        </td>
+        <td class="px-3 py-2.5 align-top w-24 text-center">
+            <input type="checkbox" data-field="profile-skip" ${skipped ? 'checked' : ''} aria-label="Пропустить профиль">
+        </td>
+        <td class="px-3 py-2.5 align-top text-xs text-ink-faint">
+            ${source}${issue}
+        </td>
+    </tr>`;
+}
+
+function planProfilesTableHtml(profiles, editable) {
+    if (!profiles.length) {
+        return `<p class="mt-3 text-sm text-ink-faint">Профилей в строке нет.</p>`;
+    }
+    return `
+    <div class="mt-4 overflow-x-auto rounded border border-line">
+        <table class="w-full text-sm">
+            <thead class="bg-mist/80">
+                <tr class="text-left text-xs text-ink-soft">
+                    <th class="px-3 py-2 font-semibold">Профиль</th>
+                    <th class="px-3 py-2 font-semibold">Уровень</th>
+                    <th class="px-3 py-2 font-semibold text-center">Пропуск</th>
+                    <th class="px-3 py-2 font-semibold">Источник</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white">${profiles.map(profile => planProfileRowHtml(profile, editable)).join('')}</tbody>
+        </table>
+    </div>`;
+}
+
+function planOrganizerHtml(organizer) {
+    return `
+    <div class="mt-4 rounded border border-line bg-mist/40 px-4 py-3">
+        <p class="text-xs font-semibold text-ink-soft">Организатор</p>
+        <p class="mt-1 text-sm text-ink leading-relaxed whitespace-pre-line break-words">${escHtml(organizer || '—')}</p>
+    </div>`;
+}
+
+/** Карточка олимпиады в одном из двух списков: сохранённые и несохранённые. */
+function planOlympiadCardHtml(item, key, editable, canEdit = true) {
     const match = item.match || {};
     const action = match.action || 'create';
     const profiles = item.profiles || [];
+    const issues = item.issues || [];
     const createCount = profiles.filter(p => (p.match || {}).action === 'create').length;
     const updateCount = profiles.filter(p => (p.match || {}).action === 'update').length;
-    const rows = profiles.map(profile => {
-        const pmatch = profile.match || {};
-        const level = profile.level || '';
-        const skipped = pmatch.action === 'skip';
-        return `
-        <tr class="${skipped ? 'opacity-50' : ''}" data-profile data-olympiad="${escAttr(item.name_norm)}" data-row="${escAttr(String(profile.source_row))}">
-            <td class="px-2 py-1 align-top">
-                <input class="${UI.input} !py-1 text-sm w-full" data-field="profile-name"
-                       value="${escAttr(profile.name || '')}" aria-label="Название профиля">
-            </td>
-            <td class="px-2 py-1 align-top w-24">
-                <select class="${UI.input} !py-1 text-sm" data-field="profile-level" aria-label="Уровень профиля">
-                    ${PLAN_LEVEL_LABELS.map(o => `<option value="${o.value}" ${o.value === level ? 'selected' : ''}>${o.label}</option>`).join('')}
-                </select>
-                ${profile.previous_level ? `<p class="mt-1 text-xs text-ink-faint">было ${escHtml(PLAN_LEVEL_LABELS.find(o => o.value === profile.previous_level)?.label || profile.previous_level)}</p>` : ''}
-            </td>
-            <td class="px-2 py-1 align-top w-20 text-center">
-                <input type="checkbox" data-field="profile-skip" ${skipped ? 'checked' : ''} aria-label="Пропустить профиль">
-            </td>
-            <td class="px-2 py-1 align-top text-xs text-ink-faint">
-                стр. ${escHtml(String(profile.page || '—'))}
-                ${(profile.issues || []).length ? `<span class="block text-danger">${escHtml(profile.issues[0])}</span>` : ''}
-            </td>
-        </tr>`;
-    }).join('');
-
-    return `
-    <details class="${UI.card} px-4 py-3" data-olympiad="${escAttr(item.name_norm)}" ${(item.issues || []).length || action === 'review' ? 'open' : ''}>
-        <summary class="cursor-pointer flex flex-wrap items-center gap-3">
-            <span class="font-semibold text-ink">${escHtml(item.number ? `№ ${item.number} · ` : '')}${escHtml(item.name)}</span>
-            ${planActionBadge(action)}
-            <span class="text-xs text-ink-faint">
-                профилей: ${profiles.length}${createCount ? ` · новых: ${createCount}` : ''}${updateCount ? ` · изменится: ${updateCount}` : ''}
-            </span>
-        </summary>
-        <div class="mt-4 grid gap-3 md:grid-cols-2">
+    const statusBadge = editable
+        ? `<span class="${UI.badge} bg-warning-soft text-warning">Не сохранено</span>`
+        : `<span class="${UI.badge} ${UI.badgeSuccess}">Сохранено</span>`;
+    const actions = editable
+        ? `<button type="button" data-plan-act="save" class="${UI.btn} ${UI.btnPrimary} ${UI.btnSmall}">Сохранить</button>
+           <button type="button" data-plan-act="cancel" class="${UI.btn} ${UI.btnGhost} ${UI.btnSmall}">Отменить</button>`
+        : canEdit
+            ? `<button type="button" data-plan-act="edit" class="${UI.btn} ${UI.btnSecondary} ${UI.btnSmall}">Изменить</button>`
+            : '';
+    const issuesHtml = issues.length
+        ? `<ul class="mt-3 text-xs text-danger list-disc pl-5 space-y-1">${issues.map(issue => `<li>${escHtml(issue)}</li>`).join('')}</ul>`
+        : '';
+    const editorHtml = `
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
             <label class="block">
-                <span class="text-xs text-ink-faint">Название</span>
-                <input class="${UI.input} !py-1 text-sm w-full" data-field="olympiad-name"
+                <span class="text-xs font-semibold text-ink-soft">Название</span>
+                <input class="${UI.input} !py-2 text-sm w-full mt-1" data-field="olympiad-name"
                        value="${escAttr(item.name)}" aria-label="Название олимпиады">
             </label>
             <label class="block">
-                <span class="text-xs text-ink-faint">Сопоставление с каталогом</span>
-                <select class="${UI.input} !py-1 text-sm w-full" data-field="olympiad-match" aria-label="Сопоставление с каталогом">
+                <span class="text-xs font-semibold text-ink-soft">Сопоставление с каталогом</span>
+                <select class="${UI.input} !py-2 text-sm w-full mt-1" data-field="olympiad-match" aria-label="Сопоставление с каталогом">
                     ${planMatchOptions(item)}
                 </select>
             </label>
             <label class="block md:col-span-2">
-                <span class="text-xs text-ink-faint">Организатор</span>
-                <textarea class="${UI.input} !py-1 text-sm w-full" rows="2" data-field="olympiad-organizer" aria-label="Организатор">${escHtml(item.organizer || '')}</textarea>
+                <span class="text-xs font-semibold text-ink-soft">Организатор</span>
+                <textarea class="${UI.input} !py-2 text-sm w-full mt-1 min-h-32" rows="4" data-field="olympiad-organizer" aria-label="Организатор">${escHtml(item.organizer || '')}</textarea>
             </label>
         </div>
-        ${(item.issues || []).length ? `<ul class="mt-3 text-xs text-danger list-disc pl-5 space-y-1">${item.issues.map(issue => `<li>${escHtml(issue)}</li>`).join('')}</ul>` : ''}
-        <div class="mt-4 overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="text-left text-xs text-ink-faint">
-                        <th class="px-2 py-1 font-semibold">Профиль</th>
-                        <th class="px-2 py-1 font-semibold">Уровень</th>
-                        <th class="px-2 py-1 font-semibold text-center">Пропуск</th>
-                        <th class="px-2 py-1 font-semibold">Источник</th>
-                    </tr>
-                </thead>
-                <tbody>${rows}</tbody>
-            </table>
+        ${issuesHtml}
+        ${planProfilesTableHtml(profiles, true)}`;
+    const readonlyHtml = `
+        ${planOrganizerHtml(item.organizer)}
+        ${issuesHtml}
+        <details class="mt-4" ${issues.length || action === 'review' ? 'open' : ''}>
+            <summary class="cursor-pointer text-sm font-semibold text-ink-soft hover:text-ink">Профили (${profiles.length})</summary>
+            ${planProfilesTableHtml(profiles, false)}
+        </details>`;
+
+    return `
+    <article class="rounded border bg-white shadow-elev-1 px-5 py-4 ${editable ? 'border-2 border-warning/40 shadow-elev-2' : 'border-line'}" data-plan-key="${escAttr(key)}">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="flex-1 min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                    ${statusBadge}
+                    <span data-plan-action-badge>${planActionBadge(action)}</span>
+                    <span class="text-xs text-ink-faint">
+                        ${item.number ? `№ ${escHtml(String(item.number))} · ` : ''}профилей: ${profiles.length}${createCount ? ` · новых: ${createCount}` : ''}${updateCount ? ` · изменится: ${updateCount}` : ''}
+                    </span>
+                </div>
+                <h3 class="mt-2 text-base font-bold text-ink leading-snug break-words">${escHtml(item.name || 'Без названия')}</h3>
+            </div>
+            <div class="flex flex-wrap gap-2 shrink-0">${actions}</div>
         </div>
-    </details>`;
+        ${editable ? editorHtml : readonlyHtml}
+    </article>`;
 }
 
 function planSummaryHtml(plan) {
@@ -1580,9 +1642,13 @@ async function renderOfficialList(importId, imp) {
         </div>`;
         return;
     }
-    const plan = planRes.data.plan;
+    let plan = planRes.data.plan;
     const applied = Boolean(imp.applied_at) || imp.state === 'approved';
     const state = { tab: 'plan', offset: 0, search: '', sheet: 'list', table: null, history: null };
+    // Черновики олимпиад, которые администратор открыл на правку, но ещё не
+    // сохранил. Ключ — name_norm, с которым олимпиада пришла в плане: он не
+    // меняется, пока правка не сохранена, и по нему же адресуются профили.
+    const drafts = new Map();
 
     function headerHtml() {
         return `
@@ -1617,16 +1683,61 @@ async function renderOfficialList(importId, imp) {
         </div>`;
     }
 
-    function planHtml() {
+    function planListHtml(title, hint, cards, tone) {
+        const panel = tone === 'unsaved'
+            ? 'border-warning/40 bg-warning-soft/60 shadow-elev-1'
+            : 'border-lineStrong/40 bg-mist shadow-elev-1';
         return `
-        <div class="mt-6 space-y-4">
+        <section class="mt-6 rounded border ${panel} px-4 py-5 md:px-6">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <h2 class="text-lg font-extrabold tracking-tight">${escHtml(title)} <span class="text-ink-faint font-semibold">(${cards.length})</span></h2>
+                <p class="text-sm text-ink-soft">${escHtml(hint)}</p>
+            </div>
+            ${cards.length
+                ? `<div class="mt-6 space-y-8">${cards.join('')}</div>`
+                : `<p class="mt-4 text-sm text-ink-faint">${tone === 'unsaved'
+                    ? 'Все изменения сохранены.'
+                    : 'Сохранённых олимпиад пока нет.'}</p>`}
+        </section>`;
+    }
+
+    function planHtml() {
+        const olympiads = plan.olympiads || [];
+        const unsaved = olympiads.filter(item => drafts.has(item.name_norm));
+        const saved = olympiads.filter(item => !drafts.has(item.name_norm));
+        const errors = (plan.errors || []).length;
+        const unsavedCards = unsaved.map(item =>
+            planOlympiadCardHtml(drafts.get(item.name_norm), item.name_norm, true, !applied));
+        const savedCards = saved.map(item =>
+            planOlympiadCardHtml(item, item.name_norm, false, !applied));
+
+        return `
+        <div class="mt-6">
             ${planIssuesHtml(plan)}
-            ${(plan.olympiads || []).map(planOlympiadHtml).join('')}
-            ${planMissingHtml(plan)}
+            ${planListHtml(
+                'Несохранённые',
+                'Измените нужные поля и сохраните каждую олимпиаду отдельно.',
+                unsavedCards,
+                'unsaved',
+            )}
+            ${planListHtml(
+                'Сохранённые',
+                applied
+                    ? 'Перечень уже применён: план доступен только для просмотра.'
+                    : 'Эти олимпиады готовы к применению. Чтобы исправить, нажмите «Изменить».',
+                savedCards,
+                'saved',
+            )}
+            <div class="mt-6">${planMissingHtml(plan)}</div>
         </div>
-        ${applied ? '' : `<div class="sticky bottom-4 mt-8 flex flex-wrap items-center justify-end gap-3 rounded bg-white shadow-elev-2 px-5 py-4">
-            <button type="button" data-list-act="savePlan" class="${UI.btn} ${UI.btnSecondary}">Сохранить правки</button>
-            <button type="button" data-list-act="applyPlan" ${(plan.errors || []).length ? 'disabled' : ''} class="${UI.btn} ${UI.btnPrimary}">Применить импорт</button>
+        ${applied ? '' : `<div class="sticky bottom-4 mt-8 flex flex-wrap items-center justify-between gap-4 rounded border border-line bg-white shadow-elev-2 px-5 py-4">
+            <p class="text-sm text-ink-soft leading-relaxed">
+                ${unsaved.length
+                    ? `Не сохранено олимпиад: <span class="font-semibold text-ink">${unsaved.length}</span>. Сохраните каждую, чтобы применить импорт.`
+                    : `Все олимпиады сохранены: <span class="font-semibold text-ink">${saved.length}</span>.`}
+                ${errors ? ` <span class="text-danger">В плане есть ошибки — исправьте их до применения.</span>` : ''}
+            </p>
+            <button type="button" data-list-act="applyPlan" ${errors || unsaved.length ? 'disabled' : ''} class="${UI.btn} ${UI.btnPrimary}">Применить импорт</button>
         </div>`}`;
     }
 
@@ -1700,10 +1811,24 @@ async function renderOfficialList(importId, imp) {
                 if (state.tab === 'history' && !state.history) loadHistory();
             });
         });
+        page.querySelectorAll('[data-plan-act]').forEach(button => {
+            button.addEventListener('click', () => {
+                const card = button.closest('[data-plan-key]');
+                if (!card) return;
+                const key = card.dataset.planKey;
+                const action = button.dataset.planAct;
+                if (action === 'edit') startPlanEdit(key);
+                if (action === 'save') saveOlympiad(key);
+                if (action === 'cancel') cancelPlanEdit(key);
+            });
+        });
+        page.querySelectorAll('[data-field]').forEach(field => {
+            field.addEventListener('input', () => applyDraftField(field));
+            field.addEventListener('change', () => applyDraftField(field));
+        });
         page.querySelectorAll('[data-list-act]').forEach(button => {
             button.addEventListener('click', () => {
                 const action = button.dataset.listAct;
-                if (action === 'savePlan') savePlan();
                 if (action === 'applyPlan') applyPlan();
                 if (action === 'tableSearch') {
                     state.search = (document.getElementById('table-search') || {}).value || '';
@@ -1747,56 +1872,141 @@ async function renderOfficialList(importId, imp) {
         render();
     }
 
-    function collectPlan() {
-        const olympiads = [];
-        const profiles = [];
-        page.querySelectorAll('[data-olympiad]').forEach(card => {
-            if (!card.querySelector('[data-field="olympiad-name"]')) return;
-            const norm = card.dataset.olympiad;
-            const matchValue = card.querySelector('[data-field="olympiad-match"]').value;
-            const change = {
-                name_norm: norm,
-                name: card.querySelector('[data-field="olympiad-name"]').value.trim(),
-                organizer: card.querySelector('[data-field="olympiad-organizer"]').value.trim(),
-            };
-            if (matchValue.startsWith('use:')) {
-                change.action = 'use';
-                change.olympiad_id = matchValue.slice(4);
-            } else if (matchValue) {
-                change.action = matchValue;
-            }
-            // Пустое значение — «нужно выбрать»: действие не отправляется, и
-            // сервер оставляет строку в состоянии review (применить нельзя).
-            olympiads.push(change);
-        });
-        page.querySelectorAll('[data-profile]').forEach(row => {
-            const skip = row.querySelector('[data-field="profile-skip"]').checked;
-            profiles.push({
-                olympiad: row.dataset.olympiad,
-                source_row: Number(row.dataset.row),
-                name: row.querySelector('[data-field="profile-name"]').value.trim(),
-                level: row.querySelector('[data-field="profile-level"]').value,
-                action: skip ? 'skip' : undefined,
-            });
-        });
-        return { olympiads, profiles };
+    function cardByKey(key) {
+        return [...page.querySelectorAll('[data-plan-key]')]
+            .find(card => card.dataset.planKey === key) || null;
     }
 
-    async function savePlan() {
-        const button = page.querySelector('[data-list-act="savePlan"]');
-        if (button) button.disabled = true;
+    function startPlanEdit(key) {
+        if (applied || drafts.has(key)) return;
+        const item = (plan.olympiads || []).find(entry => entry.name_norm === key);
+        if (!item) return;
+        const draft = JSON.parse(JSON.stringify(item));
+        for (const profile of draft.profiles || []) {
+            const match = profile.match || {};
+            profile._skipDirty = false;
+            // Снятие галочки «Пропуск» должно вернуть профиль в работу. Каким
+            // было автоматическое действие до пропуска, в плане уже не видно,
+            // поэтому для существующего профиля возвращаем обновление, для
+            // нового — создание.
+            profile._restoreAction = match.action && match.action !== 'skip'
+                ? match.action
+                : (match.profile_id ? 'update' : 'create');
+        }
+        drafts.set(key, draft);
+        render();
+    }
+
+    function cancelPlanEdit(key) {
+        if (!drafts.delete(key)) return;
+        render();
+    }
+
+    /** Правка одной олимпиады: только её строка и её профили. */
+    function draftPayload(key, draft) {
+        const match = draft.match || {};
+        const change = {
+            name_norm: key,
+            name: (draft.name || '').trim(),
+            organizer: (draft.organizer || '').trim(),
+        };
+        if (match.action === 'use' && match.olympiad_id) {
+            change.action = 'use';
+            change.olympiad_id = match.olympiad_id;
+        } else if (match.action && match.action !== 'review') {
+            // Пустое значение — «нужно выбрать»: действие не отправляется, и
+            // сервер оставляет строку в состоянии review (применить нельзя).
+            change.action = match.action;
+        }
+        const profiles = (draft.profiles || []).map(profile => {
+            const pmatch = profile.match || {};
+            const row = {
+                olympiad: key,
+                source_row: Number(profile.source_row),
+                name: (profile.name || '').trim(),
+                // Пустая строка clears уровень, null означал бы «не менять».
+                level: profile.level || '',
+            };
+            if (profile._skipDirty) row.action = pmatch.action;
+            else if (pmatch.action === 'skip') row.action = 'skip';
+            return row;
+        });
+        return { olympiads: [change], profiles };
+    }
+
+    async function saveOlympiad(key) {
+        const draft = drafts.get(key);
+        if (!draft) return;
+        const button = cardByKey(key)?.querySelector('[data-plan-act="save"]');
+        if (button) { button.disabled = true; button.textContent = 'Сохраняем…'; }
         try {
-            const res = await api.updateImportPlan(importId, collectPlan());
-            if (!res.ok) { showToast(errorText(res), 'error'); return; }
-            showToast('План сохранён', 'success');
-            await renderOfficialList(importId, (res.data.import) || imp);
+            const res = await api.updateImportPlan(importId, draftPayload(key, draft));
+            if (!res.ok) {
+                showToast(errorText(res), 'error');
+                if (button) { button.disabled = false; button.textContent = 'Сохранить'; }
+                return;
+            }
+            if (res.data.plan) plan = res.data.plan;
+            drafts.delete(key);
+            showToast('Олимпиада сохранена', 'success');
+            render();
+        } catch {
+            showToast('Сетевая ошибка: олимпиада не сохранена', 'error');
+            if (button) { button.disabled = false; button.textContent = 'Сохранить'; }
+        }
+    }
+
+    function applyDraftField(input) {
+        const card = input.closest('[data-plan-key]');
+        if (!card) return;
+        const draft = drafts.get(card.dataset.planKey);
+        if (!draft) return;
+        const field = input.dataset.field;
+        const profileRow = input.closest('[data-profile-row]');
+        if (profileRow) {
+            const profile = (draft.profiles || []).find(
+                entry => String(entry.source_row) === profileRow.dataset.row
+            );
+            if (!profile) return;
+            profile.match = profile.match || {};
+            if (field === 'profile-name') profile.name = input.value;
+            else if (field === 'profile-level') profile.level = input.value || null;
+            else if (field === 'profile-skip') {
+                profile._skipDirty = true;
+                profile.match.action = input.checked
+                    ? 'skip'
+                    : (profile._restoreAction || (profile.match.profile_id ? 'update' : 'create'));
+                profileRow.classList.toggle('opacity-60', input.checked);
+            }
             return;
-        } finally {
-            if (button) button.disabled = false;
+        }
+        if (field === 'olympiad-name') draft.name = input.value;
+        else if (field === 'olympiad-organizer') draft.organizer = input.value;
+        else if (field === 'olympiad-match') {
+            const value = input.value;
+            draft.match = draft.match || {};
+            if (value.startsWith('use:')) {
+                draft.match.action = 'use';
+                draft.match.olympiad_id = value.slice(4);
+                draft.match.confidence = 'manual';
+            } else if (value) {
+                draft.match.action = value;
+                draft.match.olympiad_id = null;
+                draft.match.confidence = 'manual';
+            } else {
+                draft.match.action = 'review';
+                draft.match.olympiad_id = null;
+            }
+            const holder = card.querySelector('[data-plan-action-badge]');
+            if (holder) holder.innerHTML = planActionBadge(draft.match.action);
         }
     }
 
     async function applyPlan() {
+        if (drafts.size) {
+            showToast('Сначала сохраните изменения во всех олимпиадах', 'error');
+            return;
+        }
         const missingBox = document.getElementById('apply-missing');
         const markMissing = Boolean(missingBox && missingBox.checked);
         const ok = window.confirm(
@@ -1807,10 +2017,6 @@ async function renderOfficialList(importId, imp) {
         const button = page.querySelector('[data-list-act="applyPlan"]');
         if (button) button.disabled = true;
         try {
-            // Правки из формы уходят до применения: план на сервере — это то,
-            // что действительно попадёт в каталог.
-            const saved = await api.updateImportPlan(importId, collectPlan());
-            if (!saved.ok) { showToast(errorText(saved), 'error'); return; }
             const res = await api.applyImportPlan(importId, { mark_missing: markMissing });
             if (!res.ok) { showToast(errorText(res), 'error'); return; }
             const result = res.data.result || {};
